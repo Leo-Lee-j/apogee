@@ -1,0 +1,14 @@
+{
+  "identifier": "default",
+  "description": "Apogee 主窗口能力集。遵循 PRD 10.2「Tauri 能力最小化」：只开必需的 permission，不放开通用 shell 执行。",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-show",
+    "core:window:allow-hide",
+    "core:window:allow-start-dragging",
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-close"
+  ]
+}

@@ -1,0 +1,337 @@
+/**
+ * Apogee 设计令牌（02 文档 §7.2 / §7.3 / §7.4）。
+ *
+ * 用原生 CSS 变量而不是 CSS-in-JS：变量在首屏就是纯文本，没有运行时注入成本。
+ * naive-ui 的主题通过 src/theme.ts 里的静态对象对齐这些值。
+ *
+ * ─────────────────────────────────────────────────────────────────────
+ * 与《Apogee 配色系统设计规范》的取舍
+ * ─────────────────────────────────────────────────────────────────────
+ *
+ * 采纳：
+ *   - 冷调深色阶梯（不用纯黑、不用中性灰，向蓝倾斜）
+ *   - 「半透明底 + 高亮前景」的 pill 处理，用于方法标签与状态徽章
+ *   - 文字四级层级、阴影三级、间距 4px 基数扩展到 40
+ *   - 亮主题「云母白画布 + 纯白面板」的层级关系
+ *
+ * 修正后采纳（规范原值不达标，实测见 scripts/check-contrast.mjs）：
+ *   - dim 文字：暗 #64748B→#7A8AA0（3.50→4.7:1）、亮 #94A3B8→#5E6C80（2.35→5.0:1）
+ *   - 主按钮：规范用白字，实测 #4F80FF 只有 3.58:1、#38BDF8 只有 2.14:1。
+ *     暗主题改深色字（--a-on-primary），保住冰蓝的穿透力又满足 4.5:1。
+ *   - 焦点环：规范的 rgba(...,.07) 实测 1.08:1，最大通道差 16 级，基本不可见。
+ *     改回实色 outline。键盘优先产品不能拿焦点可见性换观感（PRD §10.4）。
+ *   - 悬停：规范的 .032 alpha 只有 8 级通道差，低于可感知阈值，提到 .07。
+ *
+ * 不采纳（与 02 文档硬约束冲突）：
+ *   - clamp() 流体字号。rem 不随视口变化，clamp(13px,.875rem,14px) 恒等于 14px，
+ *     既没有流体效果，又会把 §7.3 定的 13px 悄悄改成 14px，破坏 20px 行高与
+ *     28px 表格行高的栅格。这里一律用固定 px。
+ *   - --duration-base .3s / --duration-slow .6s / --ease-spring 弹性缓动。
+ *     §7.4 的预算是 ≤150ms，且只允许 4 类动效。
+ *   - Launch 按钮 14 颗粒子爆炸、星空粒子背景。撞首屏 DOM < 800 节点预算，
+ *     也撞 §8「不放插画（省体积）」。
+ *   - hover 改 box-shadow。§7.4 明文禁止动画 box-shadow（静态阴影可以）。
+ *   - 999px 胶囊按钮。与「参照 VS Code 与 Linear 的信息密度」不符，
+ *     胶囊只保留给徽章（--a-radius-pill）。
+ *   - 毛玻璃 backdrop-filter。大面积 blur 在 Windows WebView2 上的合成开销
+ *     未实测，而侧边栏是要虚拟滚动 1000+ 请求的热区，先不引入。
+ */
+
+:root {
+  color-scheme: dark;
+
+  /* ── 背景层级 ──
+     bg-1 内容区（最大面积）· bg-2 窗口装饰条（顶栏/标签栏/状态栏）· bg-3 输入与抬升面
+     暗主题里 bg-1 最深，符合「内容沉下去、装饰浮起来」。 */
+  --a-bg-1: #0c0e12;
+  --a-bg-2: #14171f;
+  --a-bg-3: #1a1e29;
+  --a-border: #232733;
+  --a-border-strong: #2f3648;
+
+  /* ── 文本 ──
+     text / soft / dim 三级承载信息，必须达标。
+     ghost 只用于纯装饰分隔符，不承载信息，按 WCAG 装饰元素豁免。 */
+  --a-text: #f1f5f9;
+  --a-text-soft: #cbd5e1;
+  --a-text-dim: #94a3b8;
+  --a-text-faint: #7a8aa0;
+  --a-text-ghost: #3f4a5e;
+
+  /* ── 品牌 / 强调 ──
+     primary 冰蓝，渐变只用于「发送」这一个焦点元素。
+     on-primary 是主色块上的前景色 —— 暗主题下必须是深色，见文件头。
+     pressed 不能一味压暗：深色前景压在越暗的蓝上对比越低，#3D6FF0 只有 4.35:1。 */
+  --a-primary: #4f80ff;
+  --a-primary-hover: #6f98ff;
+  --a-primary-pressed: #4576f5;
+  --a-on-primary: #0c0e12;
+  /* 渐变两端必须各自满足与 --a-on-primary 的 4.5:1 ——
+     否则按钮一半的文字不可读，这正是 Apogee 原方案的缺陷所在。 */
+  --a-grad-from: #4f80ff;
+  --a-grad-to: #38bdf8;
+  --a-primary-gradient: linear-gradient(135deg, var(--a-grad-from) 0%, var(--a-grad-to) 100%);
+  /* 纯装饰光晕，不承载信息，不参与过渡动画。 */
+  --a-glow: rgba(56, 189, 248, 0.14);
+
+  /* ── 交互态 ──
+     叠加层而不是实色，这样在任意底色上都能用。alpha 已按可感知阈值调过。 */
+  --a-hover: rgba(255, 255, 255, 0.07);
+  --a-selected: rgba(79, 128, 255, 0.16);
+  --a-focus: #4f80ff;
+  /* 静态光晕，不参与过渡动画（§7.4 只禁止「动画」box-shadow）。 */
+  --a-focus-halo: 0 0 0 3px rgba(79, 128, 255, 0.22);
+
+  /* ── HTTP 方法（02 文档 §7.2）──
+     语义映射沿用本项目原有口径（GET 绿 / POST 蓝 / PUT 橙 / PATCH 紫 / DELETE 红），
+     色值取自 Apogee 色板。**没有照搬 Apogee 的方法映射**，原因两条：
+       1. 规范把 GET 定为冰蓝，与 --a-primary 同色系。选中态的 GET 行会出现
+          「强调底 + 强调字」，识别速度反而下降。
+       2. §5.2 整节是 Postman 迁移。Postman 用户的肌肉记忆是 GET=绿，
+          改成蓝要付一次重新学习的成本，换不回等价收益。
+     每个方法两个令牌：前景色 + pill 底色。所有语义都是颜色 + 文字双通道。 */
+  --a-get: #6ee7b7;
+  --a-get-bg: rgba(52, 211, 153, 0.12);
+  --a-post: #7dd3fc;
+  --a-post-bg: rgba(56, 189, 248, 0.12);
+  --a-put: #fcd34d;
+  --a-put-bg: rgba(251, 191, 36, 0.12);
+  --a-patch: #d8b4fe;
+  --a-patch-bg: rgba(192, 132, 252, 0.12);
+  --a-delete: #fca5a5;
+  --a-delete-bg: rgba(248, 113, 113, 0.12);
+  --a-head: #94a3b8;
+  --a-head-bg: rgba(148, 163, 184, 0.12);
+
+  /* ── 响应状态（02 文档 §4.4）──
+     Apogee 只给了 success / danger 两个状态色，这里补齐 3xx / 4xx / 网络错误。
+     网络错误用**实色填充**而不是换色相：#F87171 和 rose 系在 pill 里几乎分不开，
+     靠「填充 vs 半透明」的份量差 + 图标区分更可靠。 */
+  --a-ok: #6ee7b7;
+  --a-ok-bg: rgba(52, 211, 153, 0.1);
+  --a-redirect: #7dd3fc;
+  --a-redirect-bg: rgba(56, 189, 248, 0.1);
+  --a-warn: #fcd34d;
+  --a-warn-bg: rgba(251, 191, 36, 0.1);
+  --a-error: #fca5a5;
+  --a-error-bg: rgba(248, 113, 113, 0.1);
+  --a-neterr: #ffe4e6;
+  --a-neterr-bg: #9f1239;
+
+  /* ── 破坏性交互的实色填充（标题栏关闭按钮悬停）──
+     和 --a-neterr 目前取同一组值，但语义不同：一个是「响应状态」，一个是
+     「这个动作会关掉窗口」。分开定义是为了以后能各自演进。
+     没用 Windows 原生的 #C42B1C，因为 Apogee 色系明确「冷色调统治，除状态色
+     外避免暖色」；rose-800 是冷调深红，和整套配色不打架。
+     两个主题共用一组值，所以亮色主题里不覆盖。 */
+  --a-danger: #ffe4e6;
+  --a-danger-bg: #9f1239;
+
+  /* ── 阴影（静态，不参与过渡）── */
+  --a-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.5);
+  --a-shadow-md: 0 4px 12px rgba(0, 0, 0, 0.65);
+  --a-shadow-lg: 0 30px 90px -20px rgba(0, 0, 0, 0.85);
+
+  /* ── 圆角 ──
+     Apogee 的 6/9/14 整体下移一档。密集工具界面 28px 行高配 9px 圆角会显胖，
+     Linear 实际用的是 4～6px。胶囊只留给徽章。 */
+  --a-radius-sm: 4px;
+  --a-radius-md: 6px;
+  --a-radius-lg: 10px;
+  --a-radius-pill: 999px;
+
+  /* ── 尺寸（02 文档 §3.2）── */
+  --a-h-titlebar: 36px;
+  --a-h-tabbar: 34px;
+  --a-h-urlbar: 40px;
+  --a-h-toolbar: 32px;
+  --a-h-statusbar: 24px;
+  --a-w-sidebar: 240px;
+  --a-row: 28px;
+  --a-row-compact: 24px;
+
+  /* ── 排版（02 文档 §7.3）──
+     固定 px，不用 clamp。Inter 放首位但不下载字体文件，装了就用、没装回落系统字体。 */
+  --a-font-ui: 'Inter', 'Segoe UI', -apple-system, BlinkMacSystemFont, 'PingFang SC',
+    'Microsoft YaHei UI', sans-serif;
+  --a-font-mono: 'JetBrains Mono', 'Cascadia Code', 'SF Mono', Consolas, monospace;
+  --a-fs-xs: 11px;
+  --a-fs-sm: 12px;
+  --a-fs-base: 13px;
+  --a-fs-lg: 15px;
+  --a-lh: 20px;
+  --a-fw-normal: 400;
+  --a-fw-medium: 500;
+  --a-fw-semibold: 600;
+
+  /* 内容块之间的间隙。单独给个名字是因为它有语义：顶层内容区之间靠这条间隙
+     分隔，而不是靠 1px 细线。
+
+     刻意不挂到 --a-space-* 的 4px 栅格上：栅格管的是内容的排版节奏（padding、
+     行距），而这里是**分隔尺寸**，和边框粗细同类。加上两侧块各自 1px 边框，
+     实际视觉分隔是 5px。 */
+  --a-gutter: 3px;
+
+  /* ── 间距（4px 基数）── */
+  --a-space-1: 4px;
+  --a-space-2: 8px;
+  --a-space-3: 12px;
+  --a-space-4: 16px;
+  --a-space-5: 20px;
+  --a-space-6: 24px;
+  --a-space-8: 32px;
+  --a-space-10: 40px;
+
+  /* ── 动效预算（02 文档 §7.4）──
+     只允许 transform / opacity，时长 ≤ 150ms。这里只提供一档时长，
+     刻意不提供第二档 —— 多一档就会有人拿它写 300ms。 */
+  --a-ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --a-dur: 150ms;
+}
+
+/* 亮色主题。用 data 属性而不是媒体查询，因为要支持「跟随系统 / 强制亮 / 强制暗」三态。
+   层级关系按 Apogee 亮主题的意图：画布是云母白（避免大面积纯白刺眼），
+   装饰条用纯白浮起来。注意这与暗主题的明暗方向相反，是有意的。 */
+:root[data-theme='light'] {
+  color-scheme: light;
+
+  --a-bg-1: #f8fafb;
+  --a-bg-2: #ffffff;
+  --a-bg-3: #f1f4f7;
+  --a-border: #dbe2ea;
+  --a-border-strong: #c2ccd9;
+
+  --a-text: #0f172a;
+  --a-text-soft: #334155;
+  --a-text-dim: #475569;
+  --a-text-faint: #5e6c80;
+  --a-text-ghost: #c2ccd9;
+
+  --a-primary: #2563eb;
+  --a-primary-hover: #1d4fd8;
+  --a-primary-pressed: #1a45c0;
+  /* 亮主题下白字在 #2563EB 上是 5.17:1，可以用白字。 */
+  --a-on-primary: #ffffff;
+  /* 渐变末端从 Apogee 的 #0EA5E9 压深到 #0E7CAE。
+     原值配白字只有 2.77:1，按钮右半边的文字不可读。代价是天蓝略钝，
+     换来的是「发送」这一个最重要的按钮全幅可读。
+     暗主题不必付这个代价，因为它用深色前景，#38BDF8 上是 9.02:1。 */
+  --a-grad-from: #2563eb;
+  --a-grad-to: #0e7cae;
+  --a-primary-gradient: linear-gradient(135deg, var(--a-grad-from) 0%, var(--a-grad-to) 100%);
+  --a-glow: rgba(37, 99, 235, 0.1);
+
+  --a-hover: rgba(37, 99, 235, 0.07);
+  --a-selected: rgba(37, 99, 235, 0.11);
+  --a-focus: #2563eb;
+  --a-focus-halo: 0 0 0 3px rgba(37, 99, 235, 0.2);
+
+  --a-get: #047857;
+  --a-get-bg: rgba(5, 150, 105, 0.09);
+  --a-post: #0369a1;
+  --a-post-bg: rgba(14, 165, 233, 0.09);
+  --a-put: #b45309;
+  --a-put-bg: rgba(217, 119, 6, 0.09);
+  --a-patch: #7e22ce;
+  --a-patch-bg: rgba(147, 51, 234, 0.09);
+  --a-delete: #b91c1c;
+  --a-delete-bg: rgba(220, 38, 38, 0.09);
+  --a-head: #475569;
+  --a-head-bg: rgba(71, 85, 105, 0.09);
+
+  --a-ok: #047857;
+  --a-ok-bg: rgba(5, 150, 105, 0.08);
+  --a-redirect: #0369a1;
+  --a-redirect-bg: rgba(14, 165, 233, 0.08);
+  --a-warn: #b45309;
+  --a-warn-bg: rgba(217, 119, 6, 0.08);
+  --a-error: #b91c1c;
+  --a-error-bg: rgba(220, 38, 38, 0.08);
+  --a-neterr: #fff1f2;
+  --a-neterr-bg: #9f1239;
+
+  --a-shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.08);
+  --a-shadow-md: 0 4px 12px rgba(15, 23, 42, 0.12);
+  --a-shadow-lg: 0 24px 70px -22px rgba(15, 23, 42, 0.24);
+}
+
+/* 尊重系统减弱动效偏好（02 文档 §7.4 / PRD §10.4） */
+@media (prefers-reduced-motion: reduce) {
+  :root { --a-dur: 0ms; }
+  *, *::before, *::after {
+    animation-duration: 0ms !important;
+    transition-duration: 0ms !important;
+  }
+}
+
+* { box-sizing: border-box; }
+
+html, body, #app { height: 100%; margin: 0; }
+
+body {
+  background: var(--a-bg-1);
+  color: var(--a-text);
+  font-family: var(--a-font-ui);
+  font-size: var(--a-fs-base);
+  line-height: var(--a-lh);
+  overflow: hidden;
+  /* 桌面应用不需要文本选中的「网页感」，但输入区要能选 */
+  user-select: none;
+}
+
+input, textarea, [contenteditable], .a-selectable { user-select: text; }
+
+/* 焦点可见（PRD §10.4 无障碍要求）。
+   实色 outline，实测 4.65～5.39:1。Apogee 规范里的 7% alpha 光晕已被否决，
+   理由见文件头。 */
+:focus-visible {
+  outline: 2px solid var(--a-focus);
+  outline-offset: 1px;
+}
+
+/* 方法标签 / 状态徽章的共用形态（02 文档 §7.2 双通道要求）。
+   颜色只是加速识别，文字始终在场。 */
+.a-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: var(--a-radius-pill);
+  border: 1px solid currentColor;
+  font: var(--a-fw-semibold) var(--a-fs-xs) / 1 var(--a-font-mono);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+/* 内容块（02 文档 §3.2）。
+   顶层内容区之间用「块 + 间隙」分隔，不用 1px 细线：每块是一个圆角面，
+   浮在画布色（--a-bg-1）上，靠底色差划分区域。
+
+   这不是 Postman 式卡片化 —— 卡片化是给**每一条内容**套卡片（列表项、参数行
+   各自带边框和内边距），那会摊薄信息密度。这里只在顶层区域之间用块，
+   块内部仍然是 28px 行高的密集表格。
+
+   overflow: hidden 让内部内容被圆角裁掉。但**含弹层的块必须覆盖掉它**，
+   否则下拉菜单会被裁断 —— 见 AppBody.vue 里 .head 的处理。
+
+   圆角用 md(6px) 而不是 lg(10px)：间隙只有 3px，两块相接处如果各带 10px 圆角，
+   会在边缘留出一个约 10px 的缺口，看着像块被掐了一下。 */
+.a-block {
+  background: var(--a-bg-2);
+  border: 1px solid var(--a-border);
+  border-radius: var(--a-radius-md);
+  overflow: hidden;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* 滚动条：细、低对比，不抢视觉预算 */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb {
+  background: var(--a-border-strong);
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: 5px;
+}
+::-webkit-scrollbar-thumb:hover { background-clip: content-box; background-color: var(--a-text-faint); }
+::-webkit-scrollbar-corner { background: transparent; }

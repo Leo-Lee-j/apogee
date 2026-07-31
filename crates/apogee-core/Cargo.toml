@@ -1,0 +1,20 @@
+[package]
+name = "apogee-core"
+description = "Apogee 领域逻辑核心库，不依赖 Tauri，供桌面端与 CLI 复用"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# 关键结构决策（03 文档 §9）：本 crate 不得依赖 tauri / 任何 GUI 相关 crate。
+# 目的是让 v0.5 的 CLI 直接复用领域逻辑，且领域逻辑可脱离 GUI 单独测试。
+# CI 里会检查依赖树中不出现 tauri。
+
+[dependencies]
+anyhow.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+tracing.workspace = true

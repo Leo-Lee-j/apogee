@@ -1,0 +1,47 @@
+{
+  "name": "apogee",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Apogee - 本地优先、启动即用的桌面 API 客户端",
+  "license": "SEE LICENSE IN EULA.md",
+  "type": "module",
+  "packageManager": "pnpm@11.17.0",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build",
+    "build:nocheck": "vite build",
+    "preview": "vite preview",
+    "typecheck": "vue-tsc --noEmit",
+    "tauri": "tauri",
+    "spike:s1": "pwsh -NoProfile -File scripts/measure-s1-windows.ps1 -Runs 20",
+    "spike:s1:nobuild": "pwsh -NoProfile -File scripts/measure-s1-windows.ps1 -Runs 20 -SkipBuild",
+    "spike:s3": "pwsh -NoProfile -File scripts/measure-s3-windows.ps1",
+    "spike:s3:nobuild": "pwsh -NoProfile -File scripts/measure-s3-windows.ps1 -SkipBuild",
+    "spike:s5": "vite build --mode production && node scripts/measure-bundle.mjs",
+    "check:contrast": "node scripts/check-contrast.mjs",
+    "licenses:rust": "cargo about generate about.hbs -o THIRD-PARTY-NOTICES.txt",
+    "licenses:check": "cargo deny check"
+  },
+  "dependencies": {
+    "@codemirror/commands": "6.10.4",
+    "@codemirror/lang-json": "6.0.2",
+    "@codemirror/language": "6.12.4",
+    "@codemirror/search": "6.7.1",
+    "@codemirror/state": "6.7.1",
+    "@codemirror/view": "6.43.6",
+    "@tauri-apps/api": "2.11.1",
+    "naive-ui": "2.44.1",
+    "pinia": "4.0.2",
+    "vue": "3.5.40"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.11.4",
+    "@types/node": "26.1.1",
+    "@vitejs/plugin-vue": "6.0.8",
+    "gzip-size": "7.0.0",
+    "typescript": "5.9.3",
+    "unplugin-vue-components": "32.1.0",
+    "vite": "8.1.5",
+    "vue-tsc": "3.3.8"
+  }
+}

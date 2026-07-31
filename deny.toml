@@ -1,0 +1,111 @@
+# cargo-deny 配置 —— 对应决策 D6 / PRD §9.5「许可合规」
+#
+# 背景：Apogee 闭源分发（D6）。闭源产品分发第三方开源依赖有明确的法律要求：
+#   1. GPL / AGPL / SSPL 依赖 → 闭源分发直接违约，必须硬阻断
+#   2. MIT / Apache-2.0 等许可要求随产品附带归属声明 → 见 about.toml
+#
+# 本文件的作用是让「不小心引入 GPL 依赖」在 CI 阶段就 fail，而不是等到发布前才发现。
+# 运行：cargo deny check
+
+[graph]
+all-features = false
+
+# 只检查**实际会分发**的目标平台（决策 D2：v1.0 前只做 Windows + macOS）。
+#
+# 这一条不是可选优化。不设 targets 时 cargo-deny 会把所有平台的依赖都算进来，
+# 于是 8 个 Linux 专用的 gtk-rs GTK3 绑定（atk / gdk / gtk / gtk-sys ...）
+# 会带着「已停止维护」的 advisory 一起报出来 —— 而这些 crate 根本不会进
+# 我们的 Windows/macOS 产物。噪声会让人养成忽略 cargo-deny 输出的习惯，
+# 那比不跑还糟。
+targets = [
+    "x86_64-pc-windows-msvc",
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+]
+
+[licenses]
+version = 2
+
+# ── 允许的许可（白名单）──────────────────────────────────────────────
+# 只放宽松许可。新增条目前必须确认该许可允许闭源分发。
+allow = [
+    "MIT",
+    "MIT-0",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "CC0-1.0",
+    "Unlicense",
+    "BSL-1.0",
+    "OpenSSL",
+    "MPL-2.0",       # 文件级 copyleft，不感染我们自己的代码；仅在不修改依赖源码时可用
+]
+
+# 置信度阈值：低于此值的许可识别结果视为未知，会触发失败
+confidence-threshold = 0.9
+
+# 例外清单：留空。任何例外都必须显式写在这里并附理由，避免默默放水。
+exceptions = []
+
+# 工作区内部 crate 不参与许可检查。
+# 我们自己的 crate 标的是 `LicenseRef-proprietary`（不是 SPDX 标准许可），
+# 本来就不在白名单里，也不需要在 —— 白名单管的是**第三方**依赖。
+[licenses.private]
+ignore = true
+
+[[licenses.clarify]]
+# SQLite 是公有领域（bundled 进 rusqlite），许可元数据识别不稳定，显式声明
+name = "libsqlite3-sys"
+expression = "MIT"
+license-files = []
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"          # 禁止 "*" 版本号，依赖必须可复现
+# 工作区内部 path 依赖（apogee-core）不写版本号，属于正常做法，放行。
+# 这个豁免只对 path 依赖生效，对 crates.io 依赖仍然强制写版本。
+allow-wildcard-paths = true
+highlight = "all"
+
+# ── 明确禁止的 crate ─────────────────────────────────────────────────
+deny = [
+    # 体积杀手：与「安装包 < 15MB」直接冲突（PRD §5 / 03 文档 §1.2）
+    { name = "deno_core", reason = "嵌入式 JS 运行时体积过大，脚本引擎已定 QuickJS(rquickjs)，见决策 D5" },
+    # 安全与合规
+    { name = "openssl-sys", reason = "统一走 rustls，避免跨平台编译依赖与许可复杂度" },
+]
+
+[advisories]
+version = 2
+yanked = "deny"
+
+# ── 已知且当前无解的 advisory ────────────────────────────────────────
+#
+# 规则：每条都要写清「为什么现在不能修」和「什么时候复查」。
+# 不允许出现没有理由的 ignore —— 那等于关掉了整个 advisories 检查。
+#
+# 下面这些全部是 Tauri 的传递依赖，且上游 advisory 明确写了
+# "No safe upgrade is available"。它们是 unmaintained 类告警，不是已知漏洞。
+# 复查时机：每次升级 tauri 大版本时重新跑 `cargo deny check advisories`，
+# 能去掉的立刻去掉。
+ignore = [
+    # urlpattern → tauri-utils → tauri。rust-unic 整个项目已停止维护。
+    { id = "RUSTSEC-2025-0075", reason = "unic-char-range：经 urlpattern 传递自 tauri-utils，上游无可用替代" },
+    { id = "RUSTSEC-2025-0080", reason = "unic-common：同上" },
+    { id = "RUSTSEC-2025-0081", reason = "unic-char-property：同上" },
+    { id = "RUSTSEC-2025-0098", reason = "unic-ucd-version：同上" },
+    { id = "RUSTSEC-2025-0100", reason = "unic-ucd-ident：同上" },
+]
+# 注：限定 targets 后，原先出现的 8 条 gtk-rs GTK3 advisory 和
+# proc-macro-error(RUSTSEC-2024-0370) 都不再进入依赖图，所以不需要 ignore。
+# cargo-deny 会对「写了但用不到的 ignore」发 advisory-not-detected 警告 ——
+# 这个警告是好东西，能防止例外清单变成只增不减的垃圾堆。
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

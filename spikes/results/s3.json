@@ -1,0 +1,3859 @@
+{
+  "spike": "S3",
+  "at": "2026-07-31T11:34:31.2330196+08:00",
+  "verdict": "PASS",
+  "platform": {
+    "os": "Microsoft Windows 11 专业版",
+    "osVersion": "10.0.26200",
+    "cpu": "Intel(R) Core(TM) Ultra 5 225H",
+    "logicalCores": 14,
+    "totalMemoryBytes": 33816190976,
+    "webview2Runtime": "150.0.4078.105",
+    "rustc": "rustc 1.95.0 (59807616e 2026-04-14)",
+    "node": "v24.15.0",
+    "appVersion": "0.1.0",
+    "powerShell": "7.6.1"
+  },
+  "config": {
+    "configs": [
+      "gpu-on",
+      "gpu-off"
+    ],
+    "idleSettleMs": 2000,
+    "memorySamples": 6,
+    "sampleIntervalMs": 250,
+    "memoryRounds": 5,
+    "skipBuild": true,
+    "executable": "target/release/apogee.exe",
+    "autorunEnvVar": "APOGEE_SPIKE_AUTORUN",
+    "resultsDirEnvVar": "APOGEE_SPIKE_RESULTS_DIR",
+    "browserArgsEnvVar": "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
+    "phaseProtocol": "fps → memory-hold → done；帧率阶段量测台不采样，避免自己制造掉帧"
+  },
+  "harness": {
+    "measurementSeconds": 437.297095,
+    "cpuGateMaxPercent": 25,
+    "hotConfigs": [],
+    "topCpuConsumers": [
+      {
+        "name": "idea64",
+        "cpuSeconds": 52.3,
+        "oneCorePercent": 12.0,
+        "allCoresPercent": 0.9
+      },
+      {
+        "name": "Feishu",
+        "cpuSeconds": 45.5,
+        "oneCorePercent": 10.4,
+        "allCoresPercent": 0.7
+      },
+      {
+        "name": "msedge",
+        "cpuSeconds": 29.8,
+        "oneCorePercent": 6.8,
+        "allCoresPercent": 0.5
+      },
+      {
+        "name": "Kiro",
+        "cpuSeconds": 26.8,
+        "oneCorePercent": 6.1,
+        "allCoresPercent": 0.4
+      },
+      {
+        "name": "msedge",
+        "cpuSeconds": 21.1,
+        "oneCorePercent": 4.8,
+        "allCoresPercent": 0.3
+      },
+      {
+        "name": "msedgewebview2",
+        "cpuSeconds": 21.1,
+        "oneCorePercent": 4.8,
+        "allCoresPercent": 0.3
+      }
+    ]
+  },
+  "gates": [
+    {
+      "id": "S3-首渲",
+      "scope": "spike",
+      "source": "03 文档 §10.1",
+      "criterion": "自研虚拟树 5000 节点首次渲染 < 100 ms（数据就绪 → 像素上屏）",
+      "budget": 100.0,
+      "measured": 26.799999952316284,
+      "unit": "ms",
+      "pass": true
+    },
+    {
+      "id": "S3-帧率",
+      "scope": "spike",
+      "source": "03 文档 §10.1",
+      "criterion": "滚动 60fps → 口径：掉帧率 < 5%（相对本机显示器实测节奏）",
+      "budget": 5.0,
+      "measured": 0.0,
+      "unit": "% 掉帧",
+      "pass": true
+    },
+    {
+      "id": "PRD-集合树",
+      "scope": "prd",
+      "source": "PRD §5.1",
+      "criterion": "1000 个请求的集合首次展开 < 100 ms",
+      "budget": 100.0,
+      "measured": 26.600000143051147,
+      "unit": "ms",
+      "pass": true
+    }
+  ],
+  "memorySummary": [
+    {
+      "config": "gpu-on",
+      "mode": "mem",
+      "rounds": 5,
+      "treePrivateWorkingSetMedianBytes": 166539264,
+      "treePrivateWorkingSetMaxBytes": 176795648,
+      "treePrivateWorkingSetMaxSpreadBytes": 14696448,
+      "launchVariancePercent": 9.066329753632344,
+      "rootPrivateWorkingSetMedianBytes": 3969024,
+      "perRoundMaxBytes": [
+        162099200,
+        168730624,
+        168050688,
+        168214528,
+        176795648
+      ],
+      "roleBreakdown": [
+        {
+          "role": "gpu-process",
+          "instances": 1,
+          "privateWorkingSetBytes": 74756096
+        },
+        {
+          "role": "browser",
+          "instances": 1,
+          "privateWorkingSetBytes": 39473152
+        },
+        {
+          "role": "renderer",
+          "instances": 1,
+          "privateWorkingSetBytes": 29478912
+        },
+        {
+          "role": "utility",
+          "instances": 2,
+          "privateWorkingSetBytes": 11804672
+        },
+        {
+          "role": "host(rust)",
+          "instances": 1,
+          "privateWorkingSetBytes": 3985408
+        },
+        {
+          "role": "crashpad-handler",
+          "instances": 1,
+          "privateWorkingSetBytes": 2146304
+        }
+      ],
+      "processCount": 7
+    },
+    {
+      "config": "gpu-on",
+      "mode": "fps",
+      "rounds": 1,
+      "treePrivateWorkingSetMedianBytes": 218132480,
+      "treePrivateWorkingSetMaxBytes": 258199552,
+      "treePrivateWorkingSetMaxSpreadBytes": 0,
+      "launchVariancePercent": 0.0,
+      "rootPrivateWorkingSetMedianBytes": 3880960,
+      "perRoundMaxBytes": [
+        258199552
+      ],
+      "roleBreakdown": [
+        {
+          "role": "renderer",
+          "instances": 1,
+          "privateWorkingSetBytes": 122826752
+        },
+        {
+          "role": "gpu-process",
+          "instances": 1,
+          "privateWorkingSetBytes": 80076800
+        },
+        {
+          "role": "browser",
+          "instances": 1,
+          "privateWorkingSetBytes": 38010880
+        },
+        {
+          "role": "utility",
+          "instances": 2,
+          "privateWorkingSetBytes": 11169792
+        },
+        {
+          "role": "host(rust)",
+          "instances": 1,
+          "privateWorkingSetBytes": 3899392
+        },
+        {
+          "role": "crashpad-handler",
+          "instances": 1,
+          "privateWorkingSetBytes": 2150400
+        }
+      ],
+      "processCount": 7
+    },
+    {
+      "config": "gpu-off",
+      "mode": "mem",
+      "rounds": 5,
+      "treePrivateWorkingSetMedianBytes": 98557952,
+      "treePrivateWorkingSetMaxBytes": 102772736,
+      "treePrivateWorkingSetMaxSpreadBytes": 3088384,
+      "launchVariancePercent": 3.098163290463081,
+      "rootPrivateWorkingSetMedianBytes": 3944448,
+      "perRoundMaxBytes": [
+        102428672,
+        99762176,
+        102772736,
+        100425728,
+        99684352
+      ],
+      "roleBreakdown": [
+        {
+          "role": "browser",
+          "instances": 1,
+          "privateWorkingSetBytes": 39677952
+        },
+        {
+          "role": "renderer",
+          "instances": 1,
+          "privateWorkingSetBytes": 32886784
+        },
+        {
+          "role": "utility",
+          "instances": 2,
+          "privateWorkingSetBytes": 11800576
+        },
+        {
+          "role": "gpu-process",
+          "instances": 1,
+          "privateWorkingSetBytes": 11214848
+        },
+        {
+          "role": "host(rust)",
+          "instances": 1,
+          "privateWorkingSetBytes": 3944448
+        },
+        {
+          "role": "crashpad-handler",
+          "instances": 1,
+          "privateWorkingSetBytes": 2093056
+        }
+      ],
+      "processCount": 7
+    },
+    {
+      "config": "gpu-off",
+      "mode": "fps",
+      "rounds": 1,
+      "treePrivateWorkingSetMedianBytes": 160796672,
+      "treePrivateWorkingSetMaxBytes": 211554304,
+      "treePrivateWorkingSetMaxSpreadBytes": 0,
+      "launchVariancePercent": 0.0,
+      "rootPrivateWorkingSetMedianBytes": 3977216,
+      "perRoundMaxBytes": [
+        211554304
+      ],
+      "roleBreakdown": [
+        {
+          "role": "renderer",
+          "instances": 1,
+          "privateWorkingSetBytes": 144429056
+        },
+        {
+          "role": "browser",
+          "instances": 1,
+          "privateWorkingSetBytes": 38256640
+        },
+        {
+          "role": "gpu-process",
+          "instances": 1,
+          "privateWorkingSetBytes": 11280384
+        },
+        {
+          "role": "utility",
+          "instances": 2,
+          "privateWorkingSetBytes": 11186176
+        },
+        {
+          "role": "host(rust)",
+          "instances": 1,
+          "privateWorkingSetBytes": 3993600
+        },
+        {
+          "role": "crashpad-handler",
+          "instances": 1,
+          "privateWorkingSetBytes": 2150400
+        }
+      ],
+      "processCount": 7
+    }
+  ],
+  "gpuComparison": {
+    "question": "03 文档 §10.4 选项 (b)：关掉硬件加速换内存，值不值？",
+    "memoryBasis": "mem 轮（干净驻留）5 次启动里的进程树私有常驻最差观测值",
+    "memorySavedBytes": 74022912,
+    "memorySavedPercent": 41.869193522229686,
+    "gpuProcessStillPresentWhenDisabled": true,
+    "droppedPctOn": 0.0,
+    "droppedPctOff": 0.0,
+    "droppedPctDelta": 0.0,
+    "fpsOn": 74.99999999999999,
+    "fpsOff": 74.99812504687382,
+    "fpsDelta": -0.0018749531261619268,
+    "stepCostMedianMsOn": 0.8999999761581421,
+    "stepCostMedianMsOff": 0.7999999523162842,
+    "firstPaintPatchMsOn": 3.299999952316284,
+    "firstPaintPatchMsOff": 1.7000000476837158,
+    "stillPassesFrameGateWithGpuOff": true
+  },
+  "notMeasured": [
+    "真实滚轮/触控板滚动：帧率由应用内主线程写 scrollTop 驱动，不经过合成器线程，也不含输入事件延迟。这是更悲观的一侧，但不能宣称为「用户实际手感」。",
+    "paint / composite 的耗时：单步成本只含主线程侧（patch + 强制 layout）。GPU 开关真正影响的合成阶段在另一条线程上，本量测拿不到它的逐帧耗时，只能通过「有没有掉帧」间接判断。",
+    "50 标签内存（PRD §5.1 < 400MB）：本轮驻留条件是 3 标签 + 一棵 5000 节点集合树，未测 50 标签，也未实现标签虚拟化。",
+    "磁盘占用（安装后）：本脚本用 --no-bundle 构建，不产出安装包，体积一项仍以 S1 为准。",
+    "macOS：WKWebView 的进程模型、内存口径与合成实现都不同，本报告数字不可套用。",
+    "长时间运行的内存增长：驻留窗口只有十几秒，不能回答「开一天会不会涨」。",
+    "GPU 关配置下的启动耗时：本脚本不量启动，S1 才是启动的量测台。"
+  ],
+  "runs": [
+    {
+      "config": "gpu-on",
+      "mode": "fps",
+      "round": 1,
+      "label": "GPU 开（默认配置）",
+      "browserArgs": "",
+      "launchedAt": "2026-07-31T11:27:14.2610604+08:00",
+      "holdObservedAt": "2026-07-31T11:27:38.4338734+08:00",
+      "holdCondition": "1 工作区 + 3 标签 + 5000 节点集合树（跑完帧率矩阵之后，含会话残留）",
+      "cpuBeforeLaunchPercent": 17.0,
+      "cpuSettledBeforeLaunch": true,
+      "cpuDuringHoldMedianPercent": 21.5,
+      "gpu": {
+        "expectGpuProcess": true,
+        "gpuProcessPresent": true,
+        "gpuProcessPrivateWorkingSetBytes": 80076800,
+        "flagsObserved": []
+      },
+      "memory": {
+        "metric": "privateWorkingSet（Working Set - Private，等于任务管理器「内存」列）",
+        "gateStatistic": "max（内存逐样本稳定，取最差观测值）",
+        "sampleCount": 6,
+        "sampleBudgetExhausted": false,
+        "processCount": 7,
+        "treePrivateWorkingSetMedianBytes": 218132480,
+        "treePrivateWorkingSetMaxBytes": 258199552,
+        "treeCommitMedianBytes": 289546240,
+        "treeWorkingSetSumMedianBytes": 541368320,
+        "rootPrivateWorkingSetMedianBytes": 3880960,
+        "webviewPrivateWorkingSetMedianBytes": 214251520,
+        "treePeakWorkingSetBytes": 607371264,
+        "treePeakWorkingSetCaveat": "WorkingSet 峰值含共享页（S1 实测放大 2.99×），Windows 无「私有工作集峰值」计数器。只作尖峰旁证，不进门禁。",
+        "roleBreakdown": [
+          {
+            "role": "renderer",
+            "instances": 1,
+            "privateWorkingSetBytes": 122826752
+          },
+          {
+            "role": "gpu-process",
+            "instances": 1,
+            "privateWorkingSetBytes": 80076800
+          },
+          {
+            "role": "browser",
+            "instances": 1,
+            "privateWorkingSetBytes": 38010880
+          },
+          {
+            "role": "utility",
+            "instances": 2,
+            "privateWorkingSetBytes": 11169792
+          },
+          {
+            "role": "host(rust)",
+            "instances": 1,
+            "privateWorkingSetBytes": 3899392
+          },
+          {
+            "role": "crashpad-handler",
+            "instances": 1,
+            "privateWorkingSetBytes": 2150400
+          }
+        ],
+        "samples": [
+          {
+            "sampledAt": "2026-07-31T11:27:41.5190975+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 258134016,
+            "treeCommitBytes": 329449472,
+            "treeWorkingSetSumBytes": 576987136,
+            "rootPrivateWorkingSetBytes": 3899392,
+            "rootCommitBytes": 5431296,
+            "rootWorkingSetBytes": 27222016
+          },
+          {
+            "sampledAt": "2026-07-31T11:27:43.0565630+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 258199552,
+            "treeCommitBytes": 329355264,
+            "treeWorkingSetSumBytes": 576917504,
+            "rootPrivateWorkingSetBytes": 3899392,
+            "rootCommitBytes": 5431296,
+            "rootWorkingSetBytes": 27222016
+          },
+          {
+            "sampledAt": "2026-07-31T11:27:44.5526836+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 258113536,
+            "treeCommitBytes": 330240000,
+            "treeWorkingSetSumBytes": 585961472,
+            "rootPrivateWorkingSetBytes": 3899392,
+            "rootCommitBytes": 5369856,
+            "rootWorkingSetBytes": 27185152
+          },
+          {
+            "sampledAt": "2026-07-31T11:27:46.0288062+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 178126848,
+            "treeCommitBytes": 249462784,
+            "treeWorkingSetSumBytes": 505716736,
+            "rootPrivateWorkingSetBytes": 3862528,
+            "rootCommitBytes": 5369856,
+            "rootWorkingSetBytes": 27185152
+          },
+          {
+            "sampledAt": "2026-07-31T11:27:47.5581472+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 178151424,
+            "treeCommitBytes": 249737216,
+            "treeWorkingSetSumBytes": 505819136,
+            "rootPrivateWorkingSetBytes": 3862528,
+            "rootCommitBytes": 5369856,
+            "rootWorkingSetBytes": 27185152
+          },
+          {
+            "sampledAt": "2026-07-31T11:27:49.0644870+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 176562176,
+            "treeCommitBytes": 248430592,
+            "treeWorkingSetSumBytes": 504160256,
+            "rootPrivateWorkingSetBytes": 3862528,
+            "rootCommitBytes": 5369856,
+            "rootWorkingSetBytes": 27185152
+          }
+        ],
+        "processBreakdown": [
+          {
+            "processId": 70728,
+            "name": "msedgewebview2",
+            "role": "renderer",
+            "privateWorkingSetBytes": 122826752,
+            "workingSetBytes": 186519552,
+            "commitBytes": 135020544
+          },
+          {
+            "processId": 92240,
+            "name": "msedgewebview2",
+            "role": "gpu-process",
+            "privateWorkingSetBytes": 80076800,
+            "workingSetBytes": 137150464,
+            "commitBytes": 111788032
+          },
+          {
+            "processId": 87588,
+            "name": "msedgewebview2",
+            "role": "browser",
+            "privateWorkingSetBytes": 38010880,
+            "workingSetBytes": 149061632,
+            "commitBytes": 49631232
+          },
+          {
+            "processId": 43332,
+            "name": "msedgewebview2",
+            "role": "utility",
+            "privateWorkingSetBytes": 7766016,
+            "workingSetBytes": 42983424,
+            "commitBytes": 14671872
+          },
+          {
+            "processId": 93236,
+            "name": "apogee",
+            "role": "host(rust)",
+            "privateWorkingSetBytes": 3899392,
+            "workingSetBytes": 27222016,
+            "commitBytes": 5431296
+          },
+          {
+            "processId": 84692,
+            "name": "msedgewebview2",
+            "role": "utility",
+            "privateWorkingSetBytes": 3403776,
+            "workingSetBytes": 21356544,
+            "commitBytes": 9695232
+          },
+          {
+            "processId": 60580,
+            "name": "msedgewebview2",
+            "role": "crashpad-handler",
+            "privateWorkingSetBytes": 2150400,
+            "workingSetBytes": 12693504,
+            "commitBytes": 3211264
+          }
+        ]
+      },
+      "frontend": {
+        "spike": "S3",
+        "part": "frontend",
+        "mode": "full",
+        "at": "2026-07-31T03:28:08.389Z",
+        "inTauri": true,
+        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36 Edg/150.0.0.0",
+        "subject": {
+          "component": "src/components/sidebar/Sidebar.vue",
+          "sharedModule": "src/components/sidebar/tree.ts",
+          "rowHeightPx": 22,
+          "overscanRows": 10,
+          "control": "src/spike/S3FullTree.vue（全量 v-for，不虚拟化）"
+        },
+        "display": {
+          "frameBudgetMs": 13.300000000000182,
+          "hz": 75.187969924811,
+          "nominalHz": 75,
+          "sampleCount": 119,
+          "minMs": 13,
+          "maxMs": 13.700000000000045
+        },
+        "method": {
+          "scrollFrames": 300,
+          "scrollStepRows": 8,
+          "scrollStepPx": 176,
+          "scrollDriver": "主线程：每帧写 scroller.scrollTop（比合成器驱动更悲观）",
+          "frameBudgetMs": 13.300000000000182,
+          "frameBudgetSource": "本机显示器实测 rAF 中位间隔",
+          "toggleRepeats": 7,
+          "visibleFilterRepeats": 200,
+          "visibleFilterNote": "performance.now() 在 Chromium 里钳到 0.1ms，单次跑不出有意义的数，所以重复取平均",
+          "fullRenderSkippedAbove": 5001
+        },
+        "acceptance": {
+          "S3 首渲 5000 节点 < 100ms": {
+            "measuredMs": 26.799999952316284,
+            "commitMs": 13.5,
+            "pass": true
+          },
+          "S3 滚动 5000 节点 60fps": {
+            "fps": 74.99999999999999,
+            "droppedPct": 0,
+            "p95Ms": 13.5,
+            "frameBudgetMs": 13.300000000000182,
+            "criterion": "掉帧率 < 5%（相对本机显示器实测节奏）",
+            "pass": true
+          },
+          "PRD 集合树 1000 请求 < 100ms": {
+            "measuredMs": 26.600000143051147,
+            "requestCount": 1000,
+            "pass": true
+          }
+        },
+        "rustProcessMemory": {
+          "note": "Rust 主进程私有提交量。集合树的 DOM 在 WebView2 渲染进程里，不在这里 —— 进程树内存由 PS1 量测台负责。",
+          "beforeMb": 5.2109375,
+          "atHoldMb": 5.171875,
+          "afterHoldMb": 5.12109375
+        },
+        "holdCondition": "1 工作区 + 3 标签 + 5000 节点集合树（已挂载、空闲）",
+        "holdMs": 30000,
+        "notMeasured": [
+          "真实滚轮/触控板滚动：本面板用主线程写 scrollTop 驱动，不经过合成器线程，也不含输入事件延迟。真实滚轮在 Chromium 上可能走合成器，主线程驱动是更悲观的一侧。",
+          "真实集合数据：节点由 synthTree 合成，名称长度均匀。真实集合里超长接口名会触发文本溢出计算，行内布局成本更高。",
+          "增量加载：本次一次性把整棵扁平数组交给组件，未测「Rust 侧分页返回 + 滚动到底再取下一页」的路径（那是 v0.2 的实现）。",
+          "macOS：WKWebView 的合成与滚动实现与 WebView2 不同，本报告数字不可套用。"
+        ],
+        "cells": [
+          {
+            "scaleKey": "prd-1000",
+            "scale": "1000 请求",
+            "impl": "virtual",
+            "gate": "PRD §5.1 集合树 < 100ms",
+            "totalNodes": 1040,
+            "visibleNodes": 1040,
+            "renderedRows": 35,
+            "dataPrepMs": 0.09999990463256836,
+            "visibleFilterMs": 0.015,
+            "patchMs": 2.799999952316284,
+            "layoutMs": 0.9000000953674316,
+            "commitMs": 13.200000047683716,
+            "firstPaintMs": 26.600000143051147,
+            "scrollHeightPx": 22880,
+            "scroll": {
+              "frames": 301,
+              "truncated": false,
+              "durationMs": 4000.1,
+              "fps": 74.99812504687382,
+              "p50Ms": 13.300000000000182,
+              "p95Ms": 13.5,
+              "p99Ms": 13.599999999999909,
+              "maxMs": 13.600000000000364,
+              "droppedFrames": 0,
+              "droppedPct": 0,
+              "longFrames": 0
+            },
+            "stepCost": {
+              "medianMs": 1,
+              "p95Ms": 1.7000000476837158,
+              "maxMs": 2.299999952316284,
+              "iterations": 60
+            },
+            "loaf": {
+              "supported": true,
+              "count": 0,
+              "maxDurationMs": null,
+              "maxBlockingMs": null,
+              "maxStyleAndLayoutMs": null
+            },
+            "togglePatchMedianMs": 2.4000000953674316,
+            "togglePatchMaxMs": 3,
+            "toggleMedianMs": 26.600000143051147,
+            "toggleMaxMs": 26.799999952316284,
+            "error": null
+          },
+          {
+            "scaleKey": "s3-5000",
+            "scale": "5000 节点",
+            "impl": "virtual",
+            "gate": "03 §10.1 S3 首渲 < 100ms + 60fps",
+            "totalNodes": 5000,
+            "visibleNodes": 5000,
+            "renderedRows": 35,
+            "dataPrepMs": 0.5,
+            "visibleFilterMs": 0.03950000047683716,
+            "patchMs": 3.299999952316284,
+            "layoutMs": 1,
+            "commitMs": 13.5,
+            "firstPaintMs": 26.799999952316284,
+            "scrollHeightPx": 110000,
+            "scroll": {
+              "frames": 301,
+              "truncated": false,
+              "durationMs": 4000.000000000001,
+              "fps": 74.99999999999999,
+              "p50Ms": 13.300000000001091,
+              "p95Ms": 13.5,
+              "p99Ms": 13.5,
+              "maxMs": 13.799999999999272,
+              "droppedFrames": 0,
+              "droppedPct": 0,
+              "longFrames": 0
+            },
+            "stepCost": {
+              "medianMs": 0.8999999761581421,
+              "p95Ms": 1.6000001430511475,
+              "maxMs": 3.0999999046325684,
+              "iterations": 60
+            },
+            "loaf": {
+              "supported": true,
+              "count": 0,
+              "maxDurationMs": null,
+              "maxBlockingMs": null,
+              "maxStyleAndLayoutMs": null
+            },
+            "togglePatchMedianMs": 2.5,
+            "togglePatchMaxMs": 4.599999904632568,
+            "toggleMedianMs": 26.700000047683716,
+            "toggleMaxMs": 28.899999856948853,
+            "error": null
+          },
+          {
+            "scaleKey": "stress-20000",
+            "scale": "20000 节点",
+            "impl": "virtual",
+            "gate": "余量观测（无门槛）",
+            "totalNodes": 20000,
+            "visibleNodes": 20000,
+            "renderedRows": 35,
+            "dataPrepMs": 0.39999985694885254,
+            "visibleFilterMs": 0.09700000047683716,
+            "patchMs": 2.5999999046325684,
+            "layoutMs": 0.7000000476837158,
+            "commitMs": 13.599999904632568,
+            "firstPaintMs": 26.700000047683716,
+            "scrollHeightPx": 440000,
+            "scroll": {
+              "frames": 301,
+              "truncated": false,
+              "durationMs": 4000.300000000001,
+              "fps": 74.99437542184334,
+              "p50Ms": 13.300000000001091,
+              "p95Ms": 13.5,
+              "p99Ms": 13.600000000000364,
+              "maxMs": 15.699999999998909,
+              "droppedFrames": 0,
+              "droppedPct": 0,
+              "longFrames": 0
+            },
+            "stepCost": {
+              "medianMs": 0.7999999523162842,
+              "p95Ms": 1.1000001430511475,
+              "maxMs": 2,
+              "iterations": 60
+            },
+            "loaf": {
+              "supported": true,
+              "count": 0,
+              "maxDurationMs": null,
+              "maxBlockingMs": null,
+              "maxStyleAndLayoutMs": null
+            },
+            "togglePatchMedianMs": 2.8000001907348633,
+            "togglePatchMaxMs": 3.299999952316284,
+            "toggleMedianMs": 26.699999809265137,
+            "toggleMaxMs": 26.799999952316284,
+            "error": null
+          },
+          {
+            "scaleKey": "prd-1000",
+            "scale": "1000 请求",
+            "impl": "full",
+            "gate": "对照组（无门槛）",
+            "totalNodes": 1040,
+            "visibleNodes": 1040,
+            "renderedRows": 1040,
+            "dataPrepMs": 0.09999990463256836,
+            "visibleFilterMs": 0.0070000004768371584,
+            "patchMs": 4.6000001430511475,
+            "layoutMs": 14.399999856948853,
+            "commitMs": 24.5,
+            "firstPaintMs": 26.300000190734863,
+            "scrollHeightPx": 22880,
+            "scroll": {
+              "frames": 301,
+              "truncated": false,
+              "durationMs": 4000.1000000000004,
+              "fps": 74.99812504687382,
+              "p50Ms": 13.299999999999272,
+              "p95Ms": 13.5,
+              "p99Ms": 13.600000000000364,
+              "maxMs": 13.700000000000728,
+              "droppedFrames": 0,
+              "droppedPct": 0,
+              "longFrames": 0
+            },
+            "stepCost": {
+              "medianMs": 0,
+              "p95Ms": 0,
+              "maxMs": 0.10000014305114746,
+              "iterations": 60
+            },
+            "loaf": {
+              "supported": true,
+              "count": 0,
+              "maxDurationMs": null,
+              "maxBlockingMs": null,
+              "maxStyleAndLayoutMs": null
+            },
+            "togglePatchMedianMs": null,
+            "togglePatchMaxMs": null,
+            "toggleMedianMs": null,
+            "toggleMaxMs": null,
+            "error": null
+          },
+          {
+            "scaleKey": "s3-5000",
+            "scale": "5000 节点",
+            "impl": "full",
+            "gate": "对照组（无门槛）",
+            "totalNodes": 5000,
+            "visibleNodes": 5000,
+            "renderedRows": 5000,
+            "dataPrepMs": 0.40000009536743164,
+            "visibleFilterMs": 0.04700000047683716,
+            "patchMs": 22,
+            "layoutMs": 88.20000004768372,
+            "commitMs": 137,
+            "firstPaintMs": 146.59999990463257,
+            "scrollHeightPx": 110000,
+            "scroll": {
+              "frames": 301,
+              "truncated": false,
+              "durationMs": 4000,
+              "fps": 75,
+              "p50Ms": 13.30000000000291,
+              "p95Ms": 13.5,
+              "p99Ms": 13.599999999998545,
+              "maxMs": 13.700000000000728,
+              "droppedFrames": 0,
+              "droppedPct": 0,
+              "longFrames": 0
+            },
+            "stepCost": {
+              "medianMs": 0,
+              "p95Ms": 0,
+              "maxMs": 0.10000014305114746,
+              "iterations": 60
+            },
+            "loaf": {
+              "supported": true,
+              "count": 1,
+              "maxDurationMs": 142.10000014305115,
+              "maxBlockingMs": 79.2,
+              "maxStyleAndLayoutMs": 15.700000047683716
+            },
+            "togglePatchMedianMs": null,
+            "togglePatchMaxMs": null,
+            "toggleMedianMs": null,
+            "toggleMaxMs": null,
+            "error": null
+          }
+        ]
+      }
+    },
+    {
+      "config": "gpu-on",
+      "mode": "mem",
+      "round": 1,
+      "label": "GPU 开（默认配置）",
+      "browserArgs": "",
+      "launchedAt": "2026-07-31T11:28:10.1833311+08:00",
+      "holdObservedAt": "2026-07-31T11:28:11.4212527+08:00",
+      "holdCondition": "1 工作区 + 3 标签 + 5000 节点集合树（干净启动，未跑帧率矩阵）",
+      "cpuBeforeLaunchPercent": 23.0,
+      "cpuSettledBeforeLaunch": true,
+      "cpuDuringHoldMedianPercent": 24.0,
+      "gpu": {
+        "expectGpuProcess": true,
+        "gpuProcessPresent": true,
+        "gpuProcessPrivateWorkingSetBytes": 74756096,
+        "flagsObserved": []
+      },
+      "memory": {
+        "metric": "privateWorkingSet（Working Set - Private，等于任务管理器「内存」列）",
+        "gateStatistic": "max（内存逐样本稳定，取最差观测值）",
+        "sampleCount": 6,
+        "sampleBudgetExhausted": false,
+        "processCount": 7,
+        "treePrivateWorkingSetMedianBytes": 160493568,
+        "treePrivateWorkingSetMaxBytes": 162099200,
+        "treeCommitMedianBytes": 232798208,
+        "treeWorkingSetSumMedianBytes": 469960704,
+        "rootPrivateWorkingSetMedianBytes": 3985408,
+        "webviewPrivateWorkingSetMedianBytes": 156508160,
+        "treePeakWorkingSetBytes": 476168192,
+        "treePeakWorkingSetCaveat": "WorkingSet 峰值含共享页（S1 实测放大 2.99×），Windows 无「私有工作集峰值」计数器。只作尖峰旁证，不进门禁。",
+        "roleBreakdown": [
+          {
+            "role": "gpu-process",
+            "instances": 1,
+            "privateWorkingSetBytes": 74756096
+          },
+          {
+            "role": "browser",
+            "instances": 1,
+            "privateWorkingSetBytes": 39473152
+          },
+          {
+            "role": "renderer",
+            "instances": 1,
+            "privateWorkingSetBytes": 29478912
+          },
+          {
+            "role": "utility",
+            "instances": 2,
+            "privateWorkingSetBytes": 11804672
+          },
+          {
+            "role": "host(rust)",
+            "instances": 1,
+            "privateWorkingSetBytes": 3985408
+          },
+          {
+            "role": "crashpad-handler",
+            "instances": 1,
+            "privateWorkingSetBytes": 2146304
+          }
+        ],
+        "samples": [
+          {
+            "sampledAt": "2026-07-31T11:28:14.3955700+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 161644544,
+            "treeCommitBytes": 234074112,
+            "treeWorkingSetSumBytes": 471015424,
+            "rootPrivateWorkingSetBytes": 3985408,
+            "rootCommitBytes": 5480448,
+            "rootWorkingSetBytes": 27156480
+          },
+          {
+            "sampledAt": "2026-07-31T11:28:15.9180373+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 162054144,
+            "treeCommitBytes": 234401792,
+            "treeWorkingSetSumBytes": 471506944,
+            "rootPrivateWorkingSetBytes": 3985408,
+            "rootCommitBytes": 5480448,
+            "rootWorkingSetBytes": 27156480
+          },
+          {
+            "sampledAt": "2026-07-31T11:28:17.4203013+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 162099200,
+            "treeCommitBytes": 234504192,
+            "treeWorkingSetSumBytes": 471793664,
+            "rootPrivateWorkingSetBytes": 3985408,
+            "rootCommitBytes": 5480448,
+            "rootWorkingSetBytes": 27156480
+          },
+          {
+            "sampledAt": "2026-07-31T11:28:18.9365049+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 159342592,
+            "treeCommitBytes": 231522304,
+            "treeWorkingSetSumBytes": 468905984,
+            "rootPrivateWorkingSetBytes": 3985408,
+            "rootCommitBytes": 5480448,
+            "rootWorkingSetBytes": 27156480
+          },
+          {
+            "sampledAt": "2026-07-31T11:28:20.5097016+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 156979200,
+            "treeCommitBytes": 228925440,
+            "treeWorkingSetSumBytes": 466964480,
+            "rootPrivateWorkingSetBytes": 3985408,
+            "rootCommitBytes": 5480448,
+            "rootWorkingSetBytes": 27156480
+          },
+          {
+            "sampledAt": "2026-07-31T11:28:22.2521739+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 157184000,
+            "treeCommitBytes": 228651008,
+            "treeWorkingSetSumBytes": 466829312,
+            "rootPrivateWorkingSetBytes": 3985408,
+            "rootCommitBytes": 5480448,
+            "rootWorkingSetBytes": 27156480
+          }
+        ],
+        "processBreakdown": [
+          {
+            "processId": 95216,
+            "name": "msedgewebview2",
+            "role": "gpu-process",
+            "privateWorkingSetBytes": 74756096,
+            "workingSetBytes": 131346432,
+            "commitBytes": 106541056
+          },
+          {
+            "processId": 95248,
+            "name": "msedgewebview2",
+            "role": "browser",
+            "privateWorkingSetBytes": 39473152,
+            "workingSetBytes": 148078592,
+            "commitBytes": 52580352
+          },
+          {
+            "processId": 81488,
+            "name": "msedgewebview2",
+            "role": "renderer",
+            "privateWorkingSetBytes": 29478912,
+            "workingSetBytes": 86855680,
+            "commitBytes": 41254912
+          },
+          {
+            "processId": 73428,
+            "name": "msedgewebview2",
+            "role": "utility",
+            "privateWorkingSetBytes": 8269824,
+            "workingSetBytes": 43417600,
+            "commitBytes": 15159296
+          },
+          {
+            "processId": 90548,
+            "name": "apogee",
+            "role": "host(rust)",
+            "privateWorkingSetBytes": 3985408,
+            "workingSetBytes": 27156480,
+            "commitBytes": 5480448
+          },
+          {
+            "processId": 87540,
+            "name": "msedgewebview2",
+            "role": "utility",
+            "privateWorkingSetBytes": 3534848,
+            "workingSetBytes": 21463040,
+            "commitBytes": 9859072
+          },
+          {
+            "processId": 77720,
+            "name": "msedgewebview2",
+            "role": "crashpad-handler",
+            "privateWorkingSetBytes": 2146304,
+            "workingSetBytes": 12697600,
+            "commitBytes": 3198976
+          }
+        ]
+      },
+      "frontend": {
+        "spike": "S3",
+        "part": "memory-only",
+        "mode": "memoryOnly",
+        "at": "2026-07-31T03:28:41.253Z",
+        "inTauri": true,
+        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36 Edg/150.0.0.0",
+        "subject": {
+          "component": "src/components/sidebar/Sidebar.vue",
+          "sharedModule": "src/components/sidebar/tree.ts",
+          "rowHeightPx": 22,
+          "overscanRows": 10,
+          "control": "src/spike/S3FullTree.vue（全量 v-for，不虚拟化）"
+        },
+        "display": null,
+        "method": {
+          "scrollFrames": 300,
+          "scrollStepRows": 8,
+          "scrollStepPx": 176,
+          "scrollDriver": "主线程：每帧写 scroller.scrollTop（比合成器驱动更悲观）",
+          "frameBudgetMs": 16.666666666666668,
+          "frameBudgetSource": "本机显示器实测 rAF 中位间隔",
+          "toggleRepeats": 7,
+          "visibleFilterRepeats": 200,
+          "visibleFilterNote": "performance.now() 在 Chromium 里钳到 0.1ms，单次跑不出有意义的数，所以重复取平均",
+          "fullRenderSkippedAbove": 5001
+        },
+        "acceptance": {
+          "S3 首渲 5000 节点 < 100ms": {
+            "measuredMs": null,
+            "commitMs": null,
+            "pass": false
+          },
+          "S3 滚动 5000 节点 60fps": {
+            "fps": null,
+            "droppedPct": null,
+            "p95Ms": null,
+            "frameBudgetMs": 16.666666666666668,
+            "criterion": "掉帧率 < 5%（相对本机显示器实测节奏）",
+            "pass": false
+          },
+          "PRD 集合树 1000 请求 < 100ms": {
+            "measuredMs": null,
+            "requestCount": null,
+            "pass": false
+          }
+        },
+        "rustProcessMemory": {
+          "note": "Rust 主进程私有提交量。集合树的 DOM 在 WebView2 渲染进程里，不在这里 —— 进程树内存由 PS1 量测台负责。",
+          "beforeMb": 5.265625,
+          "atHoldMb": 5.265625,
+          "afterHoldMb": 5.171875
+        },
+        "holdCondition": "1 工作区 + 3 标签 + 5000 节点集合树（已挂载、空闲）",
+        "holdMs": 30000,
+        "notMeasured": [
+          "真实滚轮/触控板滚动：本面板用主线程写 scrollTop 驱动，不经过合成器线程，也不含输入事件延迟。真实滚轮在 Chromium 上可能走合成器，主线程驱动是更悲观的一侧。",
+          "真实集合数据：节点由 synthTree 合成，名称长度均匀。真实集合里超长接口名会触发文本溢出计算，行内布局成本更高。",
+          "增量加载：本次一次性把整棵扁平数组交给组件，未测「Rust 侧分页返回 + 滚动到底再取下一页」的路径（那是 v0.2 的实现）。",
+          "macOS：WKWebView 的合成与滚动实现与 WebView2 不同，本报告数字不可套用。"
+        ],
+        "cells": []
+      }
+    },
+    {
+      "config": "gpu-on",
+      "mode": "mem",
+      "round": 2,
+      "label": "GPU 开（默认配置）",
+      "browserArgs": "",
+      "launchedAt": "2026-07-31T11:28:43.0386625+08:00",
+      "holdObservedAt": "2026-07-31T11:28:44.9525758+08:00",
+      "holdCondition": "1 工作区 + 3 标签 + 5000 节点集合树（干净启动，未跑帧率矩阵）",
+      "cpuBeforeLaunchPercent": 18.0,
+      "cpuSettledBeforeLaunch": true,
+      "cpuDuringHoldMedianPercent": 20.0,
+      "gpu": {
+        "expectGpuProcess": true,
+        "gpuProcessPresent": true,
+        "gpuProcessPrivateWorkingSetBytes": 80617472,
+        "flagsObserved": []
+      },
+      "memory": {
+        "metric": "privateWorkingSet（Working Set - Private，等于任务管理器「内存」列）",
+        "gateStatistic": "max（内存逐样本稳定，取最差观测值）",
+        "sampleCount": 6,
+        "sampleBudgetExhausted": false,
+        "processCount": 7,
+        "treePrivateWorkingSetMedianBytes": 165978112,
+        "treePrivateWorkingSetMaxBytes": 168730624,
+        "treeCommitMedianBytes": 237422592,
+        "treeWorkingSetSumMedianBytes": 474687488,
+        "rootPrivateWorkingSetMedianBytes": 3969024,
+        "webviewPrivateWorkingSetMedianBytes": 162009088,
+        "treePeakWorkingSetBytes": 488226816,
+        "treePeakWorkingSetCaveat": "WorkingSet 峰值含共享页（S1 实测放大 2.99×），Windows 无「私有工作集峰值」计数器。只作尖峰旁证，不进门禁。",
+        "roleBreakdown": [
+          {
+            "role": "gpu-process",
+            "instances": 1,
+            "privateWorkingSetBytes": 80617472
+          },
+          {
+            "role": "browser",
+            "instances": 1,
+            "privateWorkingSetBytes": 40042496
+          },
+          {
+            "role": "renderer",
+            "instances": 1,
+            "privateWorkingSetBytes": 29687808
+          },
+          {
+            "role": "utility",
+            "instances": 2,
+            "privateWorkingSetBytes": 11915264
+          },
+          {
+            "role": "host(rust)",
+            "instances": 1,
+            "privateWorkingSetBytes": 3969024
+          },
+          {
+            "role": "crashpad-handler",
+            "instances": 1,
+            "privateWorkingSetBytes": 2146304
+          }
+        ],
+        "samples": [
+          {
+            "sampledAt": "2026-07-31T11:28:47.9847484+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 168378368,
+            "treeCommitBytes": 241278976,
+            "treeWorkingSetSumBytes": 477868032,
+            "rootPrivateWorkingSetBytes": 3969024,
+            "rootCommitBytes": 5656576,
+            "rootWorkingSetBytes": 27152384
+          },
+          {
+            "sampledAt": "2026-07-31T11:28:49.6240355+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 168599552,
+            "treeCommitBytes": 241586176,
+            "treeWorkingSetSumBytes": 478310400,
+            "rootPrivateWorkingSetBytes": 3969024,
+            "rootCommitBytes": 5656576,
+            "rootWorkingSetBytes": 27152384
+          },
+          {
+            "sampledAt": "2026-07-31T11:28:51.3691652+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 168730624,
+            "treeCommitBytes": 239181824,
+            "treeWorkingSetSumBytes": 476053504,
+            "rootPrivateWorkingSetBytes": 3969024,
+            "rootCommitBytes": 5656576,
+            "rootWorkingSetBytes": 27152384
+          },
+          {
+            "sampledAt": "2026-07-31T11:28:52.9817322+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 163278848,
+            "treeCommitBytes": 235581440,
+            "treeWorkingSetSumBytes": 473214976,
+            "rootPrivateWorkingSetBytes": 3969024,
+            "rootCommitBytes": 5656576,
+            "rootWorkingSetBytes": 27152384
+          },
+          {
+            "sampledAt": "2026-07-31T11:28:54.5667508+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 163577856,
+            "treeCommitBytes": 235663360,
+            "treeWorkingSetSumBytes": 473321472,
+            "rootPrivateWorkingSetBytes": 3969024,
+            "rootCommitBytes": 5656576,
+            "rootWorkingSetBytes": 27152384
+          },
+          {
+            "sampledAt": "2026-07-31T11:28:56.1745186+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 163155968,
+            "treeCommitBytes": 235442176,
+            "treeWorkingSetSumBytes": 473034752,
+            "rootPrivateWorkingSetBytes": 3969024,
+            "rootCommitBytes": 5656576,
+            "rootWorkingSetBytes": 27152384
+          }
+        ],
+        "processBreakdown": [
+          {
+            "processId": 18568,
+            "name": "msedgewebview2",
+            "role": "gpu-process",
+            "privateWorkingSetBytes": 80617472,
+            "workingSetBytes": 137293824,
+            "commitBytes": 112435200
+          },
+          {
+            "processId": 74528,
+            "name": "msedgewebview2",
+            "role": "browser",
+            "privateWorkingSetBytes": 40042496,
+            "workingSetBytes": 148541440,
+            "commitBytes": 52068352
+          },
+          {
+            "processId": 68100,
+            "name": "msedgewebview2",
+            "role": "renderer",
+            "privateWorkingSetBytes": 29687808,
+            "workingSetBytes": 87199744,
+            "commitBytes": 42729472
+          },
+          {
+            "processId": 95884,
+            "name": "msedgewebview2",
+            "role": "utility",
+            "privateWorkingSetBytes": 8368128,
+            "workingSetBytes": 43503616,
+            "commitBytes": 15319040
+          },
+          {
+            "processId": 83832,
+            "name": "apogee",
+            "role": "host(rust)",
+            "privateWorkingSetBytes": 3969024,
+            "workingSetBytes": 27152384,
+            "commitBytes": 5656576
+          },
+          {
+            "processId": 69128,
+            "name": "msedgewebview2",
+            "role": "utility",
+            "privateWorkingSetBytes": 3547136,
+            "workingSetBytes": 21487616,
+            "commitBytes": 9871360
+          },
+          {
+            "processId": 94132,
+            "name": "msedgewebview2",
+            "role": "crashpad-handler",
+            "privateWorkingSetBytes": 2146304,
+            "workingSetBytes": 12689408,
+            "commitBytes": 3198976
+          }
+        ]
+      },
+      "frontend": {
+        "spike": "S3",
+        "part": "memory-only",
+        "mode": "memoryOnly",
+        "at": "2026-07-31T03:29:14.855Z",
+        "inTauri": true,
+        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36 Edg/150.0.0.0",
+        "subject": {
+          "component": "src/components/sidebar/Sidebar.vue",
+          "sharedModule": "src/components/sidebar/tree.ts",
+          "rowHeightPx": 22,
+          "overscanRows": 10,
+          "control": "src/spike/S3FullTree.vue（全量 v-for，不虚拟化）"
+        },
+        "display": null,
+        "method": {
+          "scrollFrames": 300,
+          "scrollStepRows": 8,
+          "scrollStepPx": 176,
+          "scrollDriver": "主线程：每帧写 scroller.scrollTop（比合成器驱动更悲观）",
+          "frameBudgetMs": 16.666666666666668,
+          "frameBudgetSource": "本机显示器实测 rAF 中位间隔",
+          "toggleRepeats": 7,
+          "visibleFilterRepeats": 200,
+          "visibleFilterNote": "performance.now() 在 Chromium 里钳到 0.1ms，单次跑不出有意义的数，所以重复取平均",
+          "fullRenderSkippedAbove": 5001
+        },
+        "acceptance": {
+          "S3 首渲 5000 节点 < 100ms": {
+            "measuredMs": null,
+            "commitMs": null,
+            "pass": false
+          },
+          "S3 滚动 5000 节点 60fps": {
+            "fps": null,
+            "droppedPct": null,
+            "p95Ms": null,
+            "frameBudgetMs": 16.666666666666668,
+            "criterion": "掉帧率 < 5%（相对本机显示器实测节奏）",
+            "pass": false
+          },
+          "PRD 集合树 1000 请求 < 100ms": {
+            "measuredMs": null,
+            "requestCount": null,
+            "pass": false
+          }
+        },
+        "rustProcessMemory": {
+          "note": "Rust 主进程私有提交量。集合树的 DOM 在 WebView2 渲染进程里，不在这里 —— 进程树内存由 PS1 量测台负责。",
+          "beforeMb": 5.43359375,
+          "atHoldMb": 5.43359375,
+          "afterHoldMb": 5.33203125
+        },
+        "holdCondition": "1 工作区 + 3 标签 + 5000 节点集合树（已挂载、空闲）",
+        "holdMs": 30000,
+        "notMeasured": [
+          "真实滚轮/触控板滚动：本面板用主线程写 scrollTop 驱动，不经过合成器线程，也不含输入事件延迟。真实滚轮在 Chromium 上可能走合成器，主线程驱动是更悲观的一侧。",
+          "真实集合数据：节点由 synthTree 合成，名称长度均匀。真实集合里超长接口名会触发文本溢出计算，行内布局成本更高。",
+          "增量加载：本次一次性把整棵扁平数组交给组件，未测「Rust 侧分页返回 + 滚动到底再取下一页」的路径（那是 v0.2 的实现）。",
+          "macOS：WKWebView 的合成与滚动实现与 WebView2 不同，本报告数字不可套用。"
+        ],
+        "cells": []
+      }
+    },
+    {
+      "config": "gpu-on",
+      "mode": "mem",
+      "round": 3,
+      "label": "GPU 开（默认配置）",
+      "browserArgs": "",
+      "launchedAt": "2026-07-31T11:29:15.9790081+08:00",
+      "holdObservedAt": "2026-07-31T11:29:17.4218637+08:00",
+      "holdCondition": "1 工作区 + 3 标签 + 5000 节点集合树（干净启动，未跑帧率矩阵）",
+      "cpuBeforeLaunchPercent": 17.0,
+      "cpuSettledBeforeLaunch": true,
+      "cpuDuringHoldMedianPercent": 21.0,
+      "gpu": {
+        "expectGpuProcess": true,
+        "gpuProcessPresent": true,
+        "gpuProcessPrivateWorkingSetBytes": 80953344,
+        "flagsObserved": []
+      },
+      "memory": {
+        "metric": "privateWorkingSet（Working Set - Private，等于任务管理器「内存」列）",
+        "gateStatistic": "max（内存逐样本稳定，取最差观测值）",
+        "sampleCount": 6,
+        "sampleBudgetExhausted": false,
+        "processCount": 7,
+        "treePrivateWorkingSetMedianBytes": 166672384,
+        "treePrivateWorkingSetMaxBytes": 168050688,
+        "treeCommitMedianBytes": 239239168,
+        "treeWorkingSetSumMedianBytes": 476420096,
+        "rootPrivateWorkingSetMedianBytes": 3985408,
+        "webviewPrivateWorkingSetMedianBytes": 162686976,
+        "treePeakWorkingSetBytes": 486871040,
+        "treePeakWorkingSetCaveat": "WorkingSet 峰值含共享页（S1 实测放大 2.99×），Windows 无「私有工作集峰值」计数器。只作尖峰旁证，不进门禁。",
+        "roleBreakdown": [
+          {
+            "role": "gpu-process",
+            "instances": 1,
+            "privateWorkingSetBytes": 80953344
+          },
+          {
+            "role": "browser",
+            "instances": 1,
+            "privateWorkingSetBytes": 39161856
+          },
+          {
+            "role": "renderer",
+            "instances": 1,
+            "privateWorkingSetBytes": 29741056
+          },
+          {
+            "role": "utility",
+            "instances": 2,
+            "privateWorkingSetBytes": 11694080
+          },
+          {
+            "role": "host(rust)",
+            "instances": 1,
+            "privateWorkingSetBytes": 3985408
+          },
+          {
+            "role": "crashpad-handler",
+            "instances": 1,
+            "privateWorkingSetBytes": 2146304
+          }
+        ],
+        "samples": [
+          {
+            "sampledAt": "2026-07-31T11:29:20.3995605+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 167682048,
+            "treeCommitBytes": 240500736,
+            "treeWorkingSetSumBytes": 477491200,
+            "rootPrivateWorkingSetBytes": 3985408,
+            "rootCommitBytes": 5693440,
+            "rootWorkingSetBytes": 27275264
+          },
+          {
+            "sampledAt": "2026-07-31T11:29:21.8965684+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 167845888,
+            "treeCommitBytes": 240521216,
+            "treeWorkingSetSumBytes": 477650944,
+            "rootPrivateWorkingSetBytes": 3985408,
+            "rootCommitBytes": 5693440,
+            "rootWorkingSetBytes": 27275264
+          },
+          {
+            "sampledAt": "2026-07-31T11:29:23.4665323+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 168050688,
+            "treeCommitBytes": 240541696,
+            "treeWorkingSetSumBytes": 477831168,
+            "rootPrivateWorkingSetBytes": 3985408,
+            "rootCommitBytes": 5693440,
+            "rootWorkingSetBytes": 27275264
+          },
+          {
+            "sampledAt": "2026-07-31T11:29:25.0595496+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 165662720,
+            "treeCommitBytes": 237977600,
+            "treeWorkingSetSumBytes": 475348992,
+            "rootPrivateWorkingSetBytes": 3985408,
+            "rootCommitBytes": 5693440,
+            "rootWorkingSetBytes": 27275264
+          },
+          {
+            "sampledAt": "2026-07-31T11:29:26.7578935+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 163790848,
+            "treeCommitBytes": 235278336,
+            "treeWorkingSetSumBytes": 473468928,
+            "rootPrivateWorkingSetBytes": 3985408,
+            "rootCommitBytes": 5693440,
+            "rootWorkingSetBytes": 27275264
+          },
+          {
+            "sampledAt": "2026-07-31T11:29:28.4750287+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 163569664,
+            "treeCommitBytes": 235237376,
+            "treeWorkingSetSumBytes": 473411584,
+            "rootPrivateWorkingSetBytes": 3985408,
+            "rootCommitBytes": 5693440,
+            "rootWorkingSetBytes": 27275264
+          }
+        ],
+        "processBreakdown": [
+          {
+            "processId": 52808,
+            "name": "msedgewebview2",
+            "role": "gpu-process",
+            "privateWorkingSetBytes": 80953344,
+            "workingSetBytes": 137687040,
+            "commitBytes": 112807936
+          },
+          {
+            "processId": 95808,
+            "name": "msedgewebview2",
+            "role": "browser",
+            "privateWorkingSetBytes": 39161856,
+            "workingSetBytes": 147771392,
+            "commitBytes": 51257344
+          },
+          {
+            "processId": 78860,
+            "name": "msedgewebview2",
+            "role": "renderer",
+            "privateWorkingSetBytes": 29741056,
+            "workingSetBytes": 87273472,
+            "commitBytes": 42627072
+          },
+          {
+            "processId": 88964,
+            "name": "msedgewebview2",
+            "role": "utility",
+            "privateWorkingSetBytes": 8228864,
+            "workingSetBytes": 43405312,
+            "commitBytes": 15142912
+          },
+          {
+            "processId": 12388,
+            "name": "apogee",
+            "role": "host(rust)",
+            "privateWorkingSetBytes": 3985408,
+            "workingSetBytes": 27275264,
+            "commitBytes": 5693440
+          },
+          {
+            "processId": 40444,
+            "name": "msedgewebview2",
+            "role": "utility",
+            "privateWorkingSetBytes": 3465216,
+            "workingSetBytes": 21389312,
+            "commitBytes": 9773056
+          },
+          {
+            "processId": 79688,
+            "name": "msedgewebview2",
+            "role": "crashpad-handler",
+            "privateWorkingSetBytes": 2146304,
+            "workingSetBytes": 12689408,
+            "commitBytes": 3198976
+          }
+        ]
+      },
+      "frontend": {
+        "spike": "S3",
+        "part": "memory-only",
+        "mode": "memoryOnly",
+        "at": "2026-07-31T03:29:47.332Z",
+        "inTauri": true,
+        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36 Edg/150.0.0.0",
+        "subject": {
+          "component": "src/components/sidebar/Sidebar.vue",
+          "sharedModule": "src/components/sidebar/tree.ts",
+          "rowHeightPx": 22,
+          "overscanRows": 10,
+          "control": "src/spike/S3FullTree.vue（全量 v-for，不虚拟化）"
+        },
+        "display": null,
+        "method": {
+          "scrollFrames": 300,
+          "scrollStepRows": 8,
+          "scrollStepPx": 176,
+          "scrollDriver": "主线程：每帧写 scroller.scrollTop（比合成器驱动更悲观）",
+          "frameBudgetMs": 16.666666666666668,
+          "frameBudgetSource": "本机显示器实测 rAF 中位间隔",
+          "toggleRepeats": 7,
+          "visibleFilterRepeats": 200,
+          "visibleFilterNote": "performance.now() 在 Chromium 里钳到 0.1ms，单次跑不出有意义的数，所以重复取平均",
+          "fullRenderSkippedAbove": 5001
+        },
+        "acceptance": {
+          "S3 首渲 5000 节点 < 100ms": {
+            "measuredMs": null,
+            "commitMs": null,
+            "pass": false
+          },
+          "S3 滚动 5000 节点 60fps": {
+            "fps": null,
+            "droppedPct": null,
+            "p95Ms": null,
+            "frameBudgetMs": 16.666666666666668,
+            "criterion": "掉帧率 < 5%（相对本机显示器实测节奏）",
+            "pass": false
+          },
+          "PRD 集合树 1000 请求 < 100ms": {
+            "measuredMs": null,
+            "requestCount": null,
+            "pass": false
+          }
+        },
+        "rustProcessMemory": {
+          "note": "Rust 主进程私有提交量。集合树的 DOM 在 WebView2 渲染进程里，不在这里 —— 进程树内存由 PS1 量测台负责。",
+          "beforeMb": 5.46875,
+          "atHoldMb": 5.46875,
+          "afterHoldMb": 5.3671875
+        },
+        "holdCondition": "1 工作区 + 3 标签 + 5000 节点集合树（已挂载、空闲）",
+        "holdMs": 30000,
+        "notMeasured": [
+          "真实滚轮/触控板滚动：本面板用主线程写 scrollTop 驱动，不经过合成器线程，也不含输入事件延迟。真实滚轮在 Chromium 上可能走合成器，主线程驱动是更悲观的一侧。",
+          "真实集合数据：节点由 synthTree 合成，名称长度均匀。真实集合里超长接口名会触发文本溢出计算，行内布局成本更高。",
+          "增量加载：本次一次性把整棵扁平数组交给组件，未测「Rust 侧分页返回 + 滚动到底再取下一页」的路径（那是 v0.2 的实现）。",
+          "macOS：WKWebView 的合成与滚动实现与 WebView2 不同，本报告数字不可套用。"
+        ],
+        "cells": []
+      }
+    },
+    {
+      "config": "gpu-on",
+      "mode": "mem",
+      "round": 4,
+      "label": "GPU 开（默认配置）",
+      "browserArgs": "",
+      "launchedAt": "2026-07-31T11:29:48.4606638+08:00",
+      "holdObservedAt": "2026-07-31T11:29:49.9290000+08:00",
+      "holdCondition": "1 工作区 + 3 标签 + 5000 节点集合树（干净启动，未跑帧率矩阵）",
+      "cpuBeforeLaunchPercent": 16.0,
+      "cpuSettledBeforeLaunch": true,
+      "cpuDuringHoldMedianPercent": 16.5,
+      "gpu": {
+        "expectGpuProcess": true,
+        "gpuProcessPresent": true,
+        "gpuProcessPrivateWorkingSetBytes": 80084992,
+        "flagsObserved": []
+      },
+      "memory": {
+        "metric": "privateWorkingSet（Working Set - Private，等于任务管理器「内存」列）",
+        "gateStatistic": "max（内存逐样本稳定，取最差观测值）",
+        "sampleCount": 6,
+        "sampleBudgetExhausted": false,
+        "processCount": 7,
+        "treePrivateWorkingSetMedianBytes": 166539264,
+        "treePrivateWorkingSetMaxBytes": 168214528,
+        "treeCommitMedianBytes": 240220160,
+        "treeWorkingSetSumMedianBytes": 476266496,
+        "rootPrivateWorkingSetMedianBytes": 3870720,
+        "webviewPrivateWorkingSetMedianBytes": 162668544,
+        "treePeakWorkingSetBytes": 482734080,
+        "treePeakWorkingSetCaveat": "WorkingSet 峰值含共享页（S1 实测放大 2.99×），Windows 无「私有工作集峰值」计数器。只作尖峰旁证，不进门禁。",
+        "roleBreakdown": [
+          {
+            "role": "gpu-process",
+            "instances": 1,
+            "privateWorkingSetBytes": 80084992
+          },
+          {
+            "role": "browser",
+            "instances": 1,
+            "privateWorkingSetBytes": 40169472
+          },
+          {
+            "role": "renderer",
+            "instances": 1,
+            "privateWorkingSetBytes": 29679616
+          },
+          {
+            "role": "utility",
+            "instances": 2,
+            "privateWorkingSetBytes": 11845632
+          },
+          {
+            "role": "host(rust)",
+            "instances": 1,
+            "privateWorkingSetBytes": 3870720
+          },
+          {
+            "role": "crashpad-handler",
+            "instances": 1,
+            "privateWorkingSetBytes": 2138112
+          }
+        ],
+        "samples": [
+          {
+            "sampledAt": "2026-07-31T11:29:52.9185387+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 167788544,
+            "treeCommitBytes": 241631232,
+            "treeWorkingSetSumBytes": 477478912,
+            "rootPrivateWorkingSetBytes": 3870720,
+            "rootCommitBytes": 5361664,
+            "rootWorkingSetBytes": 27136000
+          },
+          {
+            "sampledAt": "2026-07-31T11:29:54.4120546+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 168157184,
+            "treeCommitBytes": 241811456,
+            "treeWorkingSetSumBytes": 477786112,
+            "rootPrivateWorkingSetBytes": 3870720,
+            "rootCommitBytes": 5361664,
+            "rootWorkingSetBytes": 27136000
+          },
+          {
+            "sampledAt": "2026-07-31T11:29:55.9315037+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 168214528,
+            "treeCommitBytes": 241860608,
+            "treeWorkingSetSumBytes": 478027776,
+            "rootPrivateWorkingSetBytes": 3870720,
+            "rootCommitBytes": 5361664,
+            "rootWorkingSetBytes": 27136000
+          },
+          {
+            "sampledAt": "2026-07-31T11:29:57.4261811+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 165289984,
+            "treeCommitBytes": 238809088,
+            "treeWorkingSetSumBytes": 475054080,
+            "rootPrivateWorkingSetBytes": 3870720,
+            "rootCommitBytes": 5361664,
+            "rootWorkingSetBytes": 27136000
+          },
+          {
+            "sampledAt": "2026-07-31T11:29:58.9137853+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 162902016,
+            "treeCommitBytes": 235753472,
+            "treeWorkingSetSumBytes": 472776704,
+            "rootPrivateWorkingSetBytes": 3870720,
+            "rootCommitBytes": 5361664,
+            "rootWorkingSetBytes": 27136000
+          },
+          {
+            "sampledAt": "2026-07-31T11:30:00.3855132+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 163065856,
+            "treeCommitBytes": 235868160,
+            "treeWorkingSetSumBytes": 472895488,
+            "rootPrivateWorkingSetBytes": 3870720,
+            "rootCommitBytes": 5361664,
+            "rootWorkingSetBytes": 27136000
+          }
+        ],
+        "processBreakdown": [
+          {
+            "processId": 92740,
+            "name": "msedgewebview2",
+            "role": "gpu-process",
+            "privateWorkingSetBytes": 80084992,
+            "workingSetBytes": 136695808,
+            "commitBytes": 111935488
+          },
+          {
+            "processId": 39824,
+            "name": "msedgewebview2",
+            "role": "browser",
+            "privateWorkingSetBytes": 40169472,
+            "workingSetBytes": 148750336,
+            "commitBytes": 52461568
+          },
+          {
+            "processId": 78436,
+            "name": "msedgewebview2",
+            "role": "renderer",
+            "privateWorkingSetBytes": 29679616,
+            "workingSetBytes": 87203840,
+            "commitBytes": 43610112
+          },
+          {
+            "processId": 92776,
+            "name": "msedgewebview2",
+            "role": "utility",
+            "privateWorkingSetBytes": 8306688,
+            "workingSetBytes": 43491328,
+            "commitBytes": 15200256
+          },
+          {
+            "processId": 81132,
+            "name": "apogee",
+            "role": "host(rust)",
+            "privateWorkingSetBytes": 3870720,
+            "workingSetBytes": 27136000,
+            "commitBytes": 5361664
+          },
+          {
+            "processId": 87012,
+            "name": "msedgewebview2",
+            "role": "utility",
+            "privateWorkingSetBytes": 3538944,
+            "workingSetBytes": 21487616,
+            "commitBytes": 9863168
+          },
+          {
+            "processId": 92244,
+            "name": "msedgewebview2",
+            "role": "crashpad-handler",
+            "privateWorkingSetBytes": 2138112,
+            "workingSetBytes": 12713984,
+            "commitBytes": 3198976
+          }
+        ]
+      },
+      "frontend": {
+        "spike": "S3",
+        "part": "memory-only",
+        "mode": "memoryOnly",
+        "at": "2026-07-31T03:30:19.73Z",
+        "inTauri": true,
+        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36 Edg/150.0.0.0",
+        "subject": {
+          "component": "src/components/sidebar/Sidebar.vue",
+          "sharedModule": "src/components/sidebar/tree.ts",
+          "rowHeightPx": 22,
+          "overscanRows": 10,
+          "control": "src/spike/S3FullTree.vue（全量 v-for，不虚拟化）"
+        },
+        "display": null,
+        "method": {
+          "scrollFrames": 300,
+          "scrollStepRows": 8,
+          "scrollStepPx": 176,
+          "scrollDriver": "主线程：每帧写 scroller.scrollTop（比合成器驱动更悲观）",
+          "frameBudgetMs": 16.666666666666668,
+          "frameBudgetSource": "本机显示器实测 rAF 中位间隔",
+          "toggleRepeats": 7,
+          "visibleFilterRepeats": 200,
+          "visibleFilterNote": "performance.now() 在 Chromium 里钳到 0.1ms，单次跑不出有意义的数，所以重复取平均",
+          "fullRenderSkippedAbove": 5001
+        },
+        "acceptance": {
+          "S3 首渲 5000 节点 < 100ms": {
+            "measuredMs": null,
+            "commitMs": null,
+            "pass": false
+          },
+          "S3 滚动 5000 节点 60fps": {
+            "fps": null,
+            "droppedPct": null,
+            "p95Ms": null,
+            "frameBudgetMs": 16.666666666666668,
+            "criterion": "掉帧率 < 5%（相对本机显示器实测节奏）",
+            "pass": false
+          },
+          "PRD 集合树 1000 请求 < 100ms": {
+            "measuredMs": null,
+            "requestCount": null,
+            "pass": false
+          }
+        },
+        "rustProcessMemory": {
+          "note": "Rust 主进程私有提交量。集合树的 DOM 在 WebView2 渲染进程里，不在这里 —— 进程树内存由 PS1 量测台负责。",
+          "beforeMb": 5.15234375,
+          "atHoldMb": 5.15234375,
+          "afterHoldMb": 5.0546875
+        },
+        "holdCondition": "1 工作区 + 3 标签 + 5000 节点集合树（已挂载、空闲）",
+        "holdMs": 30000,
+        "notMeasured": [
+          "真实滚轮/触控板滚动：本面板用主线程写 scrollTop 驱动，不经过合成器线程，也不含输入事件延迟。真实滚轮在 Chromium 上可能走合成器，主线程驱动是更悲观的一侧。",
+          "真实集合数据：节点由 synthTree 合成，名称长度均匀。真实集合里超长接口名会触发文本溢出计算，行内布局成本更高。",
+          "增量加载：本次一次性把整棵扁平数组交给组件，未测「Rust 侧分页返回 + 滚动到底再取下一页」的路径（那是 v0.2 的实现）。",
+          "macOS：WKWebView 的合成与滚动实现与 WebView2 不同，本报告数字不可套用。"
+        ],
+        "cells": []
+      }
+    },
+    {
+      "config": "gpu-on",
+      "mode": "mem",
+      "round": 5,
+      "label": "GPU 开（默认配置）",
+      "browserArgs": "",
+      "launchedAt": "2026-07-31T11:30:20.7376722+08:00",
+      "holdObservedAt": "2026-07-31T11:30:21.7788035+08:00",
+      "holdCondition": "1 工作区 + 3 标签 + 5000 节点集合树（干净启动，未跑帧率矩阵）",
+      "cpuBeforeLaunchPercent": 15.0,
+      "cpuSettledBeforeLaunch": true,
+      "cpuDuringHoldMedianPercent": 23.5,
+      "gpu": {
+        "expectGpuProcess": true,
+        "gpuProcessPresent": true,
+        "gpuProcessPrivateWorkingSetBytes": 89223168,
+        "flagsObserved": []
+      },
+      "memory": {
+        "metric": "privateWorkingSet（Working Set - Private，等于任务管理器「内存」列）",
+        "gateStatistic": "max（内存逐样本稳定，取最差观测值）",
+        "sampleCount": 6,
+        "sampleBudgetExhausted": false,
+        "processCount": 7,
+        "treePrivateWorkingSetMedianBytes": 175433728,
+        "treePrivateWorkingSetMaxBytes": 176795648,
+        "treeCommitMedianBytes": 247666688,
+        "treeWorkingSetSumMedianBytes": 484642816,
+        "rootPrivateWorkingSetMedianBytes": 3928064,
+        "webviewPrivateWorkingSetMedianBytes": 171505664,
+        "treePeakWorkingSetBytes": 491118592,
+        "treePeakWorkingSetCaveat": "WorkingSet 峰值含共享页（S1 实测放大 2.99×），Windows 无「私有工作集峰值」计数器。只作尖峰旁证，不进门禁。",
+        "roleBreakdown": [
+          {
+            "role": "gpu-process",
+            "instances": 1,
+            "privateWorkingSetBytes": 89223168
+          },
+          {
+            "role": "browser",
+            "instances": 1,
+            "privateWorkingSetBytes": 39407616
+          },
+          {
+            "role": "renderer",
+            "instances": 1,
+            "privateWorkingSetBytes": 29757440
+          },
+          {
+            "role": "utility",
+            "instances": 2,
+            "privateWorkingSetBytes": 11792384
+          },
+          {
+            "role": "host(rust)",
+            "instances": 1,
+            "privateWorkingSetBytes": 3928064
+          },
+          {
+            "role": "crashpad-handler",
+            "instances": 1,
+            "privateWorkingSetBytes": 2146304
+          }
+        ],
+        "samples": [
+          {
+            "sampledAt": "2026-07-31T11:30:24.7657437+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 176254976,
+            "treeCommitBytes": 248877056,
+            "treeWorkingSetSumBytes": 485670912,
+            "rootPrivateWorkingSetBytes": 3928064,
+            "rootCommitBytes": 5431296,
+            "rootWorkingSetBytes": 27181056
+          },
+          {
+            "sampledAt": "2026-07-31T11:30:26.3137625+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 176574464,
+            "treeCommitBytes": 249196544,
+            "treeWorkingSetSumBytes": 486129664,
+            "rootPrivateWorkingSetBytes": 3928064,
+            "rootCommitBytes": 5431296,
+            "rootWorkingSetBytes": 27181056
+          },
+          {
+            "sampledAt": "2026-07-31T11:30:27.7932820+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 176795648,
+            "treeCommitBytes": 249257984,
+            "treeWorkingSetSumBytes": 486350848,
+            "rootPrivateWorkingSetBytes": 3928064,
+            "rootCommitBytes": 5431296,
+            "rootWorkingSetBytes": 27181056
+          },
+          {
+            "sampledAt": "2026-07-31T11:30:29.2912797+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 174612480,
+            "treeCommitBytes": 246456320,
+            "treeWorkingSetSumBytes": 483614720,
+            "rootPrivateWorkingSetBytes": 3928064,
+            "rootCommitBytes": 5431296,
+            "rootWorkingSetBytes": 27181056
+          },
+          {
+            "sampledAt": "2026-07-31T11:30:30.8137554+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 171638784,
+            "treeCommitBytes": 243490816,
+            "treeWorkingSetSumBytes": 481398784,
+            "rootPrivateWorkingSetBytes": 3928064,
+            "rootCommitBytes": 5431296,
+            "rootWorkingSetBytes": 27181056
+          },
+          {
+            "sampledAt": "2026-07-31T11:30:32.2924230+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 171827200,
+            "treeCommitBytes": 243478528,
+            "treeWorkingSetSumBytes": 481431552,
+            "rootPrivateWorkingSetBytes": 3928064,
+            "rootCommitBytes": 5431296,
+            "rootWorkingSetBytes": 27181056
+          }
+        ],
+        "processBreakdown": [
+          {
+            "processId": 94484,
+            "name": "msedgewebview2",
+            "role": "gpu-process",
+            "privateWorkingSetBytes": 89223168,
+            "workingSetBytes": 145895424,
+            "commitBytes": 121163776
+          },
+          {
+            "processId": 17816,
+            "name": "msedgewebview2",
+            "role": "browser",
+            "privateWorkingSetBytes": 39407616,
+            "workingSetBytes": 147853312,
+            "commitBytes": 51503104
+          },
+          {
+            "processId": 34640,
+            "name": "msedgewebview2",
+            "role": "renderer",
+            "privateWorkingSetBytes": 29757440,
+            "workingSetBytes": 87162880,
+            "commitBytes": 42569728
+          },
+          {
+            "processId": 78224,
+            "name": "msedgewebview2",
+            "role": "utility",
+            "privateWorkingSetBytes": 8269824,
+            "workingSetBytes": 43446272,
+            "commitBytes": 15167488
+          },
+          {
+            "processId": 31840,
+            "name": "apogee",
+            "role": "host(rust)",
+            "privateWorkingSetBytes": 3928064,
+            "workingSetBytes": 27181056,
+            "commitBytes": 5431296
+          },
+          {
+            "processId": 60272,
+            "name": "msedgewebview2",
+            "role": "utility",
+            "privateWorkingSetBytes": 3522560,
+            "workingSetBytes": 21438464,
+            "commitBytes": 9846784
+          },
+          {
+            "processId": 49384,
+            "name": "msedgewebview2",
+            "role": "crashpad-handler",
+            "privateWorkingSetBytes": 2146304,
+            "workingSetBytes": 12693504,
+            "commitBytes": 3194880
+          }
+        ]
+      },
+      "frontend": {
+        "spike": "S3",
+        "part": "memory-only",
+        "mode": "memoryOnly",
+        "at": "2026-07-31T03:30:51.718Z",
+        "inTauri": true,
+        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36 Edg/150.0.0.0",
+        "subject": {
+          "component": "src/components/sidebar/Sidebar.vue",
+          "sharedModule": "src/components/sidebar/tree.ts",
+          "rowHeightPx": 22,
+          "overscanRows": 10,
+          "control": "src/spike/S3FullTree.vue（全量 v-for，不虚拟化）"
+        },
+        "display": null,
+        "method": {
+          "scrollFrames": 300,
+          "scrollStepRows": 8,
+          "scrollStepPx": 176,
+          "scrollDriver": "主线程：每帧写 scroller.scrollTop（比合成器驱动更悲观）",
+          "frameBudgetMs": 16.666666666666668,
+          "frameBudgetSource": "本机显示器实测 rAF 中位间隔",
+          "toggleRepeats": 7,
+          "visibleFilterRepeats": 200,
+          "visibleFilterNote": "performance.now() 在 Chromium 里钳到 0.1ms，单次跑不出有意义的数，所以重复取平均",
+          "fullRenderSkippedAbove": 5001
+        },
+        "acceptance": {
+          "S3 首渲 5000 节点 < 100ms": {
+            "measuredMs": null,
+            "commitMs": null,
+            "pass": false
+          },
+          "S3 滚动 5000 节点 60fps": {
+            "fps": null,
+            "droppedPct": null,
+            "p95Ms": null,
+            "frameBudgetMs": 16.666666666666668,
+            "criterion": "掉帧率 < 5%（相对本机显示器实测节奏）",
+            "pass": false
+          },
+          "PRD 集合树 1000 请求 < 100ms": {
+            "measuredMs": null,
+            "requestCount": null,
+            "pass": false
+          }
+        },
+        "rustProcessMemory": {
+          "note": "Rust 主进程私有提交量。集合树的 DOM 在 WebView2 渲染进程里，不在这里 —— 进程树内存由 PS1 量测台负责。",
+          "beforeMb": 5.21875,
+          "atHoldMb": 5.21875,
+          "afterHoldMb": 5.125
+        },
+        "holdCondition": "1 工作区 + 3 标签 + 5000 节点集合树（已挂载、空闲）",
+        "holdMs": 30000,
+        "notMeasured": [
+          "真实滚轮/触控板滚动：本面板用主线程写 scrollTop 驱动，不经过合成器线程，也不含输入事件延迟。真实滚轮在 Chromium 上可能走合成器，主线程驱动是更悲观的一侧。",
+          "真实集合数据：节点由 synthTree 合成，名称长度均匀。真实集合里超长接口名会触发文本溢出计算，行内布局成本更高。",
+          "增量加载：本次一次性把整棵扁平数组交给组件，未测「Rust 侧分页返回 + 滚动到底再取下一页」的路径（那是 v0.2 的实现）。",
+          "macOS：WKWebView 的合成与滚动实现与 WebView2 不同，本报告数字不可套用。"
+        ],
+        "cells": []
+      }
+    },
+    {
+      "config": "gpu-off",
+      "mode": "fps",
+      "round": 1,
+      "label": "GPU 关（--disable-gpu --disable-gpu-compositing）",
+      "browserArgs": "--disable-gpu --disable-gpu-compositing",
+      "launchedAt": "2026-07-31T11:30:55.2415389+08:00",
+      "holdObservedAt": "2026-07-31T11:31:19.2620695+08:00",
+      "holdCondition": "1 工作区 + 3 标签 + 5000 节点集合树（跑完帧率矩阵之后，含会话残留）",
+      "cpuBeforeLaunchPercent": 16.0,
+      "cpuSettledBeforeLaunch": true,
+      "cpuDuringHoldMedianPercent": 23.0,
+      "gpu": {
+        "expectGpuProcess": false,
+        "gpuProcessPresent": true,
+        "gpuProcessPrivateWorkingSetBytes": 11280384,
+        "flagsObserved": [
+          {
+            "flag": "--disable-gpu",
+            "presentInCommandLine": true
+          },
+          {
+            "flag": "--disable-gpu-compositing",
+            "presentInCommandLine": true
+          }
+        ]
+      },
+      "memory": {
+        "metric": "privateWorkingSet（Working Set - Private，等于任务管理器「内存」列）",
+        "gateStatistic": "max（内存逐样本稳定，取最差观测值）",
+        "sampleCount": 6,
+        "sampleBudgetExhausted": false,
+        "processCount": 7,
+        "treePrivateWorkingSetMedianBytes": 160796672,
+        "treePrivateWorkingSetMaxBytes": 211554304,
+        "treeCommitMedianBytes": 211873792,
+        "treeWorkingSetSumMedianBytes": 485343232,
+        "rootPrivateWorkingSetMedianBytes": 3977216,
+        "webviewPrivateWorkingSetMedianBytes": 156819456,
+        "treePeakWorkingSetBytes": 571895808,
+        "treePeakWorkingSetCaveat": "WorkingSet 峰值含共享页（S1 实测放大 2.99×），Windows 无「私有工作集峰值」计数器。只作尖峰旁证，不进门禁。",
+        "roleBreakdown": [
+          {
+            "role": "renderer",
+            "instances": 1,
+            "privateWorkingSetBytes": 144429056
+          },
+          {
+            "role": "browser",
+            "instances": 1,
+            "privateWorkingSetBytes": 38256640
+          },
+          {
+            "role": "gpu-process",
+            "instances": 1,
+            "privateWorkingSetBytes": 11280384
+          },
+          {
+            "role": "utility",
+            "instances": 2,
+            "privateWorkingSetBytes": 11186176
+          },
+          {
+            "role": "host(rust)",
+            "instances": 1,
+            "privateWorkingSetBytes": 3993600
+          },
+          {
+            "role": "crashpad-handler",
+            "instances": 1,
+            "privateWorkingSetBytes": 2150400
+          }
+        ],
+        "samples": [
+          {
+            "sampledAt": "2026-07-31T11:31:22.2868402+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 211296256,
+            "treeCommitBytes": 262832128,
+            "treeWorkingSetSumBytes": 537686016,
+            "rootPrivateWorkingSetBytes": 3993600,
+            "rootCommitBytes": 5664768,
+            "rootWorkingSetBytes": 27287552
+          },
+          {
+            "sampledAt": "2026-07-31T11:31:23.8194138+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 211554304,
+            "treeCommitBytes": 262750208,
+            "treeWorkingSetSumBytes": 537739264,
+            "rootPrivateWorkingSetBytes": 3993600,
+            "rootCommitBytes": 5664768,
+            "rootWorkingSetBytes": 27287552
+          },
+          {
+            "sampledAt": "2026-07-31T11:31:25.3768548+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 211501056,
+            "treeCommitBytes": 263114752,
+            "treeWorkingSetSumBytes": 531656704,
+            "rootPrivateWorkingSetBytes": 3993600,
+            "rootCommitBytes": 5664768,
+            "rootWorkingSetBytes": 27287552
+          },
+          {
+            "sampledAt": "2026-07-31T11:31:26.8994641+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 110223360,
+            "treeCommitBytes": 160739328,
+            "treeWorkingSetSumBytes": 438947840,
+            "rootPrivateWorkingSetBytes": 3960832,
+            "rootCommitBytes": 5607424,
+            "rootWorkingSetBytes": 27254784
+          },
+          {
+            "sampledAt": "2026-07-31T11:31:28.4104598+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 110297088,
+            "treeCommitBytes": 160997376,
+            "treeWorkingSetSumBytes": 439029760,
+            "rootPrivateWorkingSetBytes": 3960832,
+            "rootCommitBytes": 5607424,
+            "rootWorkingSetBytes": 27254784
+          },
+          {
+            "sampledAt": "2026-07-31T11:31:29.9764864+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 108802048,
+            "treeCommitBytes": 159969280,
+            "treeWorkingSetSumBytes": 437534720,
+            "rootPrivateWorkingSetBytes": 3960832,
+            "rootCommitBytes": 5607424,
+            "rootWorkingSetBytes": 27254784
+          }
+        ],
+        "processBreakdown": [
+          {
+            "processId": 95984,
+            "name": "msedgewebview2",
+            "role": "renderer",
+            "privateWorkingSetBytes": 144429056,
+            "workingSetBytes": 218628096,
+            "commitBytes": 158507008
+          },
+          {
+            "processId": 94292,
+            "name": "msedgewebview2",
+            "role": "browser",
+            "privateWorkingSetBytes": 38256640,
+            "workingSetBytes": 149561344,
+            "commitBytes": 50978816
+          },
+          {
+            "processId": 65524,
+            "name": "msedgewebview2",
+            "role": "gpu-process",
+            "privateWorkingSetBytes": 11280384,
+            "workingSetBytes": 65175552,
+            "commitBytes": 20123648
+          },
+          {
+            "processId": 18088,
+            "name": "msedgewebview2",
+            "role": "utility",
+            "privateWorkingSetBytes": 7770112,
+            "workingSetBytes": 42971136,
+            "commitBytes": 14647296
+          },
+          {
+            "processId": 28988,
+            "name": "apogee",
+            "role": "host(rust)",
+            "privateWorkingSetBytes": 3993600,
+            "workingSetBytes": 27287552,
+            "commitBytes": 5664768
+          },
+          {
+            "processId": 19224,
+            "name": "msedgewebview2",
+            "role": "utility",
+            "privateWorkingSetBytes": 3416064,
+            "workingSetBytes": 21360640,
+            "commitBytes": 9707520
+          },
+          {
+            "processId": 90704,
+            "name": "msedgewebview2",
+            "role": "crashpad-handler",
+            "privateWorkingSetBytes": 2150400,
+            "workingSetBytes": 12701696,
+            "commitBytes": 3203072
+          }
+        ]
+      },
+      "frontend": {
+        "spike": "S3",
+        "part": "frontend",
+        "mode": "full",
+        "at": "2026-07-31T03:31:49.105Z",
+        "inTauri": true,
+        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36 Edg/150.0.0.0",
+        "subject": {
+          "component": "src/components/sidebar/Sidebar.vue",
+          "sharedModule": "src/components/sidebar/tree.ts",
+          "rowHeightPx": 22,
+          "overscanRows": 10,
+          "control": "src/spike/S3FullTree.vue（全量 v-for，不虚拟化）"
+        },
+        "display": {
+          "frameBudgetMs": 13.300000000000068,
+          "hz": 75.18796992481164,
+          "nominalHz": 75,
+          "sampleCount": 119,
+          "minMs": 13.199999999999818,
+          "maxMs": 13.5
+        },
+        "method": {
+          "scrollFrames": 300,
+          "scrollStepRows": 8,
+          "scrollStepPx": 176,
+          "scrollDriver": "主线程：每帧写 scroller.scrollTop（比合成器驱动更悲观）",
+          "frameBudgetMs": 13.300000000000068,
+          "frameBudgetSource": "本机显示器实测 rAF 中位间隔",
+          "toggleRepeats": 7,
+          "visibleFilterRepeats": 200,
+          "visibleFilterNote": "performance.now() 在 Chromium 里钳到 0.1ms，单次跑不出有意义的数，所以重复取平均",
+          "fullRenderSkippedAbove": 5001
+        },
+        "acceptance": {
+          "S3 首渲 5000 节点 < 100ms": {
+            "measuredMs": 26,
+            "commitMs": 12.900000095367432,
+            "pass": true
+          },
+          "S3 滚动 5000 节点 60fps": {
+            "fps": 74.99812504687382,
+            "droppedPct": 0,
+            "p95Ms": 13.400000000001455,
+            "frameBudgetMs": 13.300000000000068,
+            "criterion": "掉帧率 < 5%（相对本机显示器实测节奏）",
+            "pass": true
+          },
+          "PRD 集合树 1000 请求 < 100ms": {
+            "measuredMs": 25.90000009536743,
+            "requestCount": 1000,
+            "pass": true
+          }
+        },
+        "rustProcessMemory": {
+          "note": "Rust 主进程私有提交量。集合树的 DOM 在 WebView2 渲染进程里，不在这里 —— 进程树内存由 PS1 量测台负责。",
+          "beforeMb": 5.44140625,
+          "atHoldMb": 5.3984375,
+          "afterHoldMb": 5.34765625
+        },
+        "holdCondition": "1 工作区 + 3 标签 + 5000 节点集合树（已挂载、空闲）",
+        "holdMs": 30000,
+        "notMeasured": [
+          "真实滚轮/触控板滚动：本面板用主线程写 scrollTop 驱动，不经过合成器线程，也不含输入事件延迟。真实滚轮在 Chromium 上可能走合成器，主线程驱动是更悲观的一侧。",
+          "真实集合数据：节点由 synthTree 合成，名称长度均匀。真实集合里超长接口名会触发文本溢出计算，行内布局成本更高。",
+          "增量加载：本次一次性把整棵扁平数组交给组件，未测「Rust 侧分页返回 + 滚动到底再取下一页」的路径（那是 v0.2 的实现）。",
+          "macOS：WKWebView 的合成与滚动实现与 WebView2 不同，本报告数字不可套用。"
+        ],
+        "cells": [
+          {
+            "scaleKey": "prd-1000",
+            "scale": "1000 请求",
+            "impl": "virtual",
+            "gate": "PRD §5.1 集合树 < 100ms",
+            "totalNodes": 1040,
+            "visibleNodes": 1040,
+            "renderedRows": 35,
+            "dataPrepMs": 0.09999990463256836,
+            "visibleFilterMs": 0.015,
+            "patchMs": 3.5,
+            "layoutMs": 0.8000001907348633,
+            "commitMs": 12.900000095367432,
+            "firstPaintMs": 25.90000009536743,
+            "scrollHeightPx": 22880,
+            "scroll": {
+              "frames": 301,
+              "truncated": false,
+              "durationMs": 4000.1,
+              "fps": 74.99812504687382,
+              "p50Ms": 13.300000000000182,
+              "p95Ms": 13.400000000000546,
+              "p99Ms": 13.400000000000546,
+              "maxMs": 13.5,
+              "droppedFrames": 0,
+              "droppedPct": 0,
+              "longFrames": 0
+            },
+            "stepCost": {
+              "medianMs": 0.7999999523162842,
+              "p95Ms": 1.5,
+              "maxMs": 1.5,
+              "iterations": 60
+            },
+            "loaf": {
+              "supported": true,
+              "count": 0,
+              "maxDurationMs": null,
+              "maxBlockingMs": null,
+              "maxStyleAndLayoutMs": null
+            },
+            "togglePatchMedianMs": 1.5,
+            "togglePatchMaxMs": 1.7999999523162842,
+            "toggleMedianMs": 26.5,
+            "toggleMaxMs": 27.90000009536743,
+            "error": null
+          },
+          {
+            "scaleKey": "s3-5000",
+            "scale": "5000 节点",
+            "impl": "virtual",
+            "gate": "03 §10.1 S3 首渲 < 100ms + 60fps",
+            "totalNodes": 5000,
+            "visibleNodes": 5000,
+            "renderedRows": 35,
+            "dataPrepMs": 0.20000004768371582,
+            "visibleFilterMs": 0.02799999952316284,
+            "patchMs": 1.7000000476837158,
+            "layoutMs": 0.40000009536743164,
+            "commitMs": 12.900000095367432,
+            "firstPaintMs": 26,
+            "scrollHeightPx": 110000,
+            "scroll": {
+              "frames": 301,
+              "truncated": false,
+              "durationMs": 4000.1000000000004,
+              "fps": 74.99812504687382,
+              "p50Ms": 13.300000000000182,
+              "p95Ms": 13.400000000001455,
+              "p99Ms": 13.400000000001455,
+              "maxMs": 13.5,
+              "droppedFrames": 0,
+              "droppedPct": 0,
+              "longFrames": 0
+            },
+            "stepCost": {
+              "medianMs": 0.7999999523162842,
+              "p95Ms": 1.2999999523162842,
+              "maxMs": 2.200000047683716,
+              "iterations": 60
+            },
+            "loaf": {
+              "supported": true,
+              "count": 0,
+              "maxDurationMs": null,
+              "maxBlockingMs": null,
+              "maxStyleAndLayoutMs": null
+            },
+            "togglePatchMedianMs": 2.4000000953674316,
+            "togglePatchMaxMs": 3.799999952316284,
+            "toggleMedianMs": 26.100000143051147,
+            "toggleMaxMs": 27.899999856948853,
+            "error": null
+          },
+          {
+            "scaleKey": "stress-20000",
+            "scale": "20000 节点",
+            "impl": "virtual",
+            "gate": "余量观测（无门槛）",
+            "totalNodes": 20000,
+            "visibleNodes": 20000,
+            "renderedRows": 35,
+            "dataPrepMs": 0.3000001907348633,
+            "visibleFilterMs": 0.09149999976158142,
+            "patchMs": 2.5,
+            "layoutMs": 0.5,
+            "commitMs": 13,
+            "firstPaintMs": 25.09999990463257,
+            "scrollHeightPx": 440000,
+            "scroll": {
+              "frames": 301,
+              "truncated": false,
+              "durationMs": 4013.3999999999996,
+              "fps": 74.74958887726119,
+              "p50Ms": 13.300000000001091,
+              "p95Ms": 13.399999999999636,
+              "p99Ms": 13.400000000001455,
+              "maxMs": 26.5,
+              "droppedFrames": 1,
+              "droppedPct": 0.33138984402252625,
+              "longFrames": 1
+            },
+            "stepCost": {
+              "medianMs": 0.75,
+              "p95Ms": 1.1999998092651367,
+              "maxMs": 1.5999999046325684,
+              "iterations": 60
+            },
+            "loaf": {
+              "supported": true,
+              "count": 0,
+              "maxDurationMs": null,
+              "maxBlockingMs": null,
+              "maxStyleAndLayoutMs": null
+            },
+            "togglePatchMedianMs": 2.5,
+            "togglePatchMaxMs": 2.700000047683716,
+            "toggleMedianMs": 25.799999952316284,
+            "toggleMaxMs": 28.09999990463257,
+            "error": null
+          },
+          {
+            "scaleKey": "prd-1000",
+            "scale": "1000 请求",
+            "impl": "full",
+            "gate": "对照组（无门槛）",
+            "totalNodes": 1040,
+            "visibleNodes": 1040,
+            "renderedRows": 1040,
+            "dataPrepMs": 0.09999990463256836,
+            "visibleFilterMs": 0.008500000238418579,
+            "patchMs": 4.799999952316284,
+            "layoutMs": 14.799999952316284,
+            "commitMs": 25.59999990463257,
+            "firstPaintMs": 39.39999985694885,
+            "scrollHeightPx": 22880,
+            "scroll": {
+              "frames": 301,
+              "truncated": false,
+              "durationMs": 4000,
+              "fps": 75,
+              "p50Ms": 13.300000000000182,
+              "p95Ms": 13.400000000001455,
+              "p99Ms": 13.400000000001455,
+              "maxMs": 13.5,
+              "droppedFrames": 0,
+              "droppedPct": 0,
+              "longFrames": 0
+            },
+            "stepCost": {
+              "medianMs": 0,
+              "p95Ms": 0.09999990463256836,
+              "maxMs": 0.20000004768371582,
+              "iterations": 60
+            },
+            "loaf": {
+              "supported": true,
+              "count": 0,
+              "maxDurationMs": null,
+              "maxBlockingMs": null,
+              "maxStyleAndLayoutMs": null
+            },
+            "togglePatchMedianMs": null,
+            "togglePatchMaxMs": null,
+            "toggleMedianMs": null,
+            "toggleMaxMs": null,
+            "error": null
+          },
+          {
+            "scaleKey": "s3-5000",
+            "scale": "5000 节点",
+            "impl": "full",
+            "gate": "对照组（无门槛）",
+            "totalNodes": 5000,
+            "visibleNodes": 5000,
+            "renderedRows": 5000,
+            "dataPrepMs": 0.5,
+            "visibleFilterMs": 0.05,
+            "patchMs": 42.700000047683716,
+            "layoutMs": 86.09999990463257,
+            "commitMs": 147.29999995231628,
+            "firstPaintMs": 160.59999990463257,
+            "scrollHeightPx": 110000,
+            "scroll": {
+              "frames": 301,
+              "truncated": false,
+              "durationMs": 4000,
+              "fps": 75,
+              "p50Ms": 13.299999999999272,
+              "p95Ms": 13.400000000001455,
+              "p99Ms": 13.5,
+              "maxMs": 13.5,
+              "droppedFrames": 0,
+              "droppedPct": 0,
+              "longFrames": 0
+            },
+            "stepCost": {
+              "medianMs": 0,
+              "p95Ms": 0,
+              "maxMs": 0.10000014305114746,
+              "iterations": 60
+            },
+            "loaf": {
+              "supported": true,
+              "count": 1,
+              "maxDurationMs": 144.30000019073486,
+              "maxBlockingMs": 93.9,
+              "maxStyleAndLayoutMs": 15.100000143051147
+            },
+            "togglePatchMedianMs": null,
+            "togglePatchMaxMs": null,
+            "toggleMedianMs": null,
+            "toggleMaxMs": null,
+            "error": null
+          }
+        ]
+      }
+    },
+    {
+      "config": "gpu-off",
+      "mode": "mem",
+      "round": 1,
+      "label": "GPU 关（--disable-gpu --disable-gpu-compositing）",
+      "browserArgs": "--disable-gpu --disable-gpu-compositing",
+      "launchedAt": "2026-07-31T11:31:50.8434313+08:00",
+      "holdObservedAt": "2026-07-31T11:31:51.8850652+08:00",
+      "holdCondition": "1 工作区 + 3 标签 + 5000 节点集合树（干净启动，未跑帧率矩阵）",
+      "cpuBeforeLaunchPercent": 20.0,
+      "cpuSettledBeforeLaunch": true,
+      "cpuDuringHoldMedianPercent": 17.0,
+      "gpu": {
+        "expectGpuProcess": false,
+        "gpuProcessPresent": true,
+        "gpuProcessPrivateWorkingSetBytes": 11214848,
+        "flagsObserved": [
+          {
+            "flag": "--disable-gpu",
+            "presentInCommandLine": true
+          },
+          {
+            "flag": "--disable-gpu-compositing",
+            "presentInCommandLine": true
+          }
+        ]
+      },
+      "memory": {
+        "metric": "privateWorkingSet（Working Set - Private，等于任务管理器「内存」列）",
+        "gateStatistic": "max（内存逐样本稳定，取最差观测值）",
+        "sampleCount": 6,
+        "sampleBudgetExhausted": false,
+        "processCount": 7,
+        "treePrivateWorkingSetMedianBytes": 100866048,
+        "treePrivateWorkingSetMaxBytes": 102428672,
+        "treeCommitMedianBytes": 151339008,
+        "treeWorkingSetSumMedianBytes": 410830848,
+        "rootPrivateWorkingSetMedianBytes": 3944448,
+        "webviewPrivateWorkingSetMedianBytes": 96921600,
+        "treePeakWorkingSetBytes": 441978880,
+        "treePeakWorkingSetCaveat": "WorkingSet 峰值含共享页（S1 实测放大 2.99×），Windows 无「私有工作集峰值」计数器。只作尖峰旁证，不进门禁。",
+        "roleBreakdown": [
+          {
+            "role": "browser",
+            "instances": 1,
+            "privateWorkingSetBytes": 39677952
+          },
+          {
+            "role": "renderer",
+            "instances": 1,
+            "privateWorkingSetBytes": 32886784
+          },
+          {
+            "role": "utility",
+            "instances": 2,
+            "privateWorkingSetBytes": 11800576
+          },
+          {
+            "role": "gpu-process",
+            "instances": 1,
+            "privateWorkingSetBytes": 11214848
+          },
+          {
+            "role": "host(rust)",
+            "instances": 1,
+            "privateWorkingSetBytes": 3944448
+          },
+          {
+            "role": "crashpad-handler",
+            "instances": 1,
+            "privateWorkingSetBytes": 2093056
+          }
+        ],
+        "samples": [
+          {
+            "sampledAt": "2026-07-31T11:31:54.8573970+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 101617664,
+            "treeCommitBytes": 152633344,
+            "treeWorkingSetSumBytes": 431505408,
+            "rootPrivateWorkingSetBytes": 3944448,
+            "rootCommitBytes": 5648384,
+            "rootWorkingSetBytes": 27234304
+          },
+          {
+            "sampledAt": "2026-07-31T11:31:56.3171023+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 101969920,
+            "treeCommitBytes": 152674304,
+            "treeWorkingSetSumBytes": 431697920,
+            "rootPrivateWorkingSetBytes": 3944448,
+            "rootCommitBytes": 5648384,
+            "rootWorkingSetBytes": 27234304
+          },
+          {
+            "sampledAt": "2026-07-31T11:31:57.8048056+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 102428672,
+            "treeCommitBytes": 152915968,
+            "treeWorkingSetSumBytes": 412184576,
+            "rootPrivateWorkingSetBytes": 3944448,
+            "rootCommitBytes": 5648384,
+            "rootWorkingSetBytes": 27234304
+          },
+          {
+            "sampledAt": "2026-07-31T11:31:59.3268745+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 100114432,
+            "treeCommitBytes": 150044672,
+            "treeWorkingSetSumBytes": 409477120,
+            "rootPrivateWorkingSetBytes": 3944448,
+            "rootCommitBytes": 5648384,
+            "rootWorkingSetBytes": 27234304
+          },
+          {
+            "sampledAt": "2026-07-31T11:32:00.8280262+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 97284096,
+            "treeCommitBytes": 147214336,
+            "treeWorkingSetSumBytes": 407162880,
+            "rootPrivateWorkingSetBytes": 3944448,
+            "rootCommitBytes": 5648384,
+            "rootWorkingSetBytes": 27234304
+          },
+          {
+            "sampledAt": "2026-07-31T11:32:02.3697042+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 97513472,
+            "treeCommitBytes": 147415040,
+            "treeWorkingSetSumBytes": 407437312,
+            "rootPrivateWorkingSetBytes": 3944448,
+            "rootCommitBytes": 5648384,
+            "rootWorkingSetBytes": 27234304
+          }
+        ],
+        "processBreakdown": [
+          {
+            "processId": 88032,
+            "name": "msedgewebview2",
+            "role": "browser",
+            "privateWorkingSetBytes": 39677952,
+            "workingSetBytes": 148160512,
+            "commitBytes": 52846592
+          },
+          {
+            "processId": 73008,
+            "name": "msedgewebview2",
+            "role": "renderer",
+            "privateWorkingSetBytes": 32886784,
+            "workingSetBytes": 107679744,
+            "commitBytes": 45973504
+          },
+          {
+            "processId": 69268,
+            "name": "msedgewebview2",
+            "role": "gpu-process",
+            "privateWorkingSetBytes": 11214848,
+            "workingSetBytes": 70909952,
+            "commitBytes": 20000768
+          },
+          {
+            "processId": 69900,
+            "name": "msedgewebview2",
+            "role": "utility",
+            "privateWorkingSetBytes": 8269824,
+            "workingSetBytes": 43425792,
+            "commitBytes": 15163392
+          },
+          {
+            "processId": 52664,
+            "name": "apogee",
+            "role": "host(rust)",
+            "privateWorkingSetBytes": 3944448,
+            "workingSetBytes": 27234304,
+            "commitBytes": 5648384
+          },
+          {
+            "processId": 49004,
+            "name": "msedgewebview2",
+            "role": "utility",
+            "privateWorkingSetBytes": 3530752,
+            "workingSetBytes": 21446656,
+            "commitBytes": 9854976
+          },
+          {
+            "processId": 91752,
+            "name": "msedgewebview2",
+            "role": "crashpad-handler",
+            "privateWorkingSetBytes": 2093056,
+            "workingSetBytes": 12648448,
+            "commitBytes": 3145728
+          }
+        ]
+      },
+      "frontend": {
+        "spike": "S3",
+        "part": "memory-only",
+        "mode": "memoryOnly",
+        "at": "2026-07-31T03:32:21.847Z",
+        "inTauri": true,
+        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36 Edg/150.0.0.0",
+        "subject": {
+          "component": "src/components/sidebar/Sidebar.vue",
+          "sharedModule": "src/components/sidebar/tree.ts",
+          "rowHeightPx": 22,
+          "overscanRows": 10,
+          "control": "src/spike/S3FullTree.vue（全量 v-for，不虚拟化）"
+        },
+        "display": null,
+        "method": {
+          "scrollFrames": 300,
+          "scrollStepRows": 8,
+          "scrollStepPx": 176,
+          "scrollDriver": "主线程：每帧写 scroller.scrollTop（比合成器驱动更悲观）",
+          "frameBudgetMs": 16.666666666666668,
+          "frameBudgetSource": "本机显示器实测 rAF 中位间隔",
+          "toggleRepeats": 7,
+          "visibleFilterRepeats": 200,
+          "visibleFilterNote": "performance.now() 在 Chromium 里钳到 0.1ms，单次跑不出有意义的数，所以重复取平均",
+          "fullRenderSkippedAbove": 5001
+        },
+        "acceptance": {
+          "S3 首渲 5000 节点 < 100ms": {
+            "measuredMs": null,
+            "commitMs": null,
+            "pass": false
+          },
+          "S3 滚动 5000 节点 60fps": {
+            "fps": null,
+            "droppedPct": null,
+            "p95Ms": null,
+            "frameBudgetMs": 16.666666666666668,
+            "criterion": "掉帧率 < 5%（相对本机显示器实测节奏）",
+            "pass": false
+          },
+          "PRD 集合树 1000 请求 < 100ms": {
+            "measuredMs": null,
+            "requestCount": null,
+            "pass": false
+          }
+        },
+        "rustProcessMemory": {
+          "note": "Rust 主进程私有提交量。集合树的 DOM 在 WebView2 渲染进程里，不在这里 —— 进程树内存由 PS1 量测台负责。",
+          "beforeMb": 5.42578125,
+          "atHoldMb": 5.42578125,
+          "afterHoldMb": 5.33203125
+        },
+        "holdCondition": "1 工作区 + 3 标签 + 5000 节点集合树（已挂载、空闲）",
+        "holdMs": 30000,
+        "notMeasured": [
+          "真实滚轮/触控板滚动：本面板用主线程写 scrollTop 驱动，不经过合成器线程，也不含输入事件延迟。真实滚轮在 Chromium 上可能走合成器，主线程驱动是更悲观的一侧。",
+          "真实集合数据：节点由 synthTree 合成，名称长度均匀。真实集合里超长接口名会触发文本溢出计算，行内布局成本更高。",
+          "增量加载：本次一次性把整棵扁平数组交给组件，未测「Rust 侧分页返回 + 滚动到底再取下一页」的路径（那是 v0.2 的实现）。",
+          "macOS：WKWebView 的合成与滚动实现与 WebView2 不同，本报告数字不可套用。"
+        ],
+        "cells": []
+      }
+    },
+    {
+      "config": "gpu-off",
+      "mode": "mem",
+      "round": 2,
+      "label": "GPU 关（--disable-gpu --disable-gpu-compositing）",
+      "browserArgs": "--disable-gpu --disable-gpu-compositing",
+      "launchedAt": "2026-07-31T11:32:23.6474691+08:00",
+      "holdObservedAt": "2026-07-31T11:32:24.6935696+08:00",
+      "holdCondition": "1 工作区 + 3 标签 + 5000 节点集合树（干净启动，未跑帧率矩阵）",
+      "cpuBeforeLaunchPercent": 22.0,
+      "cpuSettledBeforeLaunch": true,
+      "cpuDuringHoldMedianPercent": 26.0,
+      "gpu": {
+        "expectGpuProcess": false,
+        "gpuProcessPresent": true,
+        "gpuProcessPrivateWorkingSetBytes": 11190272,
+        "flagsObserved": [
+          {
+            "flag": "--disable-gpu",
+            "presentInCommandLine": true
+          },
+          {
+            "flag": "--disable-gpu-compositing",
+            "presentInCommandLine": true
+          }
+        ]
+      },
+      "memory": {
+        "metric": "privateWorkingSet（Working Set - Private，等于任务管理器「内存」列）",
+        "gateStatistic": "max（内存逐样本稳定，取最差观测值）",
+        "sampleCount": 6,
+        "sampleBudgetExhausted": false,
+        "processCount": 7,
+        "treePrivateWorkingSetMedianBytes": 98439168,
+        "treePrivateWorkingSetMaxBytes": 99762176,
+        "treeCommitMedianBytes": 147838976,
+        "treeWorkingSetSumMedianBytes": 409741312,
+        "rootPrivateWorkingSetMedianBytes": 3928064,
+        "webviewPrivateWorkingSetMedianBytes": 94511104,
+        "treePeakWorkingSetBytes": 441057280,
+        "treePeakWorkingSetCaveat": "WorkingSet 峰值含共享页（S1 实测放大 2.99×），Windows 无「私有工作集峰值」计数器。只作尖峰旁证，不进门禁。",
+        "roleBreakdown": [
+          {
+            "role": "browser",
+            "instances": 1,
+            "privateWorkingSetBytes": 40034304
+          },
+          {
+            "role": "renderer",
+            "instances": 1,
+            "privateWorkingSetBytes": 30244864
+          },
+          {
+            "role": "utility",
+            "instances": 2,
+            "privateWorkingSetBytes": 11796480
+          },
+          {
+            "role": "gpu-process",
+            "instances": 1,
+            "privateWorkingSetBytes": 11190272
+          },
+          {
+            "role": "host(rust)",
+            "instances": 1,
+            "privateWorkingSetBytes": 3928064
+          },
+          {
+            "role": "crashpad-handler",
+            "instances": 1,
+            "privateWorkingSetBytes": 2097152
+          }
+        ],
+        "samples": [
+          {
+            "sampledAt": "2026-07-31T11:32:27.6551926+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 99291136,
+            "treeCommitBytes": 148901888,
+            "treeWorkingSetSumBytes": 430379008,
+            "rootPrivateWorkingSetBytes": 3928064,
+            "rootCommitBytes": 5423104,
+            "rootWorkingSetBytes": 27181056
+          },
+          {
+            "sampledAt": "2026-07-31T11:32:29.1582567+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 99573760,
+            "treeCommitBytes": 149229568,
+            "treeWorkingSetSumBytes": 430768128,
+            "rootPrivateWorkingSetBytes": 3928064,
+            "rootCommitBytes": 5423104,
+            "rootWorkingSetBytes": 27181056
+          },
+          {
+            "sampledAt": "2026-07-31T11:32:30.6519418+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 99762176,
+            "treeCommitBytes": 149430272,
+            "treeWorkingSetSumBytes": 410951680,
+            "rootPrivateWorkingSetBytes": 3928064,
+            "rootCommitBytes": 5423104,
+            "rootWorkingSetBytes": 27181056
+          },
+          {
+            "sampledAt": "2026-07-31T11:32:32.1448702+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 97587200,
+            "treeCommitBytes": 146776064,
+            "treeWorkingSetSumBytes": 408530944,
+            "rootPrivateWorkingSetBytes": 3928064,
+            "rootCommitBytes": 5423104,
+            "rootWorkingSetBytes": 27181056
+          },
+          {
+            "sampledAt": "2026-07-31T11:32:33.7552320+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 94826496,
+            "treeCommitBytes": 144068608,
+            "treeWorkingSetSumBytes": 406409216,
+            "rootPrivateWorkingSetBytes": 3928064,
+            "rootCommitBytes": 5423104,
+            "rootWorkingSetBytes": 27181056
+          },
+          {
+            "sampledAt": "2026-07-31T11:32:35.3249056+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 95043584,
+            "treeCommitBytes": 144080896,
+            "treeWorkingSetSumBytes": 406392832,
+            "rootPrivateWorkingSetBytes": 3928064,
+            "rootCommitBytes": 5423104,
+            "rootWorkingSetBytes": 27181056
+          }
+        ],
+        "processBreakdown": [
+          {
+            "processId": 42560,
+            "name": "msedgewebview2",
+            "role": "browser",
+            "privateWorkingSetBytes": 40034304,
+            "workingSetBytes": 149794816,
+            "commitBytes": 52183040
+          },
+          {
+            "processId": 87640,
+            "name": "msedgewebview2",
+            "role": "renderer",
+            "privateWorkingSetBytes": 30244864,
+            "workingSetBytes": 104886272,
+            "commitBytes": 43134976
+          },
+          {
+            "processId": 7976,
+            "name": "msedgewebview2",
+            "role": "gpu-process",
+            "privateWorkingSetBytes": 11190272,
+            "workingSetBytes": 70942720,
+            "commitBytes": 19980288
+          },
+          {
+            "processId": 14464,
+            "name": "msedgewebview2",
+            "role": "utility",
+            "privateWorkingSetBytes": 8306688,
+            "workingSetBytes": 43479040,
+            "commitBytes": 15228928
+          },
+          {
+            "processId": 82636,
+            "name": "apogee",
+            "role": "host(rust)",
+            "privateWorkingSetBytes": 3928064,
+            "workingSetBytes": 27181056,
+            "commitBytes": 5423104
+          },
+          {
+            "processId": 95896,
+            "name": "msedgewebview2",
+            "role": "utility",
+            "privateWorkingSetBytes": 3489792,
+            "workingSetBytes": 21442560,
+            "commitBytes": 9797632
+          },
+          {
+            "processId": 86360,
+            "name": "msedgewebview2",
+            "role": "crashpad-handler",
+            "privateWorkingSetBytes": 2097152,
+            "workingSetBytes": 12652544,
+            "commitBytes": 3153920
+          }
+        ]
+      },
+      "frontend": {
+        "spike": "S3",
+        "part": "memory-only",
+        "mode": "memoryOnly",
+        "at": "2026-07-31T03:32:54.679Z",
+        "inTauri": true,
+        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36 Edg/150.0.0.0",
+        "subject": {
+          "component": "src/components/sidebar/Sidebar.vue",
+          "sharedModule": "src/components/sidebar/tree.ts",
+          "rowHeightPx": 22,
+          "overscanRows": 10,
+          "control": "src/spike/S3FullTree.vue（全量 v-for，不虚拟化）"
+        },
+        "display": null,
+        "method": {
+          "scrollFrames": 300,
+          "scrollStepRows": 8,
+          "scrollStepPx": 176,
+          "scrollDriver": "主线程：每帧写 scroller.scrollTop（比合成器驱动更悲观）",
+          "frameBudgetMs": 16.666666666666668,
+          "frameBudgetSource": "本机显示器实测 rAF 中位间隔",
+          "toggleRepeats": 7,
+          "visibleFilterRepeats": 200,
+          "visibleFilterNote": "performance.now() 在 Chromium 里钳到 0.1ms，单次跑不出有意义的数，所以重复取平均",
+          "fullRenderSkippedAbove": 5001
+        },
+        "acceptance": {
+          "S3 首渲 5000 节点 < 100ms": {
+            "measuredMs": null,
+            "commitMs": null,
+            "pass": false
+          },
+          "S3 滚动 5000 节点 60fps": {
+            "fps": null,
+            "droppedPct": null,
+            "p95Ms": null,
+            "frameBudgetMs": 16.666666666666668,
+            "criterion": "掉帧率 < 5%（相对本机显示器实测节奏）",
+            "pass": false
+          },
+          "PRD 集合树 1000 请求 < 100ms": {
+            "measuredMs": null,
+            "requestCount": null,
+            "pass": false
+          }
+        },
+        "rustProcessMemory": {
+          "note": "Rust 主进程私有提交量。集合树的 DOM 在 WebView2 渲染进程里，不在这里 —— 进程树内存由 PS1 量测台负责。",
+          "beforeMb": 5.2109375,
+          "atHoldMb": 5.2109375,
+          "afterHoldMb": 5.11328125
+        },
+        "holdCondition": "1 工作区 + 3 标签 + 5000 节点集合树（已挂载、空闲）",
+        "holdMs": 30000,
+        "notMeasured": [
+          "真实滚轮/触控板滚动：本面板用主线程写 scrollTop 驱动，不经过合成器线程，也不含输入事件延迟。真实滚轮在 Chromium 上可能走合成器，主线程驱动是更悲观的一侧。",
+          "真实集合数据：节点由 synthTree 合成，名称长度均匀。真实集合里超长接口名会触发文本溢出计算，行内布局成本更高。",
+          "增量加载：本次一次性把整棵扁平数组交给组件，未测「Rust 侧分页返回 + 滚动到底再取下一页」的路径（那是 v0.2 的实现）。",
+          "macOS：WKWebView 的合成与滚动实现与 WebView2 不同，本报告数字不可套用。"
+        ],
+        "cells": []
+      }
+    },
+    {
+      "config": "gpu-off",
+      "mode": "mem",
+      "round": 3,
+      "label": "GPU 关（--disable-gpu --disable-gpu-compositing）",
+      "browserArgs": "--disable-gpu --disable-gpu-compositing",
+      "launchedAt": "2026-07-31T11:32:55.6995471+08:00",
+      "holdObservedAt": "2026-07-31T11:32:56.7321964+08:00",
+      "holdCondition": "1 工作区 + 3 标签 + 5000 节点集合树（干净启动，未跑帧率矩阵）",
+      "cpuBeforeLaunchPercent": 18.0,
+      "cpuSettledBeforeLaunch": true,
+      "cpuDuringHoldMedianPercent": 15.0,
+      "gpu": {
+        "expectGpuProcess": false,
+        "gpuProcessPresent": true,
+        "gpuProcessPrivateWorkingSetBytes": 11202560,
+        "flagsObserved": [
+          {
+            "flag": "--disable-gpu",
+            "presentInCommandLine": true
+          },
+          {
+            "flag": "--disable-gpu-compositing",
+            "presentInCommandLine": true
+          }
+        ]
+      },
+      "memory": {
+        "metric": "privateWorkingSet（Working Set - Private，等于任务管理器「内存」列）",
+        "gateStatistic": "max（内存逐样本稳定，取最差观测值）",
+        "sampleCount": 6,
+        "sampleBudgetExhausted": false,
+        "processCount": 7,
+        "treePrivateWorkingSetMedianBytes": 101109760,
+        "treePrivateWorkingSetMaxBytes": 102772736,
+        "treeCommitMedianBytes": 151894016,
+        "treeWorkingSetSumMedianBytes": 413186048,
+        "rootPrivateWorkingSetMedianBytes": 3944448,
+        "webviewPrivateWorkingSetMedianBytes": 97165312,
+        "treePeakWorkingSetBytes": 448831488,
+        "treePeakWorkingSetCaveat": "WorkingSet 峰值含共享页（S1 实测放大 2.99×），Windows 无「私有工作集峰值」计数器。只作尖峰旁证，不进门禁。",
+        "roleBreakdown": [
+          {
+            "role": "browser",
+            "instances": 1,
+            "privateWorkingSetBytes": 39567360
+          },
+          {
+            "role": "renderer",
+            "instances": 1,
+            "privateWorkingSetBytes": 33435648
+          },
+          {
+            "role": "utility",
+            "instances": 2,
+            "privateWorkingSetBytes": 11816960
+          },
+          {
+            "role": "gpu-process",
+            "instances": 1,
+            "privateWorkingSetBytes": 11202560
+          },
+          {
+            "role": "host(rust)",
+            "instances": 1,
+            "privateWorkingSetBytes": 3944448
+          },
+          {
+            "role": "crashpad-handler",
+            "instances": 1,
+            "privateWorkingSetBytes": 2138112
+          }
+        ],
+        "samples": [
+          {
+            "sampledAt": "2026-07-31T11:32:59.7390036+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 102105088,
+            "treeCommitBytes": 153124864,
+            "treeWorkingSetSumBytes": 438169600,
+            "rootPrivateWorkingSetBytes": 3944448,
+            "rootCommitBytes": 5443584,
+            "rootWorkingSetBytes": 27127808
+          },
+          {
+            "sampledAt": "2026-07-31T11:33:01.2772653+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 102543360,
+            "treeCommitBytes": 153337856,
+            "treeWorkingSetSumBytes": 427700224,
+            "rootPrivateWorkingSetBytes": 3944448,
+            "rootCommitBytes": 5443584,
+            "rootWorkingSetBytes": 27127808
+          },
+          {
+            "sampledAt": "2026-07-31T11:33:02.8622573+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 102772736,
+            "treeCommitBytes": 153501696,
+            "treeWorkingSetSumBytes": 414547968,
+            "rootPrivateWorkingSetBytes": 3944448,
+            "rootCommitBytes": 5443584,
+            "rootWorkingSetBytes": 27127808
+          },
+          {
+            "sampledAt": "2026-07-31T11:33:04.3399742+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 100114432,
+            "treeCommitBytes": 150663168,
+            "treeWorkingSetSumBytes": 411824128,
+            "rootPrivateWorkingSetBytes": 3944448,
+            "rootCommitBytes": 5443584,
+            "rootWorkingSetBytes": 27127808
+          },
+          {
+            "sampledAt": "2026-07-31T11:33:05.8147231+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 97755136,
+            "treeCommitBytes": 147955712,
+            "treeWorkingSetSumBytes": 409612288,
+            "rootPrivateWorkingSetBytes": 3944448,
+            "rootCommitBytes": 5443584,
+            "rootWorkingSetBytes": 27127808
+          },
+          {
+            "sampledAt": "2026-07-31T11:33:07.3106365+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 98004992,
+            "treeCommitBytes": 147980288,
+            "treeWorkingSetSumBytes": 409780224,
+            "rootPrivateWorkingSetBytes": 3944448,
+            "rootCommitBytes": 5443584,
+            "rootWorkingSetBytes": 27127808
+          }
+        ],
+        "processBreakdown": [
+          {
+            "processId": 93716,
+            "name": "msedgewebview2",
+            "role": "browser",
+            "privateWorkingSetBytes": 39567360,
+            "workingSetBytes": 148131840,
+            "commitBytes": 52744192
+          },
+          {
+            "processId": 18196,
+            "name": "msedgewebview2",
+            "role": "renderer",
+            "privateWorkingSetBytes": 33435648,
+            "workingSetBytes": 111452160,
+            "commitBytes": 46710784
+          },
+          {
+            "processId": 68164,
+            "name": "msedgewebview2",
+            "role": "gpu-process",
+            "privateWorkingSetBytes": 11202560,
+            "workingSetBytes": 73924608,
+            "commitBytes": 19980288
+          },
+          {
+            "processId": 90188,
+            "name": "msedgewebview2",
+            "role": "utility",
+            "privateWorkingSetBytes": 8273920,
+            "workingSetBytes": 43384832,
+            "commitBytes": 15183872
+          },
+          {
+            "processId": 57012,
+            "name": "apogee",
+            "role": "host(rust)",
+            "privateWorkingSetBytes": 3944448,
+            "workingSetBytes": 27127808,
+            "commitBytes": 5443584
+          },
+          {
+            "processId": 75804,
+            "name": "msedgewebview2",
+            "role": "utility",
+            "privateWorkingSetBytes": 3543040,
+            "workingSetBytes": 21463040,
+            "commitBytes": 9871360
+          },
+          {
+            "processId": 58316,
+            "name": "msedgewebview2",
+            "role": "crashpad-handler",
+            "privateWorkingSetBytes": 2138112,
+            "workingSetBytes": 12685312,
+            "commitBytes": 3190784
+          }
+        ]
+      },
+      "frontend": {
+        "spike": "S3",
+        "part": "memory-only",
+        "mode": "memoryOnly",
+        "at": "2026-07-31T03:33:26.65Z",
+        "inTauri": true,
+        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36 Edg/150.0.0.0",
+        "subject": {
+          "component": "src/components/sidebar/Sidebar.vue",
+          "sharedModule": "src/components/sidebar/tree.ts",
+          "rowHeightPx": 22,
+          "overscanRows": 10,
+          "control": "src/spike/S3FullTree.vue（全量 v-for，不虚拟化）"
+        },
+        "display": null,
+        "method": {
+          "scrollFrames": 300,
+          "scrollStepRows": 8,
+          "scrollStepPx": 176,
+          "scrollDriver": "主线程：每帧写 scroller.scrollTop（比合成器驱动更悲观）",
+          "frameBudgetMs": 16.666666666666668,
+          "frameBudgetSource": "本机显示器实测 rAF 中位间隔",
+          "toggleRepeats": 7,
+          "visibleFilterRepeats": 200,
+          "visibleFilterNote": "performance.now() 在 Chromium 里钳到 0.1ms，单次跑不出有意义的数，所以重复取平均",
+          "fullRenderSkippedAbove": 5001
+        },
+        "acceptance": {
+          "S3 首渲 5000 节点 < 100ms": {
+            "measuredMs": null,
+            "commitMs": null,
+            "pass": false
+          },
+          "S3 滚动 5000 节点 60fps": {
+            "fps": null,
+            "droppedPct": null,
+            "p95Ms": null,
+            "frameBudgetMs": 16.666666666666668,
+            "criterion": "掉帧率 < 5%（相对本机显示器实测节奏）",
+            "pass": false
+          },
+          "PRD 集合树 1000 请求 < 100ms": {
+            "measuredMs": null,
+            "requestCount": null,
+            "pass": false
+          }
+        },
+        "rustProcessMemory": {
+          "note": "Rust 主进程私有提交量。集合树的 DOM 在 WebView2 渲染进程里，不在这里 —— 进程树内存由 PS1 量测台负责。",
+          "beforeMb": 5.23046875,
+          "atHoldMb": 5.23046875,
+          "afterHoldMb": 5.41015625
+        },
+        "holdCondition": "1 工作区 + 3 标签 + 5000 节点集合树（已挂载、空闲）",
+        "holdMs": 30000,
+        "notMeasured": [
+          "真实滚轮/触控板滚动：本面板用主线程写 scrollTop 驱动，不经过合成器线程，也不含输入事件延迟。真实滚轮在 Chromium 上可能走合成器，主线程驱动是更悲观的一侧。",
+          "真实集合数据：节点由 synthTree 合成，名称长度均匀。真实集合里超长接口名会触发文本溢出计算，行内布局成本更高。",
+          "增量加载：本次一次性把整棵扁平数组交给组件，未测「Rust 侧分页返回 + 滚动到底再取下一页」的路径（那是 v0.2 的实现）。",
+          "macOS：WKWebView 的合成与滚动实现与 WebView2 不同，本报告数字不可套用。"
+        ],
+        "cells": []
+      }
+    },
+    {
+      "config": "gpu-off",
+      "mode": "mem",
+      "round": 4,
+      "label": "GPU 关（--disable-gpu --disable-gpu-compositing）",
+      "browserArgs": "--disable-gpu --disable-gpu-compositing",
+      "launchedAt": "2026-07-31T11:33:27.5220686+08:00",
+      "holdObservedAt": "2026-07-31T11:33:28.5639969+08:00",
+      "holdCondition": "1 工作区 + 3 标签 + 5000 节点集合树（干净启动，未跑帧率矩阵）",
+      "cpuBeforeLaunchPercent": 19.0,
+      "cpuSettledBeforeLaunch": true,
+      "cpuDuringHoldMedianPercent": 22.5,
+      "gpu": {
+        "expectGpuProcess": false,
+        "gpuProcessPresent": true,
+        "gpuProcessPrivateWorkingSetBytes": 11223040,
+        "flagsObserved": [
+          {
+            "flag": "--disable-gpu",
+            "presentInCommandLine": true
+          },
+          {
+            "flag": "--disable-gpu-compositing",
+            "presentInCommandLine": true
+          }
+        ]
+      },
+      "memory": {
+        "metric": "privateWorkingSet（Working Set - Private，等于任务管理器「内存」列）",
+        "gateStatistic": "max（内存逐样本稳定，取最差观测值）",
+        "sampleCount": 6,
+        "sampleBudgetExhausted": false,
+        "processCount": 7,
+        "treePrivateWorkingSetMedianBytes": 98557952,
+        "treePrivateWorkingSetMaxBytes": 100425728,
+        "treeCommitMedianBytes": 147562496,
+        "treeWorkingSetSumMedianBytes": 409532416,
+        "rootPrivateWorkingSetMedianBytes": 3887104,
+        "webviewPrivateWorkingSetMedianBytes": 94670848,
+        "treePeakWorkingSetBytes": 440836096,
+        "treePeakWorkingSetCaveat": "WorkingSet 峰值含共享页（S1 实测放大 2.99×），Windows 无「私有工作集峰值」计数器。只作尖峰旁证，不进门禁。",
+        "roleBreakdown": [
+          {
+            "role": "browser",
+            "instances": 1,
+            "privateWorkingSetBytes": 40116224
+          },
+          {
+            "role": "renderer",
+            "instances": 1,
+            "privateWorkingSetBytes": 30560256
+          },
+          {
+            "role": "utility",
+            "instances": 2,
+            "privateWorkingSetBytes": 11829248
+          },
+          {
+            "role": "gpu-process",
+            "instances": 1,
+            "privateWorkingSetBytes": 11223040
+          },
+          {
+            "role": "host(rust)",
+            "instances": 1,
+            "privateWorkingSetBytes": 3887104
+          },
+          {
+            "role": "crashpad-handler",
+            "instances": 1,
+            "privateWorkingSetBytes": 2101248
+          }
+        ],
+        "samples": [
+          {
+            "sampledAt": "2026-07-31T11:33:31.5239652+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 99717120,
+            "treeCommitBytes": 148738048,
+            "treeWorkingSetSumBytes": 430133248,
+            "rootPrivateWorkingSetBytes": 3887104,
+            "rootCommitBytes": 5406720,
+            "rootWorkingSetBytes": 27172864
+          },
+          {
+            "sampledAt": "2026-07-31T11:33:33.1866969+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 100052992,
+            "treeCommitBytes": 149164032,
+            "treeWorkingSetSumBytes": 421908480,
+            "rootPrivateWorkingSetBytes": 3887104,
+            "rootCommitBytes": 5406720,
+            "rootWorkingSetBytes": 27172864
+          },
+          {
+            "sampledAt": "2026-07-31T11:33:34.6617359+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 100425728,
+            "treeCommitBytes": 149262336,
+            "treeWorkingSetSumBytes": 410902528,
+            "rootPrivateWorkingSetBytes": 3887104,
+            "rootCommitBytes": 5406720,
+            "rootWorkingSetBytes": 27172864
+          },
+          {
+            "sampledAt": "2026-07-31T11:33:36.1509218+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 97398784,
+            "treeCommitBytes": 146386944,
+            "treeWorkingSetSumBytes": 408162304,
+            "rootPrivateWorkingSetBytes": 3887104,
+            "rootCommitBytes": 5406720,
+            "rootWorkingSetBytes": 27172864
+          },
+          {
+            "sampledAt": "2026-07-31T11:33:37.7000054+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 95150080,
+            "treeCommitBytes": 143622144,
+            "treeWorkingSetSumBytes": 405897216,
+            "rootPrivateWorkingSetBytes": 3887104,
+            "rootCommitBytes": 5406720,
+            "rootWorkingSetBytes": 27172864
+          },
+          {
+            "sampledAt": "2026-07-31T11:33:39.2767482+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 95375360,
+            "treeCommitBytes": 143597568,
+            "treeWorkingSetSumBytes": 406081536,
+            "rootPrivateWorkingSetBytes": 3887104,
+            "rootCommitBytes": 5406720,
+            "rootWorkingSetBytes": 27172864
+          }
+        ],
+        "processBreakdown": [
+          {
+            "processId": 82476,
+            "name": "msedgewebview2",
+            "role": "browser",
+            "privateWorkingSetBytes": 40116224,
+            "workingSetBytes": 149282816,
+            "commitBytes": 52404224
+          },
+          {
+            "processId": 29860,
+            "name": "msedgewebview2",
+            "role": "renderer",
+            "privateWorkingSetBytes": 30560256,
+            "workingSetBytes": 105189376,
+            "commitBytes": 42713088
+          },
+          {
+            "processId": 47368,
+            "name": "msedgewebview2",
+            "role": "gpu-process",
+            "privateWorkingSetBytes": 11223040,
+            "workingSetBytes": 70909952,
+            "commitBytes": 20000768
+          },
+          {
+            "processId": 31000,
+            "name": "msedgewebview2",
+            "role": "utility",
+            "privateWorkingSetBytes": 8286208,
+            "workingSetBytes": 43458560,
+            "commitBytes": 15192064
+          },
+          {
+            "processId": 77024,
+            "name": "apogee",
+            "role": "host(rust)",
+            "privateWorkingSetBytes": 3887104,
+            "workingSetBytes": 27172864,
+            "commitBytes": 5406720
+          },
+          {
+            "processId": 78388,
+            "name": "msedgewebview2",
+            "role": "utility",
+            "privateWorkingSetBytes": 3543040,
+            "workingSetBytes": 21467136,
+            "commitBytes": 9871360
+          },
+          {
+            "processId": 75508,
+            "name": "msedgewebview2",
+            "role": "crashpad-handler",
+            "privateWorkingSetBytes": 2101248,
+            "workingSetBytes": 12652544,
+            "commitBytes": 3149824
+          }
+        ]
+      },
+      "frontend": {
+        "spike": "S3",
+        "part": "memory-only",
+        "mode": "memoryOnly",
+        "at": "2026-07-31T03:33:58.57Z",
+        "inTauri": true,
+        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36 Edg/150.0.0.0",
+        "subject": {
+          "component": "src/components/sidebar/Sidebar.vue",
+          "sharedModule": "src/components/sidebar/tree.ts",
+          "rowHeightPx": 22,
+          "overscanRows": 10,
+          "control": "src/spike/S3FullTree.vue（全量 v-for，不虚拟化）"
+        },
+        "display": null,
+        "method": {
+          "scrollFrames": 300,
+          "scrollStepRows": 8,
+          "scrollStepPx": 176,
+          "scrollDriver": "主线程：每帧写 scroller.scrollTop（比合成器驱动更悲观）",
+          "frameBudgetMs": 16.666666666666668,
+          "frameBudgetSource": "本机显示器实测 rAF 中位间隔",
+          "toggleRepeats": 7,
+          "visibleFilterRepeats": 200,
+          "visibleFilterNote": "performance.now() 在 Chromium 里钳到 0.1ms，单次跑不出有意义的数，所以重复取平均",
+          "fullRenderSkippedAbove": 5001
+        },
+        "acceptance": {
+          "S3 首渲 5000 节点 < 100ms": {
+            "measuredMs": null,
+            "commitMs": null,
+            "pass": false
+          },
+          "S3 滚动 5000 节点 60fps": {
+            "fps": null,
+            "droppedPct": null,
+            "p95Ms": null,
+            "frameBudgetMs": 16.666666666666668,
+            "criterion": "掉帧率 < 5%（相对本机显示器实测节奏）",
+            "pass": false
+          },
+          "PRD 集合树 1000 请求 < 100ms": {
+            "measuredMs": null,
+            "requestCount": null,
+            "pass": false
+          }
+        },
+        "rustProcessMemory": {
+          "note": "Rust 主进程私有提交量。集合树的 DOM 在 WebView2 渲染进程里，不在这里 —— 进程树内存由 PS1 量测台负责。",
+          "beforeMb": 5.1953125,
+          "atHoldMb": 5.1953125,
+          "afterHoldMb": 5.37109375
+        },
+        "holdCondition": "1 工作区 + 3 标签 + 5000 节点集合树（已挂载、空闲）",
+        "holdMs": 30000,
+        "notMeasured": [
+          "真实滚轮/触控板滚动：本面板用主线程写 scrollTop 驱动，不经过合成器线程，也不含输入事件延迟。真实滚轮在 Chromium 上可能走合成器，主线程驱动是更悲观的一侧。",
+          "真实集合数据：节点由 synthTree 合成，名称长度均匀。真实集合里超长接口名会触发文本溢出计算，行内布局成本更高。",
+          "增量加载：本次一次性把整棵扁平数组交给组件，未测「Rust 侧分页返回 + 滚动到底再取下一页」的路径（那是 v0.2 的实现）。",
+          "macOS：WKWebView 的合成与滚动实现与 WebView2 不同，本报告数字不可套用。"
+        ],
+        "cells": []
+      }
+    },
+    {
+      "config": "gpu-off",
+      "mode": "mem",
+      "round": 5,
+      "label": "GPU 关（--disable-gpu --disable-gpu-compositing）",
+      "browserArgs": "--disable-gpu --disable-gpu-compositing",
+      "launchedAt": "2026-07-31T11:33:59.5317394+08:00",
+      "holdObservedAt": "2026-07-31T11:34:00.5846574+08:00",
+      "holdCondition": "1 工作区 + 3 标签 + 5000 节点集合树（干净启动，未跑帧率矩阵）",
+      "cpuBeforeLaunchPercent": 17.0,
+      "cpuSettledBeforeLaunch": true,
+      "cpuDuringHoldMedianPercent": 17.5,
+      "gpu": {
+        "expectGpuProcess": false,
+        "gpuProcessPresent": true,
+        "gpuProcessPrivateWorkingSetBytes": 11235328,
+        "flagsObserved": [
+          {
+            "flag": "--disable-gpu",
+            "presentInCommandLine": true
+          },
+          {
+            "flag": "--disable-gpu-compositing",
+            "presentInCommandLine": true
+          }
+        ]
+      },
+      "memory": {
+        "metric": "privateWorkingSet（Working Set - Private，等于任务管理器「内存」列）",
+        "gateStatistic": "max（内存逐样本稳定，取最差观测值）",
+        "sampleCount": 6,
+        "sampleBudgetExhausted": false,
+        "processCount": 7,
+        "treePrivateWorkingSetMedianBytes": 98088960,
+        "treePrivateWorkingSetMaxBytes": 99684352,
+        "treeCommitMedianBytes": 146968576,
+        "treeWorkingSetSumMedianBytes": 411170816,
+        "rootPrivateWorkingSetMedianBytes": 3944448,
+        "webviewPrivateWorkingSetMedianBytes": 94144512,
+        "treePeakWorkingSetBytes": 445550592,
+        "treePeakWorkingSetCaveat": "WorkingSet 峰值含共享页（S1 实测放大 2.99×），Windows 无「私有工作集峰值」计数器。只作尖峰旁证，不进门禁。",
+        "roleBreakdown": [
+          {
+            "role": "browser",
+            "instances": 1,
+            "privateWorkingSetBytes": 39104512
+          },
+          {
+            "role": "renderer",
+            "instances": 1,
+            "privateWorkingSetBytes": 30765056
+          },
+          {
+            "role": "utility",
+            "instances": 2,
+            "privateWorkingSetBytes": 11804672
+          },
+          {
+            "role": "gpu-process",
+            "instances": 1,
+            "privateWorkingSetBytes": 11235328
+          },
+          {
+            "role": "host(rust)",
+            "instances": 1,
+            "privateWorkingSetBytes": 3944448
+          },
+          {
+            "role": "crashpad-handler",
+            "instances": 1,
+            "privateWorkingSetBytes": 2142208
+          }
+        ],
+        "samples": [
+          {
+            "sampledAt": "2026-07-31T11:34:03.5458599+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 98996224,
+            "treeCommitBytes": 147890176,
+            "treeWorkingSetSumBytes": 435089408,
+            "rootPrivateWorkingSetBytes": 3944448,
+            "rootCommitBytes": 5615616,
+            "rootWorkingSetBytes": 27127808
+          },
+          {
+            "sampledAt": "2026-07-31T11:34:05.0554323+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 99479552,
+            "treeCommitBytes": 148099072,
+            "treeWorkingSetSumBytes": 435421184,
+            "rootPrivateWorkingSetBytes": 3944448,
+            "rootCommitBytes": 5615616,
+            "rootWorkingSetBytes": 27127808
+          },
+          {
+            "sampledAt": "2026-07-31T11:34:06.6177684+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 99684352,
+            "treeCommitBytes": 148246528,
+            "treeWorkingSetSumBytes": 412241920,
+            "rootPrivateWorkingSetBytes": 3944448,
+            "rootCommitBytes": 5615616,
+            "rootWorkingSetBytes": 27127808
+          },
+          {
+            "sampledAt": "2026-07-31T11:34:08.1832367+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 97181696,
+            "treeCommitBytes": 146046976,
+            "treeWorkingSetSumBytes": 410099712,
+            "rootPrivateWorkingSetBytes": 3944448,
+            "rootCommitBytes": 5615616,
+            "rootWorkingSetBytes": 27127808
+          },
+          {
+            "sampledAt": "2026-07-31T11:34:09.7416101+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 95154176,
+            "treeCommitBytes": 143200256,
+            "treeWorkingSetSumBytes": 407941120,
+            "rootPrivateWorkingSetBytes": 3944448,
+            "rootCommitBytes": 5615616,
+            "rootWorkingSetBytes": 27127808
+          },
+          {
+            "sampledAt": "2026-07-31T11:34:11.2900785+08:00",
+            "processCount": 7,
+            "treePrivateWorkingSetBytes": 95363072,
+            "treeCommitBytes": 143114240,
+            "treeWorkingSetSumBytes": 407912448,
+            "rootPrivateWorkingSetBytes": 3944448,
+            "rootCommitBytes": 5615616,
+            "rootWorkingSetBytes": 27127808
+          }
+        ],
+        "processBreakdown": [
+          {
+            "processId": 27160,
+            "name": "msedgewebview2",
+            "role": "browser",
+            "privateWorkingSetBytes": 39104512,
+            "workingSetBytes": 147640320,
+            "commitBytes": 51269632
+          },
+          {
+            "processId": 77720,
+            "name": "msedgewebview2",
+            "role": "renderer",
+            "privateWorkingSetBytes": 30765056,
+            "workingSetBytes": 108769280,
+            "commitBytes": 42770432
+          },
+          {
+            "processId": 70148,
+            "name": "msedgewebview2",
+            "role": "gpu-process",
+            "privateWorkingSetBytes": 11235328,
+            "workingSetBytes": 73986048,
+            "commitBytes": 20013056
+          },
+          {
+            "processId": 1800,
+            "name": "msedgewebview2",
+            "role": "utility",
+            "privateWorkingSetBytes": 8253440,
+            "workingSetBytes": 43417600,
+            "commitBytes": 15155200
+          },
+          {
+            "processId": 93656,
+            "name": "apogee",
+            "role": "host(rust)",
+            "privateWorkingSetBytes": 3944448,
+            "workingSetBytes": 27127808,
+            "commitBytes": 5615616
+          },
+          {
+            "processId": 89320,
+            "name": "msedgewebview2",
+            "role": "utility",
+            "privateWorkingSetBytes": 3551232,
+            "workingSetBytes": 21463040,
+            "commitBytes": 9879552
+          },
+          {
+            "processId": 49992,
+            "name": "msedgewebview2",
+            "role": "crashpad-handler",
+            "privateWorkingSetBytes": 2142208,
+            "workingSetBytes": 12685312,
+            "commitBytes": 3186688
+          }
+        ]
+      },
+      "frontend": {
+        "spike": "S3",
+        "part": "memory-only",
+        "mode": "memoryOnly",
+        "at": "2026-07-31T03:34:30.53Z",
+        "inTauri": true,
+        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36 Edg/150.0.0.0",
+        "subject": {
+          "component": "src/components/sidebar/Sidebar.vue",
+          "sharedModule": "src/components/sidebar/tree.ts",
+          "rowHeightPx": 22,
+          "overscanRows": 10,
+          "control": "src/spike/S3FullTree.vue（全量 v-for，不虚拟化）"
+        },
+        "display": null,
+        "method": {
+          "scrollFrames": 300,
+          "scrollStepRows": 8,
+          "scrollStepPx": 176,
+          "scrollDriver": "主线程：每帧写 scroller.scrollTop（比合成器驱动更悲观）",
+          "frameBudgetMs": 16.666666666666668,
+          "frameBudgetSource": "本机显示器实测 rAF 中位间隔",
+          "toggleRepeats": 7,
+          "visibleFilterRepeats": 200,
+          "visibleFilterNote": "performance.now() 在 Chromium 里钳到 0.1ms，单次跑不出有意义的数，所以重复取平均",
+          "fullRenderSkippedAbove": 5001
+        },
+        "acceptance": {
+          "S3 首渲 5000 节点 < 100ms": {
+            "measuredMs": null,
+            "commitMs": null,
+            "pass": false
+          },
+          "S3 滚动 5000 节点 60fps": {
+            "fps": null,
+            "droppedPct": null,
+            "p95Ms": null,
+            "frameBudgetMs": 16.666666666666668,
+            "criterion": "掉帧率 < 5%（相对本机显示器实测节奏）",
+            "pass": false
+          },
+          "PRD 集合树 1000 请求 < 100ms": {
+            "measuredMs": null,
+            "requestCount": null,
+            "pass": false
+          }
+        },
+        "rustProcessMemory": {
+          "note": "Rust 主进程私有提交量。集合树的 DOM 在 WebView2 渲染进程里，不在这里 —— 进程树内存由 PS1 量测台负责。",
+          "beforeMb": 5.39453125,
+          "atHoldMb": 5.39453125,
+          "afterHoldMb": 5.296875
+        },
+        "holdCondition": "1 工作区 + 3 标签 + 5000 节点集合树（已挂载、空闲）",
+        "holdMs": 30000,
+        "notMeasured": [
+          "真实滚轮/触控板滚动：本面板用主线程写 scrollTop 驱动，不经过合成器线程，也不含输入事件延迟。真实滚轮在 Chromium 上可能走合成器，主线程驱动是更悲观的一侧。",
+          "真实集合数据：节点由 synthTree 合成，名称长度均匀。真实集合里超长接口名会触发文本溢出计算，行内布局成本更高。",
+          "增量加载：本次一次性把整棵扁平数组交给组件，未测「Rust 侧分页返回 + 滚动到底再取下一页」的路径（那是 v0.2 的实现）。",
+          "macOS：WKWebView 的合成与滚动实现与 WebView2 不同，本报告数字不可套用。"
+        ],
+        "cells": []
+      }
+    }
+  ]
+}

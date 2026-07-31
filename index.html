@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      CSP 的唯一来源是 src-tauri/tauri.conf.json 的 app.security.csp，
+      Tauri 会在生产构建时注入到这个 HTML 里。
+
+      这里**故意不写** meta CSP。曾经两处各写一份，结果 index.html 里只放了
+      `apogee:` 而漏了 Windows 实际使用的 `http://apogee.localhost`
+      （Tauri 在 Windows/Android 上把自定义协议映射成 http://<scheme>.localhost），
+      于是自定义协议被 CSP 静默拦掉，表现为 `TypeError: Failed to fetch`，
+      排查了一轮才定位。CSP 只能有一个来源。
+    -->
+    <title>Apogee</title>
+    <!--
+      首屏骨架直接写在 HTML 里，不等 JS。
+      目的：让「窗口出现 → 有东西可看」这段时间归零，配合 tauri.conf.json 的
+      visible:false + 首帧就绪后 show()，避免白屏闪烁（03 文档 §4.1）。
+    -->
+    <!--
+      色值必须和 src/styles/tokens.css 的暗色 --a-bg-1 / --a-text / --a-text-dim
+      一致。这里是**首帧**，tokens.css 还没解析完；不一致就会看到一次闪色。
+      写死在 HTML 里是有意的，不能改成 var()。
+    -->
+    <style>
+      :root { color-scheme: dark; }
+      html, body, #app { height: 100%; margin: 0; }
+      body {
+        background: #0c0e12;
+        color: #f1f5f9;
+        font: 13px/20px 'Inter', 'Segoe UI', -apple-system, 'PingFang SC', 'Microsoft YaHei UI', sans-serif;
+        overflow: hidden;
+      }
+      #boot {
+        display: flex; align-items: center; justify-content: center;
+        height: 100%; color: #94a3b8; font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"><div id="boot">Apogee</div></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

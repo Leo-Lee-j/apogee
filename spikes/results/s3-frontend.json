@@ -1,0 +1,63 @@
+{
+  "spike": "S3",
+  "part": "memory-only",
+  "mode": "memoryOnly",
+  "at": "2026-07-31T03:34:30.530Z",
+  "inTauri": true,
+  "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36 Edg/150.0.0.0",
+  "subject": {
+    "component": "src/components/sidebar/Sidebar.vue",
+    "sharedModule": "src/components/sidebar/tree.ts",
+    "rowHeightPx": 22,
+    "overscanRows": 10,
+    "control": "src/spike/S3FullTree.vue（全量 v-for，不虚拟化）"
+  },
+  "display": null,
+  "method": {
+    "scrollFrames": 300,
+    "scrollStepRows": 8,
+    "scrollStepPx": 176,
+    "scrollDriver": "主线程：每帧写 scroller.scrollTop（比合成器驱动更悲观）",
+    "frameBudgetMs": 16.666666666666668,
+    "frameBudgetSource": "本机显示器实测 rAF 中位间隔",
+    "toggleRepeats": 7,
+    "visibleFilterRepeats": 200,
+    "visibleFilterNote": "performance.now() 在 Chromium 里钳到 0.1ms，单次跑不出有意义的数，所以重复取平均",
+    "fullRenderSkippedAbove": 5001
+  },
+  "acceptance": {
+    "S3 首渲 5000 节点 < 100ms": {
+      "measuredMs": null,
+      "commitMs": null,
+      "pass": false
+    },
+    "S3 滚动 5000 节点 60fps": {
+      "fps": null,
+      "droppedPct": null,
+      "p95Ms": null,
+      "frameBudgetMs": 16.666666666666668,
+      "criterion": "掉帧率 < 5%（相对本机显示器实测节奏）",
+      "pass": false
+    },
+    "PRD 集合树 1000 请求 < 100ms": {
+      "measuredMs": null,
+      "requestCount": null,
+      "pass": false
+    }
+  },
+  "rustProcessMemory": {
+    "note": "Rust 主进程私有提交量。集合树的 DOM 在 WebView2 渲染进程里，不在这里 —— 进程树内存由 PS1 量测台负责。",
+    "beforeMb": 5.39453125,
+    "atHoldMb": 5.39453125,
+    "afterHoldMb": 5.296875
+  },
+  "holdCondition": "1 工作区 + 3 标签 + 5000 节点集合树（已挂载、空闲）",
+  "holdMs": 30000,
+  "notMeasured": [
+    "真实滚轮/触控板滚动：本面板用主线程写 scrollTop 驱动，不经过合成器线程，也不含输入事件延迟。真实滚轮在 Chromium 上可能走合成器，主线程驱动是更悲观的一侧。",
+    "真实集合数据：节点由 synthTree 合成，名称长度均匀。真实集合里超长接口名会触发文本溢出计算，行内布局成本更高。",
+    "增量加载：本次一次性把整棵扁平数组交给组件，未测「Rust 侧分页返回 + 滚动到底再取下一页」的路径（那是 v0.2 的实现）。",
+    "macOS：WKWebView 的合成与滚动实现与 WebView2 不同，本报告数字不可套用。"
+  ],
+  "cells": []
+}

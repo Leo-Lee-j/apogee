@@ -1,0 +1,171 @@
+<script setup lang="ts">
+import { ref, computed, onMounted } from 'vue'
+import { useTabsStore } from '@/stores/tabs'
+
+/**
+ * URL 栏，40px —— 全产品最重要的一行（02 文档 §4.1）。
+ *
+ * 骨架阶段用原生 input。正式实现要换成轻量代码编辑器，因为需要：
+ *   - 变量高亮（绿=已解析 / 红=未定义）
+ *   - 输入 `{{` 弹变量补全
+ *   - Path 参数 `:id` 识别并联动 Params 面板
+ *
+ * 关键性能约束（03 文档 §4.6）：输入不触发任何跨 IPC 调用。
+ * 变量解析结果本地缓存，只在环境变更时失效。
+ */
+
+const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'] as const
+
+const tabs = useTabsStore()
+const inputEl = ref<HTMLInputElement | null>(null)
+const methodOpen = ref(false)
+
+const tab = computed(() => tabs.active)
+
+/** 方法选择器的前景色与 pill 底色。两个都取自令牌，OPTIONS 回落到 HEAD 档。 */
+const methodVar = computed(() => methodFg(tab.value?.method ?? 'GET'))
+const methodBgVar = computed(() => methodBg(tab.value?.method ?? 'GET'))
+
+function methodFg(m: string) {
+  return `var(--a-${m.toLowerCase()}, var(--a-head))`
+}
+function methodBg(m: string) {
+  return `var(--a-${m.toLowerCase()}-bg, var(--a-head-bg))`
+}
+
+function setMethod(m: string) {
+  if (tab.value) tabs.patch(tab.value.id, { method: m, dirty: true })
+  methodOpen.value = false
+}
+
+function onUrl(e: Event) {
+  const v = (e.target as HTMLInputElement).value
+  if (tab.value) tabs.patch(tab.value.id, { url: v, dirty: true })
+}
+
+/** 分阶段启动的收尾动作：首屏就绪后聚焦 URL 栏，让用户能立刻打字（03 文档 §4.1）。 */
+onMounted(() => inputEl.value?.focus())
+
+defineExpose({ focus: () => inputEl.value?.select() })
+</script>
+
+<template>
+  <div class="urlbar">
+    <div class="method-wrap">
+      <button
+        class="method"
+        type="button"
+        :style="{ color: methodVar, background: methodBgVar, borderColor: methodVar }"
+        aria-haspopup="listbox"
+        :aria-expanded="methodOpen"
+        @click="methodOpen = !methodOpen"
+      >
+        {{ tab?.method ?? 'GET' }} <span class="caret">▾</span>
+      </button>
+      <!--
+        自研下拉而不是 n-select：这是首屏热路径。
+        02 文档 §7.5 第 5 条把 naive-ui 限定在低频、非热路径场景。
+      -->
+      <ul v-if="methodOpen" class="menu" role="listbox">
+        <li v-for="m in METHODS" :key="m" role="option" :aria-selected="m === tab?.method">
+          <button
+            type="button"
+            :style="{ color: methodFg(m) }"
+            @click="setMethod(m)"
+          >
+            {{ m }}
+          </button>
+        </li>
+      </ul>
+    </div>
+
+    <input
+      ref="inputEl"
+      class="url a-selectable"
+      type="text"
+      spellcheck="false"
+      autocomplete="off"
+      placeholder="输入 URL，或粘贴 cURL 命令"
+      aria-label="请求地址"
+      :value="tab?.url ?? ''"
+      @input="onUrl"
+    />
+
+    <button class="send" type="button">发送</button>
+    <button class="save" type="button">保存</button>
+  </div>
+</template>
+
+<style scoped>
+.urlbar {
+  height: var(--a-h-urlbar);
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  /* 没有 border-bottom —— URL 栏是「请求头」块的最后一行，
+     下边界由块自己的边框画（见 AppBody.vue 的 .head） */
+}
+.method-wrap { position: relative; }
+/* 方法选择器是全产品最显眼的语义控件，用 Apogee 的「半透明底 + 高亮前景」处理。
+   底色与描边由 :style 按当前方法绑定，见 methodBg()。颜色 + 文字双通道，
+   两种形态（pill 与裸文字）的对比度都由 scripts/check-contrast.mjs 守着。 */
+.method {
+  height: 28px; min-width: 84px;
+  border: 1px solid transparent;
+  border-radius: var(--a-radius-md);
+  font: var(--a-fw-semibold) var(--a-fs-sm) / 1 var(--a-font-mono);
+  cursor: pointer;
+}
+.caret { color: currentcolor; opacity: 0.65; font-weight: var(--a-fw-normal); }
+.menu {
+  position: absolute; top: 32px; left: 0; z-index: 20;
+  margin: 0; padding: 4px; list-style: none;
+  min-width: 110px;
+  background: var(--a-bg-3);
+  border: 1px solid var(--a-border-strong);
+  border-radius: var(--a-radius-md);
+  box-shadow: var(--a-shadow-md);
+}
+.menu button {
+  display: block; width: 100%; text-align: left;
+  background: transparent; border: none; border-radius: var(--a-radius-sm);
+  padding: 4px 8px; font: var(--a-fw-semibold) var(--a-fs-sm) / 1.6 var(--a-font-mono); cursor: pointer;
+}
+.menu button:hover { background: var(--a-hover); }
+.url {
+  flex: 1 1 auto; height: 28px;
+  background: var(--a-bg-3);
+  border: 1px solid var(--a-border);
+  border-radius: var(--a-radius-md);
+  color: var(--a-text);
+  font: var(--a-fs-base) / 1 var(--a-font-mono);
+  padding: 0 8px;
+}
+/* 不能写 outline: none（原来是这么写的）—— `.url:focus` 的特异性高于
+   tokens.css 里的全局 `:focus-visible`，会把键盘焦点环整个盖掉，违反 PRD §10.4。
+   改成把焦点环画在边框内侧，视觉上仍然干净。 */
+.url:focus-visible {
+  border-color: var(--a-focus);
+  outline: 2px solid var(--a-focus);
+  outline-offset: -2px;
+}
+.send, .save {
+  height: 28px; padding: 0 14px; border-radius: var(--a-radius-md); cursor: pointer;
+  font: inherit;
+}
+/* 唯一使用渐变的元素（Apogee 规范里的「Launch 按钮」）。
+   前景用 --a-on-primary：暗主题下是深色，因为白字压在 #4F80FF 上只有 3.58:1、
+   压在渐变末端 #38BDF8 上只有 2.14:1 —— 那会让按钮右半边的字不可读。 */
+.send {
+  background: var(--a-primary-gradient);
+  border: 1px solid transparent;
+  color: var(--a-on-primary);
+  font-weight: var(--a-fw-semibold);
+}
+.send:hover { background: var(--a-primary-hover); }
+.send:active { background: var(--a-primary-pressed); }
+.save { background: var(--a-bg-3); border: 1px solid var(--a-border); color: var(--a-text); }
+.save:hover { background: var(--a-hover); }
+</style>

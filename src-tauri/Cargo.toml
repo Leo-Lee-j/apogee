@@ -1,0 +1,50 @@
+[package]
+name = "apogee-desktop"
+description = "Apogee 桌面客户端"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "apogee_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "apogee"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+apogee-core.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+# 只读映射 spool 文件，索引构建不再复制完整响应体。
+memmap2 = "=0.9.11"
+
+# 只开必要 feature。默认 feature 会带进不必要的体积（PRD §5 包体预算 < 15MB）。
+#
+# 注意**不要**开 `protocol-asset`：那是 Tauri 内置的 asset:// 协议，用于读任意本地文件，
+# 我们用不上（自己注册的 apogee:// 协议不依赖它），而且它必须和 tauri.conf.json 里的
+# assetProtocol.enable 保持一致，否则 build script 直接报错。
+# 从安全角度也不该开 —— 少一个能读本地文件的协议就少一个攻击面（PRD §10.2 能力最小化）。
+tauri = { version = "2", default-features = false, features = ["wry", "common-controls-v6"] }
+
+# 读进程内存，供 PRD §5.2 的「性能自检」面板与性能基准使用。
+# 只开 ProcessStatus + Threading 两个 feature，避免拖进整个 Windows API 绑定。
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_System_ProcessStatus",
+    "Win32_System_Threading",
+] }
+
+[features]
+# tauri 的自定义协议在生产构建下需要这个 feature
+custom-protocol = ["tauri/custom-protocol"]

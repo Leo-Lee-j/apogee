@@ -1,0 +1,512 @@
+{
+  "spike": "S5",
+  "at": "2026-07-30T13:33:49.347Z",
+  "budgetGzip": 153600,
+  "verdict": "PASS：按 02 文档 §7.5 原方案（naive-ui 进首屏）+ 打包器默认分包，首屏 gzip 107.2 KB < 150KB，预算占用 71%",
+  "findings": [
+    "**分包策略比 naive-ui 放哪更关键。** 默认分包下首屏 gzip：变体A 107.2 KB、变体B 47.6 KB；换成手动 vendor 分包后变成 169.2 KB / 149.9 KB。手动分包把变体B 的首屏放大了 3.1 倍。",
+    "原因：把只被动态 import 用到的依赖强行归入命名 chunk（vendor-naive）后，打包器会把该 chunk 提升为 entry 的**静态**依赖，懒加载在产物层面失效。手动分包下 naive-ui 是否在首屏：A=是、B=是；默认分包下：A=是、B=否。",
+    "按 02 文档 §7.5 原样实现（变体A：n-config-provider 放根节点）+ 默认分包，首屏 gzip 107.2 KB，预算占用 71%，在预算内，文档原方案不需要改。",
+    "naive-ui 进首屏的实际代价（默认分包下 A 与 B 之差）：59.6 KB gzip，占 150KB 预算的 40%。",
+    "CodeMirror 在所有组合下都不在首屏（A=否、B=否），符合 03 文档 §4.1 的要求。它单独一个 chunk 约 107KB gzip —— 如果当初选了 Monaco，这一块进首屏就直接击穿预算。"
+  ],
+  "recommendation": [
+    "**vite.config 里不要做手动 vendor 分包。** 已改为默认关闭，仅保留 S5_MANUAL_CHUNKS=1 作为可复现对照。这条要写进工程规范：手动分包看起来是优化，实际会破坏动态 import 的懒加载边界。",
+    "02 文档 §7.5 第 3 条「n-config-provider 只包一层放根节点」**可以保留**，首屏预算撑得住。但 §7.5 需要补一条：naive-ui 的组件本身仍要按需引入且尽量只出现在懒加载模块里，因为它是首屏里最大的单一可变项（本次占 59.6 KB）。",
+    "CI 门禁复用本脚本：`node scripts/measure-bundle.mjs`。门禁只看「默认分包」的两个组合，首屏 gzip 超 150KB 即 fail。同时断言 CodeMirror 不在首屏 —— 这条比体积数字更容易被无意破坏。"
+  ],
+  "matrix": [
+    {
+      "variant": "a",
+      "manualChunks": false,
+      "label": "A + 默认分包",
+      "entryKeys": [
+        "index.html"
+      ],
+      "firstScreen": {
+        "files": [
+          {
+            "file": "assets/index-BAiNGhG6.js",
+            "raw": 289309,
+            "gzip": 80864,
+            "brotli": 68347
+          },
+          {
+            "file": "assets/index-qtpygHAl.css",
+            "raw": 14859,
+            "gzip": 3509,
+            "brotli": 3091
+          },
+          {
+            "file": "assets/rolldown-runtime-DK3Fl9T5.js",
+            "raw": 158,
+            "gzip": 154,
+            "brotli": 116
+          },
+          {
+            "file": "assets/runtime-core.esm-bundler-P4Wfz0mC.js",
+            "raw": 65098,
+            "gzip": 25232,
+            "brotli": 23018
+          }
+        ],
+        "total": {
+          "raw": 369424,
+          "gzip": 109759,
+          "brotli": 94572
+        }
+      },
+      "lazyChunks": [
+        {
+          "file": "assets/SettingsModal-B8qklvNB.js",
+          "raw": 234467,
+          "gzip": 66171,
+          "brotli": 56624
+        },
+        {
+          "file": "assets/dist-TKs8oRgz.js",
+          "raw": 199663,
+          "gzip": 63562,
+          "brotli": 55264
+        },
+        {
+          "file": "assets/dist-BQbKu8tb.js",
+          "raw": 64719,
+          "gzip": 21793,
+          "brotli": 19881
+        },
+        {
+          "file": "assets/dist-dzxfaMLV.js",
+          "raw": 49229,
+          "gzip": 16290,
+          "brotli": 14797
+        },
+        {
+          "file": "assets/dist-C5hDaWea.js",
+          "raw": 28526,
+          "gzip": 9908,
+          "brotli": 9056
+        },
+        {
+          "file": "assets/S2Panel-CygIna-Q.js",
+          "raw": 8236,
+          "gzip": 3624,
+          "brotli": 3156
+        },
+        {
+          "file": "assets/CodeMirrorView-Dy3aAmio.js",
+          "raw": 3224,
+          "gzip": 1765,
+          "brotli": 1534
+        },
+        {
+          "file": "assets/Sidebar-DMFu8PLm.js",
+          "raw": 2393,
+          "gzip": 1367,
+          "brotli": 1203
+        },
+        {
+          "file": "assets/JsonTreeView-aG449uhb.js",
+          "raw": 2068,
+          "gzip": 1285,
+          "brotli": 1097
+        },
+        {
+          "file": "assets/S2Panel-jpTaM8n5.css",
+          "raw": 1720,
+          "gzip": 598,
+          "brotli": 477
+        },
+        {
+          "file": "assets/Sidebar-Icp3Hy7d.css",
+          "raw": 1248,
+          "gzip": 482,
+          "brotli": 390
+        },
+        {
+          "file": "assets/JsonTreeView-BLcsosjH.css",
+          "raw": 827,
+          "gzip": 336,
+          "brotli": 275
+        },
+        {
+          "file": "assets/CodeMirrorView-Jk5NFjIQ.css",
+          "raw": 494,
+          "gzip": 261,
+          "brotli": 203
+        }
+      ],
+      "distTotal": 966238,
+      "naiveInFirstScreen": true,
+      "codemirrorInFirstScreen": false,
+      "withinBudget": true,
+      "budgetUsagePct": 71.45768229166667
+    },
+    {
+      "variant": "b",
+      "manualChunks": false,
+      "label": "B + 默认分包",
+      "entryKeys": [
+        "index.html"
+      ],
+      "firstScreen": {
+        "files": [
+          {
+            "file": "assets/index-B0ZKR4HW.js",
+            "raw": 54421,
+            "gzip": 19877,
+            "brotli": 17496
+          },
+          {
+            "file": "assets/index-qtpygHAl.css",
+            "raw": 14859,
+            "gzip": 3509,
+            "brotli": 3091
+          },
+          {
+            "file": "assets/rolldown-runtime-DK3Fl9T5.js",
+            "raw": 158,
+            "gzip": 154,
+            "brotli": 116
+          },
+          {
+            "file": "assets/runtime-core.esm-bundler-P4Wfz0mC.js",
+            "raw": 65098,
+            "gzip": 25232,
+            "brotli": 23018
+          }
+        ],
+        "total": {
+          "raw": 134536,
+          "gzip": 48772,
+          "brotli": 43721
+        }
+      },
+      "lazyChunks": [
+        {
+          "file": "assets/SettingsModal-CuadtJb2.js",
+          "raw": 381293,
+          "gzip": 106857,
+          "brotli": 89554
+        },
+        {
+          "file": "assets/dist-TKs8oRgz.js",
+          "raw": 199663,
+          "gzip": 63562,
+          "brotli": 55264
+        },
+        {
+          "file": "assets/dist-BQbKu8tb.js",
+          "raw": 64719,
+          "gzip": 21793,
+          "brotli": 19881
+        },
+        {
+          "file": "assets/dist-dzxfaMLV.js",
+          "raw": 49229,
+          "gzip": 16290,
+          "brotli": 14797
+        },
+        {
+          "file": "assets/dist-C5hDaWea.js",
+          "raw": 28526,
+          "gzip": 9908,
+          "brotli": 9056
+        },
+        {
+          "file": "assets/S2Panel-C7SeAFqM.js",
+          "raw": 8236,
+          "gzip": 3630,
+          "brotli": 3157
+        },
+        {
+          "file": "assets/CodeMirrorView-BKSI77Y5.js",
+          "raw": 3224,
+          "gzip": 1766,
+          "brotli": 1533
+        },
+        {
+          "file": "assets/Sidebar-BgFZ0Ny7.js",
+          "raw": 2392,
+          "gzip": 1368,
+          "brotli": 1209
+        },
+        {
+          "file": "assets/JsonTreeView-DaFfPShI.js",
+          "raw": 2068,
+          "gzip": 1286,
+          "brotli": 1095
+        },
+        {
+          "file": "assets/S2Panel-jpTaM8n5.css",
+          "raw": 1720,
+          "gzip": 598,
+          "brotli": 477
+        },
+        {
+          "file": "assets/Sidebar-Icp3Hy7d.css",
+          "raw": 1248,
+          "gzip": 482,
+          "brotli": 390
+        },
+        {
+          "file": "assets/JsonTreeView-BLcsosjH.css",
+          "raw": 827,
+          "gzip": 336,
+          "brotli": 275
+        },
+        {
+          "file": "assets/CodeMirrorView-Jk5NFjIQ.css",
+          "raw": 494,
+          "gzip": 261,
+          "brotli": 203
+        }
+      ],
+      "distTotal": 878175,
+      "naiveInFirstScreen": false,
+      "codemirrorInFirstScreen": false,
+      "withinBudget": true,
+      "budgetUsagePct": 31.752604166666664
+    },
+    {
+      "variant": "a",
+      "manualChunks": true,
+      "label": "A + 手动分包",
+      "entryKeys": [
+        "index.html"
+      ],
+      "firstScreen": {
+        "files": [
+          {
+            "file": "assets/index-AouYxEb5.js",
+            "raw": 21196,
+            "gzip": 8676,
+            "brotli": 7502
+          },
+          {
+            "file": "assets/index-qtpygHAl.css",
+            "raw": 14859,
+            "gzip": 3509,
+            "brotli": 3091
+          },
+          {
+            "file": "assets/rolldown-runtime-DK3Fl9T5.js",
+            "raw": 158,
+            "gzip": 154,
+            "brotli": 116
+          },
+          {
+            "file": "assets/vendor-naive-DDRKGeKD.js",
+            "raw": 519743,
+            "gzip": 146369,
+            "brotli": 121798
+          },
+          {
+            "file": "assets/vendor-misc-ePBFPMIn.js",
+            "raw": 37220,
+            "gzip": 11757,
+            "brotli": 10788
+          },
+          {
+            "file": "assets/vendor-vue-dtEOXpyO.js",
+            "raw": 5887,
+            "gzip": 2785,
+            "brotli": 2504
+          }
+        ],
+        "total": {
+          "raw": 599063,
+          "gzip": 173250,
+          "brotli": 145799
+        }
+      },
+      "lazyChunks": [
+        {
+          "file": "assets/vendor-codemirror-CdTDFMNJ.js",
+          "raw": 341982,
+          "gzip": 109592,
+          "brotli": 94968
+        },
+        {
+          "file": "assets/S2Panel-ZkUgHES9.js",
+          "raw": 8282,
+          "gzip": 3651,
+          "brotli": 3179
+        },
+        {
+          "file": "assets/CodeMirrorView-BxlQ1utC.js",
+          "raw": 3216,
+          "gzip": 1712,
+          "brotli": 1464
+        },
+        {
+          "file": "assets/Sidebar-D8vUP00S.js",
+          "raw": 2379,
+          "gzip": 1353,
+          "brotli": 1204
+        },
+        {
+          "file": "assets/SettingsModal-B325GCHV.js",
+          "raw": 2742,
+          "gzip": 1318,
+          "brotli": 1054
+        },
+        {
+          "file": "assets/JsonTreeView-BJR7LkMq.js",
+          "raw": 2060,
+          "gzip": 1277,
+          "brotli": 1083
+        },
+        {
+          "file": "assets/S2Panel-jpTaM8n5.css",
+          "raw": 1720,
+          "gzip": 598,
+          "brotli": 477
+        },
+        {
+          "file": "assets/Sidebar-Icp3Hy7d.css",
+          "raw": 1248,
+          "gzip": 482,
+          "brotli": 390
+        },
+        {
+          "file": "assets/JsonTreeView-BLcsosjH.css",
+          "raw": 827,
+          "gzip": 336,
+          "brotli": 275
+        },
+        {
+          "file": "assets/CodeMirrorView-Jk5NFjIQ.css",
+          "raw": 494,
+          "gzip": 261,
+          "brotli": 203
+        }
+      ],
+      "distTotal": 964013,
+      "naiveInFirstScreen": true,
+      "codemirrorInFirstScreen": false,
+      "withinBudget": false,
+      "budgetUsagePct": 112.79296875
+    },
+    {
+      "variant": "b",
+      "manualChunks": true,
+      "label": "B + 手动分包",
+      "entryKeys": [
+        "index.html"
+      ],
+      "firstScreen": {
+        "files": [
+          {
+            "file": "assets/index-C-tIPKPn.js",
+            "raw": 19469,
+            "gzip": 7966,
+            "brotli": 6885
+          },
+          {
+            "file": "assets/index-qtpygHAl.css",
+            "raw": 14859,
+            "gzip": 3509,
+            "brotli": 3091
+          },
+          {
+            "file": "assets/rolldown-runtime-DK3Fl9T5.js",
+            "raw": 158,
+            "gzip": 154,
+            "brotli": 116
+          },
+          {
+            "file": "assets/vendor-naive-ccqEpVCo.js",
+            "raw": 435298,
+            "gzip": 127295,
+            "brotli": 107982
+          },
+          {
+            "file": "assets/vendor-misc-BlPlQk4P.js",
+            "raw": 37215,
+            "gzip": 11806,
+            "brotli": 10735
+          },
+          {
+            "file": "assets/vendor-vue-BPUvsnjp.js",
+            "raw": 5887,
+            "gzip": 2784,
+            "brotli": 2509
+          }
+        ],
+        "total": {
+          "raw": 512886,
+          "gzip": 153514,
+          "brotli": 131318
+        }
+      },
+      "lazyChunks": [
+        {
+          "file": "assets/vendor-codemirror-CdTDFMNJ.js",
+          "raw": 341982,
+          "gzip": 109592,
+          "brotli": 94968
+        },
+        {
+          "file": "assets/S2Panel-CfeLJUua.js",
+          "raw": 8280,
+          "gzip": 3652,
+          "brotli": 3175
+        },
+        {
+          "file": "assets/CodeMirrorView-De_c303-.js",
+          "raw": 3215,
+          "gzip": 1711,
+          "brotli": 1463
+        },
+        {
+          "file": "assets/Sidebar-DohuW2ND.js",
+          "raw": 2376,
+          "gzip": 1355,
+          "brotli": 1191
+        },
+        {
+          "file": "assets/SettingsModal-BdX07YB4.js",
+          "raw": 2741,
+          "gzip": 1314,
+          "brotli": 1042
+        },
+        {
+          "file": "assets/JsonTreeView-Bt-QH5AU.js",
+          "raw": 2057,
+          "gzip": 1275,
+          "brotli": 1079
+        },
+        {
+          "file": "assets/S2Panel-jpTaM8n5.css",
+          "raw": 1720,
+          "gzip": 598,
+          "brotli": 477
+        },
+        {
+          "file": "assets/Sidebar-Icp3Hy7d.css",
+          "raw": 1248,
+          "gzip": 482,
+          "brotli": 390
+        },
+        {
+          "file": "assets/JsonTreeView-BLcsosjH.css",
+          "raw": 827,
+          "gzip": 336,
+          "brotli": 275
+        },
+        {
+          "file": "assets/CodeMirrorView-Jk5NFjIQ.css",
+          "raw": 494,
+          "gzip": 261,
+          "brotli": 203
+        }
+      ],
+      "distTotal": 877826,
+      "naiveInFirstScreen": true,
+      "codemirrorInFirstScreen": false,
+      "withinBudget": true,
+      "budgetUsagePct": 99.94401041666666
+    }
+  ]
+}

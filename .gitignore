@@ -1,0 +1,40 @@
+# ── 构建产物 ─────────────────────────────────────────────────────────
+/target
+/dist
+/node_modules
+/src-tauri/gen
+/src-tauri/target
+
+# ── 自动生成，不入库 ─────────────────────────────────────────────────
+# unplugin-vue-components 生成的组件类型声明
+/src/types/components.d.ts
+# ts-rs 从 Rust 类型生成的 TS 定义（03 文档 §9「类型契约」）
+/src/types/generated
+# cargo-about 生成的归属声明。发布流程里生成并随安装包分发（PRD §9.5），
+# 不需要入库 —— 入库反而会每次依赖变动都产生噪声 diff。
+/THIRD-PARTY-NOTICES.txt
+# vite 分包归属 dump（调试用）
+/dist/chunk-map.json
+
+# ── Spike 中间产物 ───────────────────────────────────────────────────
+# 报告本身要入库（是决策依据），但语料库和控制台原始输出不入库
+/spikes/s6-postman-schema/corpus/
+/spikes/results/*-console.txt
+
+# ── 用户数据与密钥（PRD §10.2）─────────────────────────────────────
+# 集合文件里的敏感值走 *.local.yaml，永不入库
+*.local.yaml
+*.local.json
+.env
+.env.*
+!.env.example
+/.apogee/
+
+# ── 编辑器与系统 ─────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.log
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json.example

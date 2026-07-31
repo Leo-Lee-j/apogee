@@ -1,0 +1,33 @@
+Apogee 第三方开源组件声明 / Third-Party Software Notices
+=======================================================
+
+Apogee 使用了以下开源组件。以下为各组件的许可条款与版权声明。
+Apogee incorporates the following open-source components. Their license terms and
+copyright notices are reproduced below.
+
+本文件由 cargo-about 自动生成，请勿手工编辑。
+This file is generated automatically by cargo-about. Do not edit by hand.
+
+-----------------------------------------------------------------------
+按许可类型汇总 / Summary by license
+-----------------------------------------------------------------------
+
+{{#each overview}}
+{{count}} 个组件 / component(s): {{name}}
+{{/each}}
+
+=======================================================================
+
+{{#each licenses}}
+-----------------------------------------------------------------------
+许可 / License: {{name}}
+适用组件 / Applies to:
+{{#each used_by}}  - {{crate.name}} {{crate.version}}{{#if crate.repository}}  ({{crate.repository}}){{/if}}
+{{/each}}
+-----------------------------------------------------------------------
+
+{{text}}
+
+{{/each}}
+=======================================================================
+声明结束 / End of notices

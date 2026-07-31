@@ -1,0 +1,4140 @@
+{
+  "spike": "S1",
+  "at": "2026-07-31T11:25:18.4050756+08:00",
+  "verdict": "FAIL",
+  "windowsPass": false,
+  "platform": {
+    "os": "Microsoft Windows 11 专业版",
+    "osVersion": "10.0.26200",
+    "cpu": "Intel(R) Core(TM) Ultra 5 225H",
+    "logicalCores": 14,
+    "totalMemoryBytes": 33816190976,
+    "webview2Runtime": "150.0.4078.105",
+    "rustc": "rustc 1.95.0 (59807616e 2026-04-14)",
+    "node": "v24.15.0",
+    "appVersion": "0.1.0",
+    "powerShell": "7.6.1"
+  },
+  "config": {
+    "runs": 20,
+    "idleSettleMs": 2000,
+    "idleSamples": 5,
+    "sampleIntervalMs": 250,
+    "readyTimeoutMs": 10000,
+    "skipBuild": true,
+    "readyMarkerEnvVar": "APOGEE_S1_READY_FILE",
+    "executable": "target/release/apogee.exe"
+  },
+  "artifacts": [
+    {
+      "path": "target/release/apogee.exe",
+      "bytes": 4153856
+    },
+    {
+      "path": "target/release/bundle/nsis/Apogee_0.1.0_x64-setup.exe",
+      "bytes": 1348476
+    },
+    {
+      "path": "target/release/bundle/nsis/xAPI_0.1.0_x64-setup.exe",
+      "bytes": 1337169
+    }
+  ],
+  "size": {
+    "executableBytes": 4153856,
+    "installerBytes": 1348476
+  },
+  "startup": {
+    "gateStatistic": "p95（启动噪声大，不用 max 以免单个离群轮定结论；内存稳定，仍用 max）",
+    "firstLaunchMs": 608.5263671875,
+    "relaunchMedianMs": 590.010498046875,
+    "relaunchP95Ms": 746.313720703125,
+    "relaunchMaxMs": 746.313720703125,
+    "allMedianMs": 590.2833251953125,
+    "allP95Ms": 672.523681640625,
+    "allMinMs": 526.222412109375,
+    "allMaxMs": 746.313720703125,
+    "preJsMedianMs": 506.4833251237869,
+    "preJsMinMs": 436.0224120616913,
+    "preJsMaxMs": 663.6137206554413,
+    "firstHalfMedianMs": 584.77490234375,
+    "secondHalfMedianMs": 590.2833251953125,
+    "warmupDriftPercent": -0.933182865997422,
+    "warmupDriftDetected": false,
+    "outlierRuns": []
+  },
+  "frontend": {
+    "mountMedianMs": 66.35000002384186,
+    "readyMedianMs": 66.75000011920929,
+    "firstPaintMedianMs": 81.25,
+    "preScriptOverheadMs": 506.4833251237869
+  },
+  "harness": {
+    "clockSource": "kernel Process.StartTime → 应用写入的 readyEpochMs",
+    "overheadMedianMs": 19.68011757812502,
+    "note": "秒表口径（Start-Process 返回 + 5ms 轮询）比内核口径高出的部分，属量测台噪声",
+    "measurementSeconds": 371.6541782,
+    "cpuGateMaxPercent": 20,
+    "cpuGateTimeoutMs": 20000,
+    "systemCpuMedianPercent": 18.0,
+    "systemCpuMaxPercent": 20.0,
+    "hotRuns": [],
+    "noisyEnvironment": false,
+    "topCpuConsumers": [
+      {
+        "name": "Kiro",
+        "cpuSeconds": 70.8,
+        "oneCorePercent": 19.0,
+        "allCoresPercent": 1.4
+      },
+      {
+        "name": "Kiro",
+        "cpuSeconds": 58.9,
+        "oneCorePercent": 15.9,
+        "allCoresPercent": 1.1
+      },
+      {
+        "name": "Feishu",
+        "cpuSeconds": 36.2,
+        "oneCorePercent": 9.7,
+        "allCoresPercent": 0.7
+      },
+      {
+        "name": "msedge",
+        "cpuSeconds": 21.6,
+        "oneCorePercent": 5.8,
+        "allCoresPercent": 0.4
+      },
+      {
+        "name": "Kiro",
+        "cpuSeconds": 20.4,
+        "oneCorePercent": 5.5,
+        "allCoresPercent": 0.4
+      },
+      {
+        "name": "msedgewebview2",
+        "cpuSeconds": 17.1,
+        "oneCorePercent": 4.6,
+        "allCoresPercent": 0.3
+      }
+    ]
+  },
+  "idle": {
+    "totalSampleCount": 100,
+    "processCountMax": 7,
+    "memoryMetric": "privateWorkingSet（Working Set - Private，等于任务管理器「内存」列）",
+    "gateStatistic": "max（内存逐样本稳定，取最差观测值）",
+    "treePrivateWorkingSetMedianBytes": 163278848,
+    "treePrivateWorkingSetMaxBytes": 179798016,
+    "firstLaunchPrivateWorkingSetMaxBytes": 163819520,
+    "relaunchPrivateWorkingSetMedianBytes": 163270656,
+    "relaunchPrivateWorkingSetMaxBytes": 179798016,
+    "peakRun": 16,
+    "spikyRuns": [
+      16
+    ],
+    "treeCommitMedianBytes": 235134976,
+    "treeWorkingSetSumMedianBytes": 470769664,
+    "sharedPageInflation": 2.8832250457818027,
+    "rootPrivateWorkingSetMedianBytes": 3895296,
+    "rootPrivateWorkingSetMaxBytes": 9773056,
+    "rootCommitMedianBytes": 5664768,
+    "webviewPrivateWorkingSetMedianBytes": 159383552,
+    "roleBreakdown": [
+      {
+        "role": "gpu-process",
+        "privateWorkingSetMedianBytes": 78733312,
+        "instancesPerRun": 1
+      },
+      {
+        "role": "browser",
+        "privateWorkingSetMedianBytes": 37517312,
+        "instancesPerRun": 1
+      },
+      {
+        "role": "renderer",
+        "privateWorkingSetMedianBytes": 24549376,
+        "instancesPerRun": 1
+      },
+      {
+        "role": "utility",
+        "privateWorkingSetMedianBytes": 5271552,
+        "instancesPerRun": 2
+      },
+      {
+        "role": "host(rust)",
+        "privateWorkingSetMedianBytes": 3885056,
+        "instancesPerRun": 1
+      },
+      {
+        "role": "crashpad-handler",
+        "privateWorkingSetMedianBytes": 2148352,
+        "instancesPerRun": 1
+      }
+    ]
+  },
+  "gates": [
+    {
+      "id": "PRD-冷启动",
+      "scope": "prd",
+      "source": "PRD §5.1",
+      "criterion": "冷启动到可交互 < 800 ms（首轮）",
+      "budget": 800.0,
+      "measured": 608.5263671875,
+      "unit": "ms",
+      "pass": true
+    },
+    {
+      "id": "PRD-热启动",
+      "scope": "prd",
+      "source": "PRD §5.1",
+      "criterion": "热启动 < 300 ms（OS 缓存已热的重启轮次 p95）",
+      "budget": 300.0,
+      "measured": 746.313720703125,
+      "unit": "ms",
+      "pass": false
+    },
+    {
+      "id": "PRD-空闲内存",
+      "scope": "prd",
+      "source": "PRD §5.1",
+      "criterion": "空闲常驻内存 < 220 MB（Windows；进程树私有常驻峰值）。本轮条件是空壳，属地板检查",
+      "budget": 220.0,
+      "measured": 171.46875,
+      "unit": "MB",
+      "pass": true
+    },
+    {
+      "id": "PRD-Rust常驻",
+      "scope": "prd",
+      "source": "PRD §5.1",
+      "criterion": "Rust 主进程私有常驻 < 20 MB（峰值）—— 内存预算里唯一可控项",
+      "budget": 20.0,
+      "measured": 9.3203125,
+      "unit": "MB",
+      "pass": true
+    },
+    {
+      "id": "PRD-安装包",
+      "scope": "prd",
+      "source": "PRD §5.1",
+      "criterion": "安装包体积 < 15 MB（NSIS，WebView2 走 downloadBootstrapper）",
+      "budget": 15.0,
+      "measured": 1.2860069274902344,
+      "unit": "MB",
+      "pass": true
+    }
+  ],
+  "referenceApp": {
+    "name": "dbx 0.5.70",
+    "source": "https://github.com/t8y2/dbx",
+    "stack": "Tauri + Vue + WebView2",
+    "condition": "实际使用中（已连接数据库、数据网格与 CodeMirror 已加载）",
+    "measuredAt": "2026-07-30",
+    "manual": true,
+    "processCount": 7,
+    "privateWorkingSetMbRange": [
+      188.4,
+      194.3
+    ],
+    "hostPrivateWorkingSetMb": 5.79,
+    "workingSetSumMb": 298.5,
+    "commitMb": 401.2,
+    "roles": {
+      "gpu-process": 81.9,
+      "renderer": 75.1,
+      "browser": 18.6,
+      "utility+crashpad": 6.5
+    },
+    "webview2Flags": "默认配置（无 --disable-gpu / --single-process）"
+  },
+  "notMeasured": [
+    "macOS 侧冷启动与内存：S1 声明覆盖双平台，本脚本只跑 Windows。macOS 是 WKWebView，进程模型与内存口径都不同，不能套用本报告的数字。",
+    "真正的冷缓存启动：未清理 OS 文件缓存、未重启、未排除 Defender 首扫，首轮只是「本次会话首次拉起」。",
+    "PRD §5.1「空闲常驻内存」的量测条件是 1 工作区 + 3 标签；当前空壳只有 1 个空标签，实测值是地板不是达标证明。那个条件由 Spike S3 量（pnpm spike:s3）。",
+    "PRD §5.1「磁盘占用（安装后）< 50MB」：本脚本只量 exe 与安装包体积，未做安装后目录统计（还需计入 EBWebView 用户数据目录）。",
+    "PRD §5.1「50 标签 < 400MB」：需要标签虚拟化落地后才有意义。",
+    "共享内存的归属：私有工作集刻意排除共享页，因此本报告的数字不包含 WebView2 Runtime 的共享映射；这是「本应用额外占用多少内存」的口径，不是「系统总共为它花了多少」。"
+  ],
+  "runs": [
+    {
+      "run": 1,
+      "classification": "first-clean-process-launch",
+      "externalReadyMs": 608.5263671875,
+      "harnessObservedMs": 654.8044,
+      "harnessOverheadMs": 46.27803281249999,
+      "systemCpuBeforeLaunchPercent": 16.0,
+      "cpuSettledBeforeLaunch": true,
+      "cpuSettleWaitedMs": 1287.5156,
+      "systemCpuDuringIdleMedianPercent": 33.0,
+      "frontend": {
+        "firstPaintMs": 78.39999985694885,
+        "mountMs": 65.09999990463257,
+        "readyMs": 65.39999985694885
+      },
+      "idle": {
+        "sampleCount": 5,
+        "treePrivateWorkingSetMedianBytes": 163704832,
+        "treePrivateWorkingSetMaxBytes": 163819520,
+        "treeCommitMedianBytes": 235319296,
+        "treeWorkingSetSumMedianBytes": 471048192,
+        "rootPrivateWorkingSetMedianBytes": 3870720,
+        "rootCommitMedianBytes": 5664768,
+        "processCountMax": 7
+      },
+      "processBreakdown": [
+        {
+          "processId": 46492,
+          "name": "msedgewebview2",
+          "role": "gpu-process",
+          "privateWorkingSetBytes": 79740928,
+          "workingSetBytes": 136368128,
+          "commitBytes": 111210496
+        },
+        {
+          "processId": 91744,
+          "name": "msedgewebview2",
+          "role": "browser",
+          "privateWorkingSetBytes": 37519360,
+          "workingSetBytes": 146219008,
+          "commitBytes": 49876992
+        },
+        {
+          "processId": 55504,
+          "name": "msedgewebview2",
+          "role": "renderer",
+          "privateWorkingSetBytes": 24666112,
+          "workingSetBytes": 80097280,
+          "commitBytes": 35708928
+        },
+        {
+          "processId": 32524,
+          "name": "msedgewebview2",
+          "role": "utility",
+          "privateWorkingSetBytes": 7917568,
+          "workingSetBytes": 43114496,
+          "commitBytes": 14815232
+        },
+        {
+          "processId": 82112,
+          "name": "apogee",
+          "role": "host(rust)",
+          "privateWorkingSetBytes": 3870720,
+          "workingSetBytes": 27123712,
+          "commitBytes": 5664768
+        },
+        {
+          "processId": 24052,
+          "name": "msedgewebview2",
+          "role": "utility",
+          "privateWorkingSetBytes": 3399680,
+          "workingSetBytes": 21348352,
+          "commitBytes": 9691136
+        },
+        {
+          "processId": 85444,
+          "name": "msedgewebview2",
+          "role": "crashpad-handler",
+          "privateWorkingSetBytes": 2146304,
+          "workingSetBytes": 12673024,
+          "commitBytes": 3207168
+        }
+      ],
+      "memorySamples": [
+        {
+          "sampledAt": "2026-07-31T11:19:11.9481262+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 163704832,
+          "treeCommitBytes": 235319296,
+          "treeWorkingSetSumBytes": 471048192,
+          "rootPrivateWorkingSetBytes": 3870720,
+          "rootCommitBytes": 5664768,
+          "rootWorkingSetBytes": 27123712
+        },
+        {
+          "sampledAt": "2026-07-31T11:19:13.5586472+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 163819520,
+          "treeCommitBytes": 235560960,
+          "treeWorkingSetSumBytes": 471306240,
+          "rootPrivateWorkingSetBytes": 3870720,
+          "rootCommitBytes": 5664768,
+          "rootWorkingSetBytes": 27123712
+        },
+        {
+          "sampledAt": "2026-07-31T11:19:15.2935887+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 163774464,
+          "treeCommitBytes": 235401216,
+          "treeWorkingSetSumBytes": 471191552,
+          "rootPrivateWorkingSetBytes": 3870720,
+          "rootCommitBytes": 5664768,
+          "rootWorkingSetBytes": 27123712
+        },
+        {
+          "sampledAt": "2026-07-31T11:19:16.8536542+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 161558528,
+          "treeCommitBytes": 230375424,
+          "treeWorkingSetSumBytes": 467116032,
+          "rootPrivateWorkingSetBytes": 3870720,
+          "rootCommitBytes": 5664768,
+          "rootWorkingSetBytes": 27123712
+        },
+        {
+          "sampledAt": "2026-07-31T11:19:18.3964128+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 159260672,
+          "treeCommitBytes": 230174720,
+          "treeWorkingSetSumBytes": 466944000,
+          "rootPrivateWorkingSetBytes": 3870720,
+          "rootCommitBytes": 5664768,
+          "rootWorkingSetBytes": 27123712,
+          "processes": [
+            {
+              "processId": 46492,
+              "name": "msedgewebview2",
+              "role": "gpu-process",
+              "privateWorkingSetBytes": 79740928,
+              "workingSetBytes": 136368128,
+              "commitBytes": 111210496
+            },
+            {
+              "processId": 91744,
+              "name": "msedgewebview2",
+              "role": "browser",
+              "privateWorkingSetBytes": 37519360,
+              "workingSetBytes": 146219008,
+              "commitBytes": 49876992
+            },
+            {
+              "processId": 55504,
+              "name": "msedgewebview2",
+              "role": "renderer",
+              "privateWorkingSetBytes": 24666112,
+              "workingSetBytes": 80097280,
+              "commitBytes": 35708928
+            },
+            {
+              "processId": 32524,
+              "name": "msedgewebview2",
+              "role": "utility",
+              "privateWorkingSetBytes": 7917568,
+              "workingSetBytes": 43114496,
+              "commitBytes": 14815232
+            },
+            {
+              "processId": 82112,
+              "name": "apogee",
+              "role": "host(rust)",
+              "privateWorkingSetBytes": 3870720,
+              "workingSetBytes": 27123712,
+              "commitBytes": 5664768
+            },
+            {
+              "processId": 24052,
+              "name": "msedgewebview2",
+              "role": "utility",
+              "privateWorkingSetBytes": 3399680,
+              "workingSetBytes": 21348352,
+              "commitBytes": 9691136
+            },
+            {
+              "processId": 85444,
+              "name": "msedgewebview2",
+              "role": "crashpad-handler",
+              "privateWorkingSetBytes": 2146304,
+              "workingSetBytes": 12673024,
+              "commitBytes": 3207168
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "run": 2,
+      "classification": "clean-process-relaunch",
+      "externalReadyMs": 550.800537109375,
+      "harnessObservedMs": 567.5636,
+      "harnessOverheadMs": 16.76306289062495,
+      "systemCpuBeforeLaunchPercent": 17.0,
+      "cpuSettledBeforeLaunch": true,
+      "cpuSettleWaitedMs": 1880.0691,
+      "systemCpuDuringIdleMedianPercent": 22.0,
+      "frontend": {
+        "firstPaintMs": 79.10000014305115,
+        "mountMs": 65.40000009536743,
+        "readyMs": 65.70000004768372
+      },
+      "idle": {
+        "sampleCount": 5,
+        "treePrivateWorkingSetMedianBytes": 163446784,
+        "treePrivateWorkingSetMaxBytes": 163631104,
+        "treeCommitMedianBytes": 235855872,
+        "treeWorkingSetSumMedianBytes": 473214976,
+        "rootPrivateWorkingSetMedianBytes": 3870720,
+        "rootCommitMedianBytes": 5406720,
+        "processCountMax": 7
+      },
+      "processBreakdown": [
+        {
+          "processId": 62900,
+          "name": "msedgewebview2",
+          "role": "gpu-process",
+          "privateWorkingSetBytes": 78696448,
+          "workingSetBytes": 135241728,
+          "commitBytes": 110047232
+        },
+        {
+          "processId": 72796,
+          "name": "msedgewebview2",
+          "role": "browser",
+          "privateWorkingSetBytes": 37908480,
+          "workingSetBytes": 147066880,
+          "commitBytes": 50352128
+        },
+        {
+          "processId": 94104,
+          "name": "msedgewebview2",
+          "role": "renderer",
+          "privateWorkingSetBytes": 24547328,
+          "workingSetBytes": 79884288,
+          "commitBytes": 36573184
+        },
+        {
+          "processId": 93472,
+          "name": "msedgewebview2",
+          "role": "utility",
+          "privateWorkingSetBytes": 7766016,
+          "workingSetBytes": 42881024,
+          "commitBytes": 14626816
+        },
+        {
+          "processId": 92268,
+          "name": "apogee",
+          "role": "host(rust)",
+          "privateWorkingSetBytes": 3870720,
+          "workingSetBytes": 27025408,
+          "commitBytes": 5406720
+        },
+        {
+          "processId": 94060,
+          "name": "msedgewebview2",
+          "role": "utility",
+          "privateWorkingSetBytes": 3399680,
+          "workingSetBytes": 21340160,
+          "commitBytes": 9691136
+        },
+        {
+          "processId": 92528,
+          "name": "msedgewebview2",
+          "role": "crashpad-handler",
+          "privateWorkingSetBytes": 2351104,
+          "workingSetBytes": 15151104,
+          "commitBytes": 3469312
+        }
+      ],
+      "memorySamples": [
+        {
+          "sampledAt": "2026-07-31T11:19:24.7848012+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 163393536,
+          "treeCommitBytes": 235855872,
+          "treeWorkingSetSumBytes": 473214976,
+          "rootPrivateWorkingSetBytes": 3887104,
+          "rootCommitBytes": 5406720,
+          "rootWorkingSetBytes": 27025408
+        },
+        {
+          "sampledAt": "2026-07-31T11:19:26.3305840+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 163446784,
+          "treeCommitBytes": 235945984,
+          "treeWorkingSetSumBytes": 473313280,
+          "rootPrivateWorkingSetBytes": 3870720,
+          "rootCommitBytes": 5406720,
+          "rootWorkingSetBytes": 27025408
+        },
+        {
+          "sampledAt": "2026-07-31T11:19:27.9183258+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 163631104,
+          "treeCommitBytes": 236146688,
+          "treeWorkingSetSumBytes": 473567232,
+          "rootPrivateWorkingSetBytes": 3870720,
+          "rootCommitBytes": 5406720,
+          "rootWorkingSetBytes": 27025408
+        },
+        {
+          "sampledAt": "2026-07-31T11:19:29.4583730+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 163549184,
+          "treeCommitBytes": 233754624,
+          "treeWorkingSetSumBytes": 471162880,
+          "rootPrivateWorkingSetBytes": 3870720,
+          "rootCommitBytes": 5406720,
+          "rootWorkingSetBytes": 27025408
+        },
+        {
+          "sampledAt": "2026-07-31T11:19:31.0137805+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 158539776,
+          "treeCommitBytes": 230166528,
+          "treeWorkingSetSumBytes": 468590592,
+          "rootPrivateWorkingSetBytes": 3870720,
+          "rootCommitBytes": 5406720,
+          "rootWorkingSetBytes": 27025408,
+          "processes": [
+            {
+              "processId": 62900,
+              "name": "msedgewebview2",
+              "role": "gpu-process",
+              "privateWorkingSetBytes": 78696448,
+              "workingSetBytes": 135241728,
+              "commitBytes": 110047232
+            },
+            {
+              "processId": 72796,
+              "name": "msedgewebview2",
+              "role": "browser",
+              "privateWorkingSetBytes": 37908480,
+              "workingSetBytes": 147066880,
+              "commitBytes": 50352128
+            },
+            {
+              "processId": 94104,
+              "name": "msedgewebview2",
+              "role": "renderer",
+              "privateWorkingSetBytes": 24547328,
+              "workingSetBytes": 79884288,
+              "commitBytes": 36573184
+            },
+            {
+              "processId": 93472,
+              "name": "msedgewebview2",
+              "role": "utility",
+              "privateWorkingSetBytes": 7766016,
+              "workingSetBytes": 42881024,
+              "commitBytes": 14626816
+            },
+            {
+              "processId": 92268,
+              "name": "apogee",
+              "role": "host(rust)",
+              "privateWorkingSetBytes": 3870720,
+              "workingSetBytes": 27025408,
+              "commitBytes": 5406720
+            },
+            {
+              "processId": 94060,
+              "name": "msedgewebview2",
+              "role": "utility",
+              "privateWorkingSetBytes": 3399680,
+              "workingSetBytes": 21340160,
+              "commitBytes": 9691136
+            },
+            {
+              "processId": 92528,
+              "name": "msedgewebview2",
+              "role": "crashpad-handler",
+              "privateWorkingSetBytes": 2351104,
+              "workingSetBytes": 15151104,
+              "commitBytes": 3469312
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "run": 3,
+      "classification": "clean-process-relaunch",
+      "externalReadyMs": 561.0234375,
+      "harnessObservedMs": 584.0486,
+      "harnessOverheadMs": 23.025162499999965,
+      "systemCpuBeforeLaunchPercent": 17.0,
+      "cpuSettledBeforeLaunch": true,
+      "cpuSettleWaitedMs": 2673.0823,
+      "systemCpuDuringIdleMedianPercent": 32.0,
+      "frontend": {
+        "firstPaintMs": 77.29999995231628,
+        "mountMs": 64.0,
+        "readyMs": 64.40000009536743
+      },
+      "idle": {
+        "sampleCount": 5,
+        "treePrivateWorkingSetMedianBytes": 164118528,
+        "treePrivateWorkingSetMaxBytes": 164261888,
+        "treeCommitMedianBytes": 236474368,
+        "treeWorkingSetSumMedianBytes": 471347200,
+        "rootPrivateWorkingSetMedianBytes": 3936256,
+        "rootCommitMedianBytes": 5435392,
+        "processCountMax": 7
+      },
+      "processBreakdown": [
+        {
+          "processId": 78056,
+          "name": "msedgewebview2",
+          "role": "gpu-process",
+          "privateWorkingSetBytes": 79339520,
+          "workingSetBytes": 135892992,
+          "commitBytes": 110825472
+        },
+        {
+          "processId": 42180,
+          "name": "msedgewebview2",
+          "role": "browser",
+          "privateWorkingSetBytes": 37994496,
+          "workingSetBytes": 148709376,
+          "commitBytes": 49713152
+        },
+        {
+          "processId": 22932,
+          "name": "msedgewebview2",
+          "role": "renderer",
+          "privateWorkingSetBytes": 24600576,
+          "workingSetBytes": 80039936,
+          "commitBytes": 36737024
+        },
+        {
+          "processId": 17916,
+          "name": "msedgewebview2",
+          "role": "utility",
+          "privateWorkingSetBytes": 7929856,
+          "workingSetBytes": 43147264,
+          "commitBytes": 14839808
+        },
+        {
+          "processId": 94844,
+          "name": "apogee",
+          "role": "host(rust)",
+          "privateWorkingSetBytes": 3936256,
+          "workingSetBytes": 27217920,
+          "commitBytes": 5435392
+        },
+        {
+          "processId": 57888,
+          "name": "msedgewebview2",
+          "role": "utility",
+          "privateWorkingSetBytes": 3416064,
+          "workingSetBytes": 21381120,
+          "commitBytes": 9711616
+        },
+        {
+          "processId": 88956,
+          "name": "msedgewebview2",
+          "role": "crashpad-handler",
+          "privateWorkingSetBytes": 2146304,
+          "workingSetBytes": 12689408,
+          "commitBytes": 3198976
+        }
+      ],
+      "memorySamples": [
+        {
+          "sampledAt": "2026-07-31T11:19:38.1990989+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 164069376,
+          "treeCommitBytes": 236474368,
+          "treeWorkingSetSumBytes": 471347200,
+          "rootPrivateWorkingSetBytes": 3952640,
+          "rootCommitBytes": 5435392,
+          "rootWorkingSetBytes": 27217920
+        },
+        {
+          "sampledAt": "2026-07-31T11:19:39.7175450+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 164118528,
+          "treeCommitBytes": 236556288,
+          "treeWorkingSetSumBytes": 471429120,
+          "rootPrivateWorkingSetBytes": 3936256,
+          "rootCommitBytes": 5435392,
+          "rootWorkingSetBytes": 27217920
+        },
+        {
+          "sampledAt": "2026-07-31T11:19:41.3847160+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 164261888,
+          "treeCommitBytes": 236724224,
+          "treeWorkingSetSumBytes": 471650304,
+          "rootPrivateWorkingSetBytes": 3936256,
+          "rootCommitBytes": 5435392,
+          "rootWorkingSetBytes": 27217920
+        },
+        {
+          "sampledAt": "2026-07-31T11:19:43.0164049+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 164188160,
+          "treeCommitBytes": 233623552,
+          "treeWorkingSetSumBytes": 468643840,
+          "rootPrivateWorkingSetBytes": 3936256,
+          "rootCommitBytes": 5435392,
+          "rootWorkingSetBytes": 27217920
+        },
+        {
+          "sampledAt": "2026-07-31T11:19:44.6521591+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 159363072,
+          "treeCommitBytes": 230461440,
+          "treeWorkingSetSumBytes": 469078016,
+          "rootPrivateWorkingSetBytes": 3936256,
+          "rootCommitBytes": 5435392,
+          "rootWorkingSetBytes": 27217920,
+          "processes": [
+            {
+              "processId": 78056,
+              "name": "msedgewebview2",
+              "role": "gpu-process",
+              "privateWorkingSetBytes": 79339520,
+              "workingSetBytes": 135892992,
+              "commitBytes": 110825472
+            },
+            {
+              "processId": 42180,
+              "name": "msedgewebview2",
+              "role": "browser",
+              "privateWorkingSetBytes": 37994496,
+              "workingSetBytes": 148709376,
+              "commitBytes": 49713152
+            },
+            {
+              "processId": 22932,
+              "name": "msedgewebview2",
+              "role": "renderer",
+              "privateWorkingSetBytes": 24600576,
+              "workingSetBytes": 80039936,
+              "commitBytes": 36737024
+            },
+            {
+              "processId": 17916,
+              "name": "msedgewebview2",
+              "role": "utility",
+              "privateWorkingSetBytes": 7929856,
+              "workingSetBytes": 43147264,
+              "commitBytes": 14839808
+            },
+            {
+              "processId": 94844,
+              "name": "apogee",
+              "role": "host(rust)",
+              "privateWorkingSetBytes": 3936256,
+              "workingSetBytes": 27217920,
+              "commitBytes": 5435392
+            },
+            {
+              "processId": 57888,
+              "name": "msedgewebview2",
+              "role": "utility",
+              "privateWorkingSetBytes": 3416064,
+              "workingSetBytes": 21381120,
+              "commitBytes": 9711616
+            },
+            {
+              "processId": 88956,
+              "name": "msedgewebview2",
+              "role": "crashpad-handler",
+              "privateWorkingSetBytes": 2146304,
+              "workingSetBytes": 12689408,
+              "commitBytes": 3198976
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "run": 4,
+      "classification": "clean-process-relaunch",
+      "externalReadyMs": 672.523681640625,
+      "harnessObservedMs": 693.618,
+      "harnessOverheadMs": 21.094318359375052,
+      "systemCpuBeforeLaunchPercent": 13.0,
+      "cpuSettledBeforeLaunch": true,
+      "cpuSettleWaitedMs": 9019.115,
+      "systemCpuDuringIdleMedianPercent": 21.0,
+      "frontend": {
+        "firstPaintMs": 90.29999995231628,
+        "mountMs": 75.70000004768372,
+        "readyMs": 75.90000009536743
+      },
+      "idle": {
+        "sampleCount": 5,
+        "treePrivateWorkingSetMedianBytes": 170962944,
+        "treePrivateWorkingSetMaxBytes": 171098112,
+        "treeCommitMedianBytes": 246034432,
+        "treeWorkingSetSumMedianBytes": 488558592,
+        "rootPrivateWorkingSetMedianBytes": 9756672,
+        "rootCommitMedianBytes": 12668928,
+        "processCountMax": 7
+      },
+      "processBreakdown": [
+        {
+          "processId": 94828,
+          "name": "msedgewebview2",
+          "role": "gpu-process",
+          "privateWorkingSetBytes": 67080192,
+          "workingSetBytes": 123731968,
+          "commitBytes": 98480128
+        },
+        {
+          "processId": 19608,
+          "name": "msedgewebview2",
+          "role": "browser",
+          "privateWorkingSetBytes": 38244352,
+          "workingSetBytes": 149151744,
+          "commitBytes": 51089408
+        },
+        {
+          "processId": 56912,
+          "name": "msedgewebview2",
+          "role": "renderer",
+          "privateWorkingSetBytes": 24551424,
+          "workingSetBytes": 79876096,
+          "commitBytes": 37593088
+        },
+        {
+          "processId": 81908,
+          "name": "apogee",
+          "role": "host(rust)",
+          "privateWorkingSetBytes": 9756672,
+          "workingSetBytes": 41017344,
+          "commitBytes": 12668928
+        },
+        {
+          "processId": 88412,
+          "name": "msedgewebview2",
+          "role": "utility",
+          "privateWorkingSetBytes": 7815168,
+          "workingSetBytes": 42975232,
+          "commitBytes": 14688256
+        },
+        {
+          "processId": 73404,
+          "name": "msedgewebview2",
+          "role": "utility",
+          "privateWorkingSetBytes": 3403776,
+          "workingSetBytes": 21356544,
+          "commitBytes": 9691136
+        },
+        {
+          "processId": 74984,
+          "name": "msedgewebview2",
+          "role": "crashpad-handler",
+          "privateWorkingSetBytes": 2109440,
+          "workingSetBytes": 12664832,
+          "commitBytes": 3170304
+        }
+      ],
+      "memorySamples": [
+        {
+          "sampledAt": "2026-07-31T11:19:58.2923928+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 170905600,
+          "treeCommitBytes": 245952512,
+          "treeWorkingSetSumBytes": 488468480,
+          "rootPrivateWorkingSetBytes": 9773056,
+          "rootCommitBytes": 12668928,
+          "rootWorkingSetBytes": 41017344
+        },
+        {
+          "sampledAt": "2026-07-31T11:19:59.7961372+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 170962944,
+          "treeCommitBytes": 246034432,
+          "treeWorkingSetSumBytes": 488558592,
+          "rootPrivateWorkingSetBytes": 9756672,
+          "rootCommitBytes": 12668928,
+          "rootWorkingSetBytes": 41017344
+        },
+        {
+          "sampledAt": "2026-07-31T11:20:01.2990681+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 171098112,
+          "treeCommitBytes": 246198272,
+          "treeWorkingSetSumBytes": 488755200,
+          "rootPrivateWorkingSetBytes": 9756672,
+          "rootCommitBytes": 12668928,
+          "rootWorkingSetBytes": 41017344
+        },
+        {
+          "sampledAt": "2026-07-31T11:20:02.8536702+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 171048960,
+          "treeCommitBytes": 246153216,
+          "treeWorkingSetSumBytes": 488747008,
+          "rootPrivateWorkingSetBytes": 9756672,
+          "rootCommitBytes": 12668928,
+          "rootWorkingSetBytes": 41017344
+        },
+        {
+          "sampledAt": "2026-07-31T11:20:04.3785057+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 152961024,
+          "treeCommitBytes": 227381248,
+          "treeWorkingSetSumBytes": 470773760,
+          "rootPrivateWorkingSetBytes": 9756672,
+          "rootCommitBytes": 12668928,
+          "rootWorkingSetBytes": 41017344,
+          "processes": [
+            {
+              "processId": 94828,
+              "name": "msedgewebview2",
+              "role": "gpu-process",
+              "privateWorkingSetBytes": 67080192,
+              "workingSetBytes": 123731968,
+              "commitBytes": 98480128
+            },
+            {
+              "processId": 19608,
+              "name": "msedgewebview2",
+              "role": "browser",
+              "privateWorkingSetBytes": 38244352,
+              "workingSetBytes": 149151744,
+              "commitBytes": 51089408
+            },
+            {
+              "processId": 56912,
+              "name": "msedgewebview2",
+              "role": "renderer",
+              "privateWorkingSetBytes": 24551424,
+              "workingSetBytes": 79876096,
+              "commitBytes": 37593088
+            },
+            {
+              "processId": 81908,
+              "name": "apogee",
+              "role": "host(rust)",
+              "privateWorkingSetBytes": 9756672,
+              "workingSetBytes": 41017344,
+              "commitBytes": 12668928
+            },
+            {
+              "processId": 88412,
+              "name": "msedgewebview2",
+              "role": "utility",
+              "privateWorkingSetBytes": 7815168,
+              "workingSetBytes": 42975232,
+              "commitBytes": 14688256
+            },
+            {
+              "processId": 73404,
+              "name": "msedgewebview2",
+              "role": "utility",
+              "privateWorkingSetBytes": 3403776,
+              "workingSetBytes": 21356544,
+              "commitBytes": 9691136
+            },
+            {
+              "processId": 74984,
+              "name": "msedgewebview2",
+              "role": "crashpad-handler",
+              "privateWorkingSetBytes": 2109440,
+              "workingSetBytes": 12664832,
+              "commitBytes": 3170304
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "run": 5,
+      "classification": "clean-process-relaunch",
+      "externalReadyMs": 640.4814453125,
+      "harnessObservedMs": 662.1164,
+      "harnessOverheadMs": 21.6349546875,
+      "systemCpuBeforeLaunchPercent": 14.0,
+      "cpuSettledBeforeLaunch": true,
+      "cpuSettleWaitedMs": 1868.1276,
+      "systemCpuDuringIdleMedianPercent": 19.0,
+      "frontend": {
+        "firstPaintMs": 83.40000009536743,
+        "mountMs": 70.0,
+        "readyMs": 70.30000019073486
+      },
+      "idle": {
+        "sampleCount": 5,
+        "treePrivateWorkingSetMedianBytes": 172834816,
+        "treePrivateWorkingSetMaxBytes": 172957696,
+        "treeCommitMedianBytes": 245432320,
+        "treeWorkingSetSumMedianBytes": 490901504,
+        "rootPrivateWorkingSetMedianBytes": 9752576,
+        "rootCommitMedianBytes": 12881920,
+        "processCountMax": 7
+      },
+      "processBreakdown": [
+        {
+          "processId": 51440,
+          "name": "msedgewebview2",
+          "role": "gpu-process",
+          "privateWorkingSetBytes": 67063808,
+          "workingSetBytes": 123719680,
+          "commitBytes": 98471936
+        },
+        {
+          "processId": 95448,
+          "name": "msedgewebview2",
+          "role": "browser",
+          "privateWorkingSetBytes": 38281216,
+          "workingSetBytes": 149696512,
+          "commitBytes": 50020352
+        },
+        {
+          "processId": 93480,
+          "name": "msedgewebview2",
+          "role": "renderer",
+          "privateWorkingSetBytes": 27238400,
+          "workingSetBytes": 82550784,
+          "commitBytes": 38486016
+        },
+        {
+          "processId": 58092,
+          "name": "apogee",
+          "role": "host(rust)",
+          "privateWorkingSetBytes": 9752576,
+          "workingSetBytes": 41078784,
+          "commitBytes": 12881920
+        },
+        {
+          "processId": 86892,
+          "name": "msedgewebview2",
+          "role": "utility",
+          "privateWorkingSetBytes": 7794688,
+          "workingSetBytes": 42942464,
+          "commitBytes": 14671872
+        },
+        {
+          "processId": 83832,
+          "name": "msedgewebview2",
+          "role": "utility",
+          "privateWorkingSetBytes": 3407872,
+          "workingSetBytes": 21364736,
+          "commitBytes": 9699328
+        },
+        {
+          "processId": 77980,
+          "name": "msedgewebview2",
+          "role": "crashpad-handler",
+          "privateWorkingSetBytes": 2146304,
+          "workingSetBytes": 12685312,
+          "commitBytes": 3203072
+        }
+      ],
+      "memorySamples": [
+        {
+          "sampledAt": "2026-07-31T11:20:10.7685058+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 172769280,
+          "treeCommitBytes": 245432320,
+          "treeWorkingSetSumBytes": 490901504,
+          "rootPrivateWorkingSetBytes": 9768960,
+          "rootCommitBytes": 12881920,
+          "rootWorkingSetBytes": 41078784
+        },
+        {
+          "sampledAt": "2026-07-31T11:20:12.2685136+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 172834816,
+          "treeCommitBytes": 245538816,
+          "treeWorkingSetSumBytes": 491020288,
+          "rootPrivateWorkingSetBytes": 9752576,
+          "rootCommitBytes": 12881920,
+          "rootWorkingSetBytes": 41078784
+        },
+        {
+          "sampledAt": "2026-07-31T11:20:13.7571687+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 172957696,
+          "treeCommitBytes": 245686272,
+          "treeWorkingSetSumBytes": 491200512,
+          "rootPrivateWorkingSetBytes": 9752576,
+          "rootCommitBytes": 12881920,
+          "rootWorkingSetBytes": 41078784
+        },
+        {
+          "sampledAt": "2026-07-31T11:20:15.3857041+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 172920832,
+          "treeCommitBytes": 243798016,
+          "treeWorkingSetSumBytes": 489295872,
+          "rootPrivateWorkingSetBytes": 9752576,
+          "rootCommitBytes": 12881920,
+          "rootWorkingSetBytes": 41078784
+        },
+        {
+          "sampledAt": "2026-07-31T11:20:16.8708051+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 155684864,
+          "treeCommitBytes": 227434496,
+          "treeWorkingSetSumBytes": 474038272,
+          "rootPrivateWorkingSetBytes": 9752576,
+          "rootCommitBytes": 12881920,
+          "rootWorkingSetBytes": 41078784,
+          "processes": [
+            {
+              "processId": 51440,
+              "name": "msedgewebview2",
+              "role": "gpu-process",
+              "privateWorkingSetBytes": 67063808,
+              "workingSetBytes": 123719680,
+              "commitBytes": 98471936
+            },
+            {
+              "processId": 95448,
+              "name": "msedgewebview2",
+              "role": "browser",
+              "privateWorkingSetBytes": 38281216,
+              "workingSetBytes": 149696512,
+              "commitBytes": 50020352
+            },
+            {
+              "processId": 93480,
+              "name": "msedgewebview2",
+              "role": "renderer",
+              "privateWorkingSetBytes": 27238400,
+              "workingSetBytes": 82550784,
+              "commitBytes": 38486016
+            },
+            {
+              "processId": 58092,
+              "name": "apogee",
+              "role": "host(rust)",
+              "privateWorkingSetBytes": 9752576,
+              "workingSetBytes": 41078784,
+              "commitBytes": 12881920
+            },
+            {
+              "processId": 86892,
+              "name": "msedgewebview2",
+              "role": "utility",
+              "privateWorkingSetBytes": 7794688,
+              "workingSetBytes": 42942464,
+              "commitBytes": 14671872
+            },
+            {
+              "processId": 83832,
+              "name": "msedgewebview2",
+              "role": "utility",
+              "privateWorkingSetBytes": 3407872,
+              "workingSetBytes": 21364736,
+              "commitBytes": 9699328
+            },
+            {
+              "processId": 77980,
+              "name": "msedgewebview2",
+              "role": "crashpad-handler",
+              "privateWorkingSetBytes": 2146304,
+              "workingSetBytes": 12685312,
+              "commitBytes": 3203072
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "run": 6,
+      "classification": "clean-process-relaunch",
+      "externalReadyMs": 618.64697265625,
+      "harnessObservedMs": 628.1998,
+      "harnessOverheadMs": 9.552827343749982,
+      "systemCpuBeforeLaunchPercent": 16.0,
+      "cpuSettledBeforeLaunch": true,
+      "cpuSettleWaitedMs": 1074.4801,
+      "systemCpuDuringIdleMedianPercent": 18.0,
+      "frontend": {
+        "firstPaintMs": 82.0,
+        "mountMs": 68.10000014305115,
+        "readyMs": 68.40000009536743
+      },
+      "idle": {
+        "sampleCount": 5,
+        "treePrivateWorkingSetMedianBytes": 171540480,
+        "treePrivateWorkingSetMaxBytes": 171679744,
+        "treeCommitMedianBytes": 244936704,
+        "treeWorkingSetSumMedianBytes": 491438080,
+        "rootPrivateWorkingSetMedianBytes": 9723904,
+        "rootCommitMedianBytes": 12681216,
+        "processCountMax": 7
+      },
+      "processBreakdown": [
+        {
+          "processId": 94668,
+          "name": "msedgewebview2",
+          "role": "gpu-process",
+          "privateWorkingSetBytes": 67059712,
+          "workingSetBytes": 123772928,
+          "commitBytes": 98467840
+        },
+        {
+          "processId": 76908,
+          "name": "msedgewebview2",
+          "role": "browser",
+          "privateWorkingSetBytes": 38223872,
+          "workingSetBytes": 149012480,
+          "commitBytes": 49979392
+        },
+        {
+          "processId": 25096,
+          "name": "msedgewebview2",
+          "role": "renderer",
+          "privateWorkingSetBytes": 24608768,
+          "workingSetBytes": 79933440,
+          "commitBytes": 36642816
+        },
+        {
+          "processId": 33088,
+          "name": "apogee",
+          "role": "host(rust)",
+          "privateWorkingSetBytes": 9723904,
+          "workingSetBytes": 41050112,
+          "commitBytes": 12681216
+        },
+        {
+          "processId": 87756,
+          "name": "msedgewebview2",
+          "role": "utility",
+          "privateWorkingSetBytes": 7839744,
+          "workingSetBytes": 43003904,
+          "commitBytes": 14737408
+        },
+        {
+          "processId": 94968,
+          "name": "msedgewebview2",
+          "role": "utility",
+          "privateWorkingSetBytes": 3399680,
+          "workingSetBytes": 21344256,
+          "commitBytes": 9703424
+        },
+        {
+          "processId": 68064,
+          "name": "msedgewebview2",
+          "role": "crashpad-handler",
+          "privateWorkingSetBytes": 2351104,
+          "workingSetBytes": 15159296,
+          "commitBytes": 3469312
+        }
+      ],
+      "memorySamples": [
+        {
+          "sampledAt": "2026-07-31T11:20:22.4561671+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 171491328,
+          "treeCommitBytes": 244854784,
+          "treeWorkingSetSumBytes": 491339776,
+          "rootPrivateWorkingSetBytes": 9740288,
+          "rootCommitBytes": 12681216,
+          "rootWorkingSetBytes": 41050112
+        },
+        {
+          "sampledAt": "2026-07-31T11:20:23.9612935+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 171540480,
+          "treeCommitBytes": 244936704,
+          "treeWorkingSetSumBytes": 491438080,
+          "rootPrivateWorkingSetBytes": 9723904,
+          "rootCommitBytes": 12681216,
+          "rootWorkingSetBytes": 41050112
+        },
+        {
+          "sampledAt": "2026-07-31T11:20:25.5060039+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 171679744,
+          "treeCommitBytes": 245104640,
+          "treeWorkingSetSumBytes": 491634688,
+          "rootPrivateWorkingSetBytes": 9723904,
+          "rootCommitBytes": 12681216,
+          "rootWorkingSetBytes": 41050112
+        },
+        {
+          "sampledAt": "2026-07-31T11:20:27.0275662+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 171634688,
+          "treeCommitBytes": 245043200,
+          "treeWorkingSetSumBytes": 491601920,
+          "rootPrivateWorkingSetBytes": 9723904,
+          "rootCommitBytes": 12681216,
+          "rootWorkingSetBytes": 41050112
+        },
+        {
+          "sampledAt": "2026-07-31T11:20:28.5417667+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 153206784,
+          "treeCommitBytes": 225681408,
+          "treeWorkingSetSumBytes": 473276416,
+          "rootPrivateWorkingSetBytes": 9723904,
+          "rootCommitBytes": 12681216,
+          "rootWorkingSetBytes": 41050112,
+          "processes": [
+            {
+              "processId": 94668,
+              "name": "msedgewebview2",
+              "role": "gpu-process",
+              "privateWorkingSetBytes": 67059712,
+              "workingSetBytes": 123772928,
+              "commitBytes": 98467840
+            },
+            {
+              "processId": 76908,
+              "name": "msedgewebview2",
+              "role": "browser",
+              "privateWorkingSetBytes": 38223872,
+              "workingSetBytes": 149012480,
+              "commitBytes": 49979392
+            },
+            {
+              "processId": 25096,
+              "name": "msedgewebview2",
+              "role": "renderer",
+              "privateWorkingSetBytes": 24608768,
+              "workingSetBytes": 79933440,
+              "commitBytes": 36642816
+            },
+            {
+              "processId": 33088,
+              "name": "apogee",
+              "role": "host(rust)",
+              "privateWorkingSetBytes": 9723904,
+              "workingSetBytes": 41050112,
+              "commitBytes": 12681216
+            },
+            {
+              "processId": 87756,
+              "name": "msedgewebview2",
+              "role": "utility",
+              "privateWorkingSetBytes": 7839744,
+              "workingSetBytes": 43003904,
+              "commitBytes": 14737408
+            },
+            {
+              "processId": 94968,
+              "name": "msedgewebview2",
+              "role": "utility",
+              "privateWorkingSetBytes": 3399680,
+              "workingSetBytes": 21344256,
+              "commitBytes": 9703424
+            },
+            {
+              "processId": 68064,
+              "name": "msedgewebview2",
+              "role": "crashpad-handler",
+              "privateWorkingSetBytes": 2351104,
+              "workingSetBytes": 15159296,
+              "commitBytes": 3469312
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "run": 7,
+      "classification": "clean-process-relaunch",
+      "externalReadyMs": 746.313720703125,
+      "harnessObservedMs": 771.6296,
+      "harnessOverheadMs": 25.315879296874982,
+      "systemCpuBeforeLaunchPercent": 16.0,
+      "cpuSettledBeforeLaunch": true,
+      "cpuSettleWaitedMs": 1887.4556,
+      "systemCpuDuringIdleMedianPercent": 26.0,
+      "frontend": {
+        "firstPaintMs": 82.70000004768372,
+        "mountMs": 67.20000004768372,
+        "readyMs": 67.60000014305115
+      },
+      "idle": {
+        "sampleCount": 5,
+        "treePrivateWorkingSetMedianBytes": 165650432,
+        "treePrivateWorkingSetMaxBytes": 165912576,
+        "treeCommitMedianBytes": 237539328,
+        "treeWorkingSetSumMedianBytes": 473051136,
+        "rootPrivateWorkingSetMedianBytes": 3874816,
+        "rootCommitMedianBytes": 5668864,
+        "processCountMax": 7
+      },
+      "processBreakdown": [
+        {
+          "processId": 64700,
+          "name": "msedgewebview2",
+          "role": "gpu-process",
+          "privateWorkingSetBytes": 67317760,
+          "workingSetBytes": 124026880,
+          "commitBytes": 98746368
+        },
+        {
+          "processId": 94260,
+          "name": "msedgewebview2",
+          "role": "browser",
+          "privateWorkingSetBytes": 37191680,
+          "workingSetBytes": 145920000,
+          "commitBytes": 49328128
+        },
+        {
+          "processId": 58504,
+          "name": "msedgewebview2",
+          "role": "renderer",
+          "privateWorkingSetBytes": 26689536,
+          "workingSetBytes": 81985536,
+          "commitBytes": 38060032
+        },
+        {
+          "processId": 77900,
+          "name": "msedgewebview2",
+          "role": "utility",
+          "privateWorkingSetBytes": 7929856,
+          "workingSetBytes": 43163648,
+          "commitBytes": 14860288
+        },
+        {
+          "processId": 75372,
+          "name": "apogee",
+          "role": "host(rust)",
+          "privateWorkingSetBytes": 3874816,
+          "workingSetBytes": 26992640,
+          "commitBytes": 5668864
+        },
+        {
+          "processId": 81308,
+          "name": "msedgewebview2",
+          "role": "utility",
+          "privateWorkingSetBytes": 3411968,
+          "workingSetBytes": 21360640,
+          "commitBytes": 9711616
+        },
+        {
+          "processId": 65360,
+          "name": "msedgewebview2",
+          "role": "crashpad-handler",
+          "privateWorkingSetBytes": 2101248,
+          "workingSetBytes": 12656640,
+          "commitBytes": 3153920
+        }
+      ],
+      "memorySamples": [
+        {
+          "sampledAt": "2026-07-31T11:20:35.1996023+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 165650432,
+          "treeCommitBytes": 237539328,
+          "treeWorkingSetSumBytes": 473051136,
+          "rootPrivateWorkingSetBytes": 3874816,
+          "rootCommitBytes": 5668864,
+          "rootWorkingSetBytes": 26992640
+        },
+        {
+          "sampledAt": "2026-07-31T11:20:36.7438692+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 165732352,
+          "treeCommitBytes": 237604864,
+          "treeWorkingSetSumBytes": 473141248,
+          "rootPrivateWorkingSetBytes": 3874816,
+          "rootCommitBytes": 5668864,
+          "rootWorkingSetBytes": 26992640
+        },
+        {
+          "sampledAt": "2026-07-31T11:20:38.3162356+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 165912576,
+          "treeCommitBytes": 237805568,
+          "treeWorkingSetSumBytes": 473387008,
+          "rootPrivateWorkingSetBytes": 3874816,
+          "rootCommitBytes": 5668864,
+          "rootWorkingSetBytes": 26992640
+        },
+        {
+          "sampledAt": "2026-07-31T11:20:39.8596145+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 163930112,
+          "treeCommitBytes": 235094016,
+          "treeWorkingSetSumBytes": 470904832,
+          "rootPrivateWorkingSetBytes": 3874816,
+          "rootCommitBytes": 5668864,
+          "rootWorkingSetBytes": 26992640
+        },
+        {
+          "sampledAt": "2026-07-31T11:20:41.4359016+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 148516864,
+          "treeCommitBytes": 219529216,
+          "treeWorkingSetSumBytes": 456105984,
+          "rootPrivateWorkingSetBytes": 3874816,
+          "rootCommitBytes": 5668864,
+          "rootWorkingSetBytes": 26992640,
+          "processes": [
+            {
+              "processId": 64700,
+              "name": "msedgewebview2",
+              "role": "gpu-process",
+              "privateWorkingSetBytes": 67317760,
+              "workingSetBytes": 124026880,
+              "commitBytes": 98746368
+            },
+            {
+              "processId": 94260,
+              "name": "msedgewebview2",
+              "role": "browser",
+              "privateWorkingSetBytes": 37191680,
+              "workingSetBytes": 145920000,
+              "commitBytes": 49328128
+            },
+            {
+              "processId": 58504,
+              "name": "msedgewebview2",
+              "role": "renderer",
+              "privateWorkingSetBytes": 26689536,
+              "workingSetBytes": 81985536,
+              "commitBytes": 38060032
+            },
+            {
+              "processId": 77900,
+              "name": "msedgewebview2",
+              "role": "utility",
+              "privateWorkingSetBytes": 7929856,
+              "workingSetBytes": 43163648,
+              "commitBytes": 14860288
+            },
+            {
+              "processId": 75372,
+              "name": "apogee",
+              "role": "host(rust)",
+              "privateWorkingSetBytes": 3874816,
+              "workingSetBytes": 26992640,
+              "commitBytes": 5668864
+            },
+            {
+              "processId": 81308,
+              "name": "msedgewebview2",
+              "role": "utility",
+              "privateWorkingSetBytes": 3411968,
+              "workingSetBytes": 21360640,
+              "commitBytes": 9711616
+            },
+            {
+              "processId": 65360,
+              "name": "msedgewebview2",
+              "role": "crashpad-handler",
+              "privateWorkingSetBytes": 2101248,
+              "workingSetBytes": 12656640,
+              "commitBytes": 3153920
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "run": 8,
+      "classification": "clean-process-relaunch",
+      "externalReadyMs": 549.252685546875,
+      "harnessObservedMs": 574.2541,
+      "harnessOverheadMs": 25.001414453124994,
+      "systemCpuBeforeLaunchPercent": 17.0,
+      "cpuSettledBeforeLaunch": true,
+      "cpuSettleWaitedMs": 2676.1807,
+      "systemCpuDuringIdleMedianPercent": 23.0,
+      "frontend": {
+        "firstPaintMs": 74.5,
+        "mountMs": 61.09999990463257,
+        "readyMs": 61.39999985694885
+      },
+      "idle": {
+        "sampleCount": 5,
+        "treePrivateWorkingSetMedianBytes": 162885632,
+        "treePrivateWorkingSetMaxBytes": 163037184,
+        "treeCommitMedianBytes": 235036672,
+        "treeWorkingSetSumMedianBytes": 472805376,
+        "rootPrivateWorkingSetMedianBytes": 3969024,
+        "rootCommitMedianBytes": 5525504,
+        "processCountMax": 7
+      },
+      "processBreakdown": [
+        {
+          "processId": 95852,
+          "name": "msedgewebview2",
+          "role": "gpu-process",
+          "privateWorkingSetBytes": 66981888,
+          "workingSetBytes": 126345216,
+          "commitBytes": 98369536
+        },
+        {
+          "processId": 55344,
+          "name": "msedgewebview2",
+          "role": "browser",
+          "privateWorkingSetBytes": 37367808,
+          "workingSetBytes": 146010112,
+          "commitBytes": 49520640
+        },
+        {
+          "processId": 96060,
+          "name": "msedgewebview2",
+          "role": "renderer",
+          "privateWorkingSetBytes": 24473600,
+          "workingSetBytes": 79847424,
+          "commitBytes": 36716544
+        },
+        {
+          "processId": 81232,
+          "name": "msedgewebview2",
+          "role": "utility",
+          "privateWorkingSetBytes": 7761920,
+          "workingSetBytes": 42958848,
+          "commitBytes": 14622720
+        },
+        {
+          "processId": 92008,
+          "name": "apogee",
+          "role": "host(rust)",
+          "privateWorkingSetBytes": 3969024,
+          "workingSetBytes": 27136000,
+          "commitBytes": 5525504
+        },
+        {
+          "processId": 67208,
+          "name": "msedgewebview2",
+          "role": "utility",
+          "privateWorkingSetBytes": 3399680,
+          "workingSetBytes": 21344256,
+          "commitBytes": 9695232
+        },
+        {
+          "processId": 85732,
+          "name": "msedgewebview2",
+          "role": "crashpad-handler",
+          "privateWorkingSetBytes": 2154496,
+          "workingSetBytes": 12693504,
+          "commitBytes": 3211264
+        }
+      ],
+      "memorySamples": [
+        {
+          "sampledAt": "2026-07-31T11:20:48.6013551+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 162795520,
+          "treeCommitBytes": 235036672,
+          "treeWorkingSetSumBytes": 472805376,
+          "rootPrivateWorkingSetBytes": 3985408,
+          "rootCommitBytes": 5525504,
+          "rootWorkingSetBytes": 27136000
+        },
+        {
+          "sampledAt": "2026-07-31T11:20:50.1982383+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 162885632,
+          "treeCommitBytes": 235151360,
+          "treeWorkingSetSumBytes": 472944640,
+          "rootPrivateWorkingSetBytes": 3969024,
+          "rootCommitBytes": 5525504,
+          "rootWorkingSetBytes": 27136000
+        },
+        {
+          "sampledAt": "2026-07-31T11:20:51.7411278+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 163037184,
+          "treeCommitBytes": 235323392,
+          "treeWorkingSetSumBytes": 473145344,
+          "rootPrivateWorkingSetBytes": 3969024,
+          "rootCommitBytes": 5525504,
+          "rootWorkingSetBytes": 27136000
+        },
+        {
+          "sampledAt": "2026-07-31T11:20:53.2763893+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 162959360,
+          "treeCommitBytes": 233398272,
+          "treeWorkingSetSumBytes": 471199744,
+          "rootPrivateWorkingSetBytes": 3969024,
+          "rootCommitBytes": 5525504,
+          "rootWorkingSetBytes": 27136000
+        },
+        {
+          "sampledAt": "2026-07-31T11:20:54.8536955+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 146108416,
+          "treeCommitBytes": 217661440,
+          "treeWorkingSetSumBytes": 456335360,
+          "rootPrivateWorkingSetBytes": 3969024,
+          "rootCommitBytes": 5525504,
+          "rootWorkingSetBytes": 27136000,
+          "processes": [
+            {
+              "processId": 95852,
+              "name": "msedgewebview2",
+              "role": "gpu-process",
+              "privateWorkingSetBytes": 66981888,
+              "workingSetBytes": 126345216,
+              "commitBytes": 98369536
+            },
+            {
+              "processId": 55344,
+              "name": "msedgewebview2",
+              "role": "browser",
+              "privateWorkingSetBytes": 37367808,
+              "workingSetBytes": 146010112,
+              "commitBytes": 49520640
+            },
+            {
+              "processId": 96060,
+              "name": "msedgewebview2",
+              "role": "renderer",
+              "privateWorkingSetBytes": 24473600,
+              "workingSetBytes": 79847424,
+              "commitBytes": 36716544
+            },
+            {
+              "processId": 81232,
+              "name": "msedgewebview2",
+              "role": "utility",
+              "privateWorkingSetBytes": 7761920,
+              "workingSetBytes": 42958848,
+              "commitBytes": 14622720
+            },
+            {
+              "processId": 92008,
+              "name": "apogee",
+              "role": "host(rust)",
+              "privateWorkingSetBytes": 3969024,
+              "workingSetBytes": 27136000,
+              "commitBytes": 5525504
+            },
+            {
+              "processId": 67208,
+              "name": "msedgewebview2",
+              "role": "utility",
+              "privateWorkingSetBytes": 3399680,
+              "workingSetBytes": 21344256,
+              "commitBytes": 9695232
+            },
+            {
+              "processId": 85732,
+              "name": "msedgewebview2",
+              "role": "crashpad-handler",
+              "privateWorkingSetBytes": 2154496,
+              "workingSetBytes": 12693504,
+              "commitBytes": 3211264
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "run": 9,
+      "classification": "clean-process-relaunch",
+      "externalReadyMs": 526.222412109375,
+      "harnessObservedMs": 541.22,
+      "harnessOverheadMs": 14.997587890625027,
+      "systemCpuBeforeLaunchPercent": 20.0,
+      "cpuSettledBeforeLaunch": true,
+      "cpuSettleWaitedMs": 1886.1376,
+      "systemCpuDuringIdleMedianPercent": 23.0,
+      "frontend": {
+        "firstPaintMs": 90.20000004768372,
+        "mountMs": 67.79999995231628,
+        "readyMs": 68.20000004768372
+      },
+      "idle": {
+        "sampleCount": 5,
+        "treePrivateWorkingSetMedianBytes": 162414592,
+        "treePrivateWorkingSetMaxBytes": 162525184,
+        "treeCommitMedianBytes": 233197568,
+        "treeWorkingSetSumMedianBytes": 469405696,
+        "rootPrivateWorkingSetMedianBytes": 3883008,
+        "rootCommitMedianBytes": 5382144,
+        "processCountMax": 7
+      },
+      "processBreakdown": [
+        {
+          "processId": 34060,
+          "name": "msedgewebview2",
+          "role": "gpu-process",
+          "privateWorkingSetBytes": 78622720,
+          "workingSetBytes": 135184384,
+          "commitBytes": 109961216
+        },
+        {
+          "processId": 39800,
+          "name": "msedgewebview2",
+          "role": "browser",
+          "privateWorkingSetBytes": 37437440,
+          "workingSetBytes": 145960960,
+          "commitBytes": 49655808
+        },
+        {
+          "processId": 78452,
+          "name": "msedgewebview2",
+          "role": "renderer",
+          "privateWorkingSetBytes": 24399872,
+          "workingSetBytes": 79642624,
+          "commitBytes": 35115008
+        },
+        {
+          "processId": 93832,
+          "name": "msedgewebview2",
+          "role": "utility",
+          "privateWorkingSetBytes": 7802880,
+          "workingSetBytes": 42983424,
+          "commitBytes": 14688256
+        },
+        {
+          "processId": 96052,
+          "name": "apogee",
+          "role": "host(rust)",
+          "privateWorkingSetBytes": 3883008,
+          "workingSetBytes": 27131904,
+          "commitBytes": 5382144
+        },
+        {
+          "processId": 91188,
+          "name": "msedgewebview2",
+          "role": "utility",
+          "privateWorkingSetBytes": 3407872,
+          "workingSetBytes": 21352448,
+          "commitBytes": 9703424
+        },
+        {
+          "processId": 39864,
+          "name": "msedgewebview2",
+          "role": "crashpad-handler",
+          "privateWorkingSetBytes": 2150400,
+          "workingSetBytes": 12693504,
+          "commitBytes": 3207168
+        }
+      ],
+      "memorySamples": [
+        {
+          "sampledAt": "2026-07-31T11:21:01.2085947+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 162414592,
+          "treeCommitBytes": 233246720,
+          "treeWorkingSetSumBytes": 469430272,
+          "rootPrivateWorkingSetBytes": 3899392,
+          "rootCommitBytes": 5382144,
+          "rootWorkingSetBytes": 27131904
+        },
+        {
+          "sampledAt": "2026-07-31T11:21:02.8625292+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 162340864,
+          "treeCommitBytes": 233197568,
+          "treeWorkingSetSumBytes": 469405696,
+          "rootPrivateWorkingSetBytes": 3883008,
+          "rootCommitBytes": 5382144,
+          "rootWorkingSetBytes": 27131904
+        },
+        {
+          "sampledAt": "2026-07-31T11:21:04.4194501+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 162525184,
+          "treeCommitBytes": 233394176,
+          "treeWorkingSetSumBytes": 469651456,
+          "rootPrivateWorkingSetBytes": 3883008,
+          "rootCommitBytes": 5382144,
+          "rootWorkingSetBytes": 27131904
+        },
+        {
+          "sampledAt": "2026-07-31T11:21:05.9680266+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 162496512,
+          "treeCommitBytes": 230522880,
+          "treeWorkingSetSumBytes": 466882560,
+          "rootPrivateWorkingSetBytes": 3883008,
+          "rootCommitBytes": 5382144,
+          "rootWorkingSetBytes": 27131904
+        },
+        {
+          "sampledAt": "2026-07-31T11:21:07.5195542+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 157704192,
+          "treeCommitBytes": 227713024,
+          "treeWorkingSetSumBytes": 464949248,
+          "rootPrivateWorkingSetBytes": 3883008,
+          "rootCommitBytes": 5382144,
+          "rootWorkingSetBytes": 27131904,
+          "processes": [
+            {
+              "processId": 34060,
+              "name": "msedgewebview2",
+              "role": "gpu-process",
+              "privateWorkingSetBytes": 78622720,
+              "workingSetBytes": 135184384,
+              "commitBytes": 109961216
+            },
+            {
+              "processId": 39800,
+              "name": "msedgewebview2",
+              "role": "browser",
+              "privateWorkingSetBytes": 37437440,
+              "workingSetBytes": 145960960,
+              "commitBytes": 49655808
+            },
+            {
+              "processId": 78452,
+              "name": "msedgewebview2",
+              "role": "renderer",
+              "privateWorkingSetBytes": 24399872,
+              "workingSetBytes": 79642624,
+              "commitBytes": 35115008
+            },
+            {
+              "processId": 93832,
+              "name": "msedgewebview2",
+              "role": "utility",
+              "privateWorkingSetBytes": 7802880,
+              "workingSetBytes": 42983424,
+              "commitBytes": 14688256
+            },
+            {
+              "processId": 96052,
+              "name": "apogee",
+              "role": "host(rust)",
+              "privateWorkingSetBytes": 3883008,
+              "workingSetBytes": 27131904,
+              "commitBytes": 5382144
+            },
+            {
+              "processId": 91188,
+              "name": "msedgewebview2",
+              "role": "utility",
+              "privateWorkingSetBytes": 3407872,
+              "workingSetBytes": 21352448,
+              "commitBytes": 9703424
+            },
+            {
+              "processId": 39864,
+              "name": "msedgewebview2",
+              "role": "crashpad-handler",
+              "privateWorkingSetBytes": 2150400,
+              "workingSetBytes": 12693504,
+              "commitBytes": 3207168
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "run": 10,
+      "classification": "clean-process-relaunch",
+      "externalReadyMs": 532.683837890625,
+      "harnessObservedMs": 545.3773,
+      "harnessOverheadMs": 12.693462109374991,
+      "systemCpuBeforeLaunchPercent": 19.0,
+      "cpuSettledBeforeLaunch": true,
+      "cpuSettleWaitedMs": 1076.6594,
+      "systemCpuDuringIdleMedianPercent": 21.0,
+      "frontend": {
+        "firstPaintMs": 76.0,
+        "mountMs": 61.90000009536743,
+        "readyMs": 62.20000004768371
+      },
+      "idle": {
+        "sampleCount": 5,
+        "treePrivateWorkingSetMedianBytes": 152674304,
+        "treePrivateWorkingSetMaxBytes": 162766848,
+        "treeCommitMedianBytes": 224096256,
+        "treeWorkingSetSumMedianBytes": 468353024,
+        "rootPrivateWorkingSetMedianBytes": 3837952,
+        "rootCommitMedianBytes": 5632000,
+        "processCountMax": 7
+      },
+      "processBreakdown": [
+        {
+          "processId": 82592,
+          "name": "msedgewebview2",
+          "role": "gpu-process",
+          "privateWorkingSetBytes": 74780672,
+          "workingSetBytes": 131452928,
+          "commitBytes": 106070016
+        },
+        {
+          "processId": 18552,
+          "name": "msedgewebview2",
+          "role": "browser",
+          "privateWorkingSetBytes": 37863424,
+          "workingSetBytes": 150454272,
+          "commitBytes": 50356224
+        },
+        {
+          "processId": 78320,
+          "name": "msedgewebview2",
+          "role": "renderer",
+          "privateWorkingSetBytes": 23289856,
+          "workingSetBytes": 80068608,
+          "commitBytes": 34652160
+        },
+        {
+          "processId": 87388,
+          "name": "msedgewebview2",
+          "role": "utility",
+          "privateWorkingSetBytes": 7114752,
+          "workingSetBytes": 42483712,
+          "commitBytes": 13934592
+        },
+        {
+          "processId": 81068,
+          "name": "apogee",
+          "role": "host(rust)",
+          "privateWorkingSetBytes": 3837952,
+          "workingSetBytes": 26980352,
+          "commitBytes": 5632000
+        },
+        {
+          "processId": 25240,
+          "name": "msedgewebview2",
+          "role": "utility",
+          "privateWorkingSetBytes": 3395584,
+          "workingSetBytes": 21389312,
+          "commitBytes": 9666560
+        },
+        {
+          "processId": 43332,
+          "name": "msedgewebview2",
+          "role": "crashpad-handler",
+          "privateWorkingSetBytes": 2392064,
+          "workingSetBytes": 15523840,
+          "commitBytes": 3784704
+        }
+      ],
+      "memorySamples": [
+        {
+          "sampledAt": "2026-07-31T11:21:13.0203838+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 162766848,
+          "treeCommitBytes": 235241472,
+          "treeWorkingSetSumBytes": 469831680,
+          "rootPrivateWorkingSetBytes": 3923968,
+          "rootCommitBytes": 5754880,
+          "rootWorkingSetBytes": 27037696
+        },
+        {
+          "sampledAt": "2026-07-31T11:22:54.6938650+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 152690688,
+          "treeCommitBytes": 224112640,
+          "treeWorkingSetSumBytes": 468369408,
+          "rootPrivateWorkingSetBytes": 3837952,
+          "rootCommitBytes": 5632000,
+          "rootWorkingSetBytes": 26980352
+        },
+        {
+          "sampledAt": "2026-07-31T11:22:56.2612849+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 152674304,
+          "treeCommitBytes": 224096256,
+          "treeWorkingSetSumBytes": 468353024,
+          "rootPrivateWorkingSetBytes": 3837952,
+          "rootCommitBytes": 5632000,
+          "rootWorkingSetBytes": 26980352
+        },
+        {
+          "sampledAt": "2026-07-31T11:22:57.8013431+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 152674304,
+          "treeCommitBytes": 224096256,
+          "treeWorkingSetSumBytes": 468353024,
+          "rootPrivateWorkingSetBytes": 3837952,
+          "rootCommitBytes": 5632000,
+          "rootWorkingSetBytes": 26980352
+        },
+        {
+          "sampledAt": "2026-07-31T11:22:59.3309650+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 152674304,
+          "treeCommitBytes": 224096256,
+          "treeWorkingSetSumBytes": 468353024,
+          "rootPrivateWorkingSetBytes": 3837952,
+          "rootCommitBytes": 5632000,
+          "rootWorkingSetBytes": 26980352,
+          "processes": [
+            {
+              "processId": 82592,
+              "name": "msedgewebview2",
+              "role": "gpu-process",
+              "privateWorkingSetBytes": 74780672,
+              "workingSetBytes": 131452928,
+              "commitBytes": 106070016
+            },
+            {
+              "processId": 18552,
+              "name": "msedgewebview2",
+              "role": "browser",
+              "privateWorkingSetBytes": 37863424,
+              "workingSetBytes": 150454272,
+              "commitBytes": 50356224
+            },
+            {
+              "processId": 78320,
+              "name": "msedgewebview2",
+              "role": "renderer",
+              "privateWorkingSetBytes": 23289856,
+              "workingSetBytes": 80068608,
+              "commitBytes": 34652160
+            },
+            {
+              "processId": 87388,
+              "name": "msedgewebview2",
+              "role": "utility",
+              "privateWorkingSetBytes": 7114752,
+              "workingSetBytes": 42483712,
+              "commitBytes": 13934592
+            },
+            {
+              "processId": 81068,
+              "name": "apogee",
+              "role": "host(rust)",
+              "privateWorkingSetBytes": 3837952,
+              "workingSetBytes": 26980352,
+              "commitBytes": 5632000
+            },
+            {
+              "processId": 25240,
+              "name": "msedgewebview2",
+              "role": "utility",
+              "privateWorkingSetBytes": 3395584,
+              "workingSetBytes": 21389312,
+              "commitBytes": 9666560
+            },
+            {
+              "processId": 43332,
+              "name": "msedgewebview2",
+              "role": "crashpad-handler",
+              "privateWorkingSetBytes": 2392064,
+              "workingSetBytes": 15523840,
+              "commitBytes": 3784704
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "run": 11,
+      "classification": "clean-process-relaunch",
+      "externalReadyMs": 590.010498046875,
+      "harnessObservedMs": 602.7201,
+      "harnessOverheadMs": 12.709601953125002,
+      "systemCpuBeforeLaunchPercent": 20.0,
+      "cpuSettledBeforeLaunch": true,
+      "cpuSettleWaitedMs": 293.7394,
+      "systemCpuDuringIdleMedianPercent": 20.0,
+      "frontend": {
+        "firstPaintMs": 82.10000014305115,
+        "mountMs": 68.90000009536743,
+        "readyMs": 69.20000004768372
+      },
+      "idle": {
+        "sampleCount": 5,
+        "treePrivateWorkingSetMedianBytes": 164933632,
+        "treePrivateWorkingSetMaxBytes": 165011456,
+        "treeCommitMedianBytes": 237105152,
+        "treeWorkingSetSumMedianBytes": 472080384,
+        "rootPrivateWorkingSetMedianBytes": 3899392,
+        "rootCommitMedianBytes": 5844992,
+        "processCountMax": 7
+      },
+      "processBreakdown": [
+        {
+          "processId": 81212,
+          "name": "msedgewebview2",
+          "role": "gpu-process",
+          "privateWorkingSetBytes": 79671296,
+          "workingSetBytes": 136200192,
+          "commitBytes": 111075328
+        },
+        {
+          "processId": 78952,
+          "name": "msedgewebview2",
+          "role": "browser",
+          "privateWorkingSetBytes": 37273600,
+          "workingSetBytes": 145920000,
+          "commitBytes": 49373184
+        },
+        {
+          "processId": 20036,
+          "name": "msedgewebview2",
+          "role": "renderer",
+          "privateWorkingSetBytes": 27127808,
+          "workingSetBytes": 82468864,
+          "commitBytes": 39100416
+        },
+        {
+          "processId": 74436,
+          "name": "msedgewebview2",
+          "role": "utility",
+          "privateWorkingSetBytes": 7766016,
+          "workingSetBytes": 42954752,
+          "commitBytes": 14639104
+        },
+        {
+          "processId": 65180,
+          "name": "apogee",
+          "role": "host(rust)",
+          "privateWorkingSetBytes": 3899392,
+          "workingSetBytes": 27037696,
+          "commitBytes": 5844992
+        },
+        {
+          "processId": 56976,
+          "name": "msedgewebview2",
+          "role": "utility",
+          "privateWorkingSetBytes": 3403776,
+          "workingSetBytes": 21352448,
+          "commitBytes": 9699328
+        },
+        {
+          "processId": 89504,
+          "name": "msedgewebview2",
+          "role": "crashpad-handler",
+          "privateWorkingSetBytes": 2146304,
+          "workingSetBytes": 12689408,
+          "commitBytes": 3198976
+        }
+      ],
+      "memorySamples": [
+        {
+          "sampledAt": "2026-07-31T11:23:04.1385421+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 164999168,
+          "treeCommitBytes": 237170688,
+          "treeWorkingSetSumBytes": 472104960,
+          "rootPrivateWorkingSetBytes": 3915776,
+          "rootCommitBytes": 5844992,
+          "rootWorkingSetBytes": 27037696
+        },
+        {
+          "sampledAt": "2026-07-31T11:23:05.6960880+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 164933632,
+          "treeCommitBytes": 237105152,
+          "treeWorkingSetSumBytes": 472080384,
+          "rootPrivateWorkingSetBytes": 3899392,
+          "rootCommitBytes": 5844992,
+          "rootWorkingSetBytes": 27037696
+        },
+        {
+          "sampledAt": "2026-07-31T11:23:07.2377922+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 165011456,
+          "treeCommitBytes": 237182976,
+          "treeWorkingSetSumBytes": 472215552,
+          "rootPrivateWorkingSetBytes": 3899392,
+          "rootCommitBytes": 5844992,
+          "rootWorkingSetBytes": 27037696
+        },
+        {
+          "sampledAt": "2026-07-31T11:23:08.7850488+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 164921344,
+          "treeCommitBytes": 235266048,
+          "treeWorkingSetSumBytes": 470265856,
+          "rootPrivateWorkingSetBytes": 3899392,
+          "rootCommitBytes": 5844992,
+          "rootWorkingSetBytes": 27037696
+        },
+        {
+          "sampledAt": "2026-07-31T11:23:10.3322683+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 161288192,
+          "treeCommitBytes": 232931328,
+          "treeWorkingSetSumBytes": 468623360,
+          "rootPrivateWorkingSetBytes": 3899392,
+          "rootCommitBytes": 5844992,
+          "rootWorkingSetBytes": 27037696,
+          "processes": [
+            {
+              "processId": 81212,
+              "name": "msedgewebview2",
+              "role": "gpu-process",
+              "privateWorkingSetBytes": 79671296,
+              "workingSetBytes": 136200192,
+              "commitBytes": 111075328
+            },
+            {
+              "processId": 78952,
+              "name": "msedgewebview2",
+              "role": "browser",
+              "privateWorkingSetBytes": 37273600,
+              "workingSetBytes": 145920000,
+              "commitBytes": 49373184
+            },
+            {
+              "processId": 20036,
+              "name": "msedgewebview2",
+              "role": "renderer",
+              "privateWorkingSetBytes": 27127808,
+              "workingSetBytes": 82468864,
+              "commitBytes": 39100416
+            },
+            {
+              "processId": 74436,
+              "name": "msedgewebview2",
+              "role": "utility",
+              "privateWorkingSetBytes": 7766016,
+              "workingSetBytes": 42954752,
+              "commitBytes": 14639104
+            },
+            {
+              "processId": 65180,
+              "name": "apogee",
+              "role": "host(rust)",
+              "privateWorkingSetBytes": 3899392,
+              "workingSetBytes": 27037696,
+              "commitBytes": 5844992
+            },
+            {
+              "processId": 56976,
+              "name": "msedgewebview2",
+              "role": "utility",
+              "privateWorkingSetBytes": 3403776,
+              "workingSetBytes": 21352448,
+              "commitBytes": 9699328
+            },
+            {
+              "processId": 89504,
+              "name": "msedgewebview2",
+              "role": "crashpad-handler",
+              "privateWorkingSetBytes": 2146304,
+              "workingSetBytes": 12689408,
+              "commitBytes": 3198976
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "run": 12,
+      "classification": "clean-process-relaunch",
+      "externalReadyMs": 590.55615234375,
+      "harnessObservedMs": 614.7923,
+      "harnessOverheadMs": 24.236147656249955,
+      "systemCpuBeforeLaunchPercent": 14.0,
+      "cpuSettledBeforeLaunch": true,
+      "cpuSettleWaitedMs": 8994.1628,
+      "systemCpuDuringIdleMedianPercent": 23.0,
+      "frontend": {
+        "firstPaintMs": 85.5,
+        "mountMs": 71.29999995231628,
+        "readyMs": 71.70000004768372
+      },
+      "idle": {
+        "sampleCount": 5,
+        "treePrivateWorkingSetMedianBytes": 162291712,
+        "treePrivateWorkingSetMaxBytes": 162357248,
+        "treeCommitMedianBytes": 234323968,
+        "treeWorkingSetSumMedianBytes": 469491712,
+        "rootPrivateWorkingSetMedianBytes": 3887104,
+        "rootCommitMedianBytes": 5681152,
+        "processCountMax": 7
+      },
+      "processBreakdown": [
+        {
+          "processId": 74860,
+          "name": "msedgewebview2",
+          "role": "gpu-process",
+          "privateWorkingSetBytes": 66183168,
+          "workingSetBytes": 122863616,
+          "commitBytes": 97476608
+        },
+        {
+          "processId": 38492,
+          "name": "msedgewebview2",
+          "role": "browser",
+          "privateWorkingSetBytes": 37515264,
+          "workingSetBytes": 146055168,
+          "commitBytes": 49664000
+        },
+        {
+          "processId": 85732,
+          "name": "msedgewebview2",
+          "role": "renderer",
+          "privateWorkingSetBytes": 24387584,
+          "workingSetBytes": 79724544,
+          "commitBytes": 36450304
+        },
+        {
+          "processId": 51800,
+          "name": "msedgewebview2",
+          "role": "utility",
+          "privateWorkingSetBytes": 7847936,
+          "workingSetBytes": 43012096,
+          "commitBytes": 14745600
+        },
+        {
+          "processId": 69268,
+          "name": "apogee",
+          "role": "host(rust)",
+          "privateWorkingSetBytes": 3887104,
+          "workingSetBytes": 27152384,
+          "commitBytes": 5681152
+        },
+        {
+          "processId": 95876,
+          "name": "msedgewebview2",
+          "role": "utility",
+          "privateWorkingSetBytes": 3403776,
+          "workingSetBytes": 21348352,
+          "commitBytes": 9695232
+        },
+        {
+          "processId": 29916,
+          "name": "msedgewebview2",
+          "role": "crashpad-handler",
+          "privateWorkingSetBytes": 2150400,
+          "workingSetBytes": 12689408,
+          "commitBytes": 3207168
+        }
+      ],
+      "memorySamples": [
+        {
+          "sampledAt": "2026-07-31T11:23:23.8771325+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 162332672,
+          "treeCommitBytes": 234446848,
+          "treeWorkingSetSumBytes": 469577728,
+          "rootPrivateWorkingSetBytes": 3903488,
+          "rootCommitBytes": 5681152,
+          "rootWorkingSetBytes": 27152384
+        },
+        {
+          "sampledAt": "2026-07-31T11:23:25.4593207+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 162209792,
+          "treeCommitBytes": 234323968,
+          "treeWorkingSetSumBytes": 469491712,
+          "rootPrivateWorkingSetBytes": 3887104,
+          "rootCommitBytes": 5681152,
+          "rootWorkingSetBytes": 27152384
+        },
+        {
+          "sampledAt": "2026-07-31T11:23:27.0268500+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 162357248,
+          "treeCommitBytes": 234504192,
+          "treeWorkingSetSumBytes": 469725184,
+          "rootPrivateWorkingSetBytes": 3887104,
+          "rootCommitBytes": 5681152,
+          "rootWorkingSetBytes": 27152384
+        },
+        {
+          "sampledAt": "2026-07-31T11:23:28.6170055+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 162291712,
+          "treeCommitBytes": 231903232,
+          "treeWorkingSetSumBytes": 467234816,
+          "rootPrivateWorkingSetBytes": 3887104,
+          "rootCommitBytes": 5681152,
+          "rootWorkingSetBytes": 27152384
+        },
+        {
+          "sampledAt": "2026-07-31T11:23:30.2121840+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 145375232,
+          "treeCommitBytes": 216920064,
+          "treeWorkingSetSumBytes": 452845568,
+          "rootPrivateWorkingSetBytes": 3887104,
+          "rootCommitBytes": 5681152,
+          "rootWorkingSetBytes": 27152384,
+          "processes": [
+            {
+              "processId": 74860,
+              "name": "msedgewebview2",
+              "role": "gpu-process",
+              "privateWorkingSetBytes": 66183168,
+              "workingSetBytes": 122863616,
+              "commitBytes": 97476608
+            },
+            {
+              "processId": 38492,
+              "name": "msedgewebview2",
+              "role": "browser",
+              "privateWorkingSetBytes": 37515264,
+              "workingSetBytes": 146055168,
+              "commitBytes": 49664000
+            },
+            {
+              "processId": 85732,
+              "name": "msedgewebview2",
+              "role": "renderer",
+              "privateWorkingSetBytes": 24387584,
+              "workingSetBytes": 79724544,
+              "commitBytes": 36450304
+            },
+            {
+              "processId": 51800,
+              "name": "msedgewebview2",
+              "role": "utility",
+              "privateWorkingSetBytes": 7847936,
+              "workingSetBytes": 43012096,
+              "commitBytes": 14745600
+            },
+            {
+              "processId": 69268,
+              "name": "apogee",
+              "role": "host(rust)",
+              "privateWorkingSetBytes": 3887104,
+              "workingSetBytes": 27152384,
+              "commitBytes": 5681152
+            },
+            {
+              "processId": 95876,
+              "name": "msedgewebview2",
+              "role": "utility",
+              "privateWorkingSetBytes": 3403776,
+              "workingSetBytes": 21348352,
+              "commitBytes": 9695232
+            },
+            {
+              "processId": 29916,
+              "name": "msedgewebview2",
+              "role": "crashpad-handler",
+              "privateWorkingSetBytes": 2150400,
+              "workingSetBytes": 12689408,
+              "commitBytes": 3207168
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "run": 13,
+      "classification": "clean-process-relaunch",
+      "externalReadyMs": 549.69921875,
+      "harnessObservedMs": 569.7074,
+      "harnessOverheadMs": 20.008181250000007,
+      "systemCpuBeforeLaunchPercent": 18.0,
+      "cpuSettledBeforeLaunch": true,
+      "cpuSettleWaitedMs": 2671.5772,
+      "systemCpuDuringIdleMedianPercent": 27.0,
+      "frontend": {
+        "firstPaintMs": 79.5,
+        "mountMs": 65.20000004768372,
+        "readyMs": 65.40000009536743
+      },
+      "idle": {
+        "sampleCount": 5,
+        "treePrivateWorkingSetMedianBytes": 162861056,
+        "treePrivateWorkingSetMaxBytes": 163004416,
+        "treeCommitMedianBytes": 234962944,
+        "treeWorkingSetSumMedianBytes": 469934080,
+        "rootPrivateWorkingSetMedianBytes": 3874816,
+        "rootCommitMedianBytes": 5505024,
+        "processCountMax": 7
+      },
+      "processBreakdown": [
+        {
+          "processId": 95940,
+          "name": "msedgewebview2",
+          "role": "gpu-process",
+          "privateWorkingSetBytes": 79077376,
+          "workingSetBytes": 135618560,
+          "commitBytes": 110493696
+        },
+        {
+          "processId": 92980,
+          "name": "msedgewebview2",
+          "role": "browser",
+          "privateWorkingSetBytes": 37470208,
+          "workingSetBytes": 146038784,
+          "commitBytes": 49639424
+        },
+        {
+          "processId": 96032,
+          "name": "msedgewebview2",
+          "role": "renderer",
+          "privateWorkingSetBytes": 24436736,
+          "workingSetBytes": 79704064,
+          "commitBytes": 36179968
+        },
+        {
+          "processId": 78496,
+          "name": "msedgewebview2",
+          "role": "utility",
+          "privateWorkingSetBytes": 7995392,
+          "workingSetBytes": 43188224,
+          "commitBytes": 14970880
+        },
+        {
+          "processId": 95288,
+          "name": "apogee",
+          "role": "host(rust)",
+          "privateWorkingSetBytes": 3874816,
+          "workingSetBytes": 27107328,
+          "commitBytes": 5505024
+        },
+        {
+          "processId": 56912,
+          "name": "msedgewebview2",
+          "role": "utility",
+          "privateWorkingSetBytes": 3403776,
+          "workingSetBytes": 21348352,
+          "commitBytes": 9703424
+        },
+        {
+          "processId": 64012,
+          "name": "msedgewebview2",
+          "role": "crashpad-handler",
+          "privateWorkingSetBytes": 2142208,
+          "workingSetBytes": 12685312,
+          "commitBytes": 3190784
+        }
+      ],
+      "memorySamples": [
+        {
+          "sampledAt": "2026-07-31T11:23:37.3320032+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 162816000,
+          "treeCommitBytes": 234901504,
+          "treeWorkingSetSumBytes": 469860352,
+          "rootPrivateWorkingSetBytes": 3891200,
+          "rootCommitBytes": 5505024,
+          "rootWorkingSetBytes": 27107328
+        },
+        {
+          "sampledAt": "2026-07-31T11:23:38.8632808+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 162861056,
+          "treeCommitBytes": 234962944,
+          "treeWorkingSetSumBytes": 469934080,
+          "rootPrivateWorkingSetBytes": 3874816,
+          "rootCommitBytes": 5505024,
+          "rootWorkingSetBytes": 27107328
+        },
+        {
+          "sampledAt": "2026-07-31T11:23:40.4020634+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 163004416,
+          "treeCommitBytes": 235180032,
+          "treeWorkingSetSumBytes": 470200320,
+          "rootPrivateWorkingSetBytes": 3874816,
+          "rootCommitBytes": 5505024,
+          "rootWorkingSetBytes": 27107328
+        },
+        {
+          "sampledAt": "2026-07-31T11:23:41.9430757+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 162922496,
+          "treeCommitBytes": 235094016,
+          "treeWorkingSetSumBytes": 470122496,
+          "rootPrivateWorkingSetBytes": 3874816,
+          "rootCommitBytes": 5505024,
+          "rootWorkingSetBytes": 27107328
+        },
+        {
+          "sampledAt": "2026-07-31T11:23:43.4913352+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 158400512,
+          "treeCommitBytes": 229683200,
+          "treeWorkingSetSumBytes": 465690624,
+          "rootPrivateWorkingSetBytes": 3874816,
+          "rootCommitBytes": 5505024,
+          "rootWorkingSetBytes": 27107328,
+          "processes": [
+            {
+              "processId": 95940,
+              "name": "msedgewebview2",
+              "role": "gpu-process",
+              "privateWorkingSetBytes": 79077376,
+              "workingSetBytes": 135618560,
+              "commitBytes": 110493696
+            },
+            {
+              "processId": 92980,
+              "name": "msedgewebview2",
+              "role": "browser",
+              "privateWorkingSetBytes": 37470208,
+              "workingSetBytes": 146038784,
+              "commitBytes": 49639424
+            },
+            {
+              "processId": 96032,
+              "name": "msedgewebview2",
+              "role": "renderer",
+              "privateWorkingSetBytes": 24436736,
+              "workingSetBytes": 79704064,
+              "commitBytes": 36179968
+            },
+            {
+              "processId": 78496,
+              "name": "msedgewebview2",
+              "role": "utility",
+              "privateWorkingSetBytes": 7995392,
+              "workingSetBytes": 43188224,
+              "commitBytes": 14970880
+            },
+            {
+              "processId": 95288,
+              "name": "apogee",
+              "role": "host(rust)",
+              "privateWorkingSetBytes": 3874816,
+              "workingSetBytes": 27107328,
+              "commitBytes": 5505024
+            },
+            {
+              "processId": 56912,
+              "name": "msedgewebview2",
+              "role": "utility",
+              "privateWorkingSetBytes": 3403776,
+              "workingSetBytes": 21348352,
+              "commitBytes": 9703424
+            },
+            {
+              "processId": 64012,
+              "name": "msedgewebview2",
+              "role": "crashpad-handler",
+              "privateWorkingSetBytes": 2142208,
+              "workingSetBytes": 12685312,
+              "commitBytes": 3190784
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "run": 14,
+      "classification": "clean-process-relaunch",
+      "externalReadyMs": 572.22314453125,
+      "harnessObservedMs": 587.0768,
+      "harnessOverheadMs": 14.853655468750048,
+      "systemCpuBeforeLaunchPercent": 19.0,
+      "cpuSettledBeforeLaunch": true,
+      "cpuSettleWaitedMs": 1084.558,
+      "systemCpuDuringIdleMedianPercent": 22.0,
+      "frontend": {
+        "firstPaintMs": 76.79999995231628,
+        "mountMs": 62.79999995231629,
+        "readyMs": 63.0
+      },
+      "idle": {
+        "sampleCount": 5,
+        "treePrivateWorkingSetMedianBytes": 162914304,
+        "treePrivateWorkingSetMaxBytes": 163131392,
+        "treeCommitMedianBytes": 235024384,
+        "treeWorkingSetSumMedianBytes": 472244224,
+        "rootPrivateWorkingSetMedianBytes": 3883008,
+        "rootCommitMedianBytes": 5410816,
+        "processCountMax": 7
+      },
+      "processBreakdown": [
+        {
+          "processId": 66124,
+          "name": "msedgewebview2",
+          "role": "gpu-process",
+          "privateWorkingSetBytes": 78770176,
+          "workingSetBytes": 135368704,
+          "commitBytes": 110075904
+        },
+        {
+          "processId": 93832,
+          "name": "msedgewebview2",
+          "role": "browser",
+          "privateWorkingSetBytes": 37306368,
+          "workingSetBytes": 145833984,
+          "commitBytes": 49459200
+        },
+        {
+          "processId": 57528,
+          "name": "msedgewebview2",
+          "role": "renderer",
+          "privateWorkingSetBytes": 24576000,
+          "workingSetBytes": 79847424,
+          "commitBytes": 36589568
+        },
+        {
+          "processId": 64460,
+          "name": "msedgewebview2",
+          "role": "utility",
+          "privateWorkingSetBytes": 7831552,
+          "workingSetBytes": 42954752,
+          "commitBytes": 14696448
+        },
+        {
+          "processId": 8396,
+          "name": "apogee",
+          "role": "host(rust)",
+          "privateWorkingSetBytes": 3883008,
+          "workingSetBytes": 27144192,
+          "commitBytes": 5410816
+        },
+        {
+          "processId": 53928,
+          "name": "msedgewebview2",
+          "role": "utility",
+          "privateWorkingSetBytes": 3403776,
+          "workingSetBytes": 21360640,
+          "commitBytes": 9703424
+        },
+        {
+          "processId": 52532,
+          "name": "msedgewebview2",
+          "role": "crashpad-handler",
+          "privateWorkingSetBytes": 2351104,
+          "workingSetBytes": 15171584,
+          "commitBytes": 3469312
+        }
+      ],
+      "memorySamples": [
+        {
+          "sampledAt": "2026-07-31T11:23:49.0546248+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 162914304,
+          "treeCommitBytes": 235024384,
+          "treeWorkingSetSumBytes": 472244224,
+          "rootPrivateWorkingSetBytes": 3899392,
+          "rootCommitBytes": 5410816,
+          "rootWorkingSetBytes": 27144192
+        },
+        {
+          "sampledAt": "2026-07-31T11:23:50.7143885+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 162963456,
+          "treeCommitBytes": 235114496,
+          "treeWorkingSetSumBytes": 472346624,
+          "rootPrivateWorkingSetBytes": 3883008,
+          "rootCommitBytes": 5410816,
+          "rootWorkingSetBytes": 27144192
+        },
+        {
+          "sampledAt": "2026-07-31T11:23:52.3370193+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 163131392,
+          "treeCommitBytes": 235118592,
+          "treeWorkingSetSumBytes": 472399872,
+          "rootPrivateWorkingSetBytes": 3883008,
+          "rootCommitBytes": 5410816,
+          "rootWorkingSetBytes": 27144192
+        },
+        {
+          "sampledAt": "2026-07-31T11:23:53.9389443+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 160727040,
+          "treeCommitBytes": 229654528,
+          "treeWorkingSetSumBytes": 467955712,
+          "rootPrivateWorkingSetBytes": 3883008,
+          "rootCommitBytes": 5410816,
+          "rootWorkingSetBytes": 27144192
+        },
+        {
+          "sampledAt": "2026-07-31T11:23:55.4984683+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 158121984,
+          "treeCommitBytes": 229404672,
+          "treeWorkingSetSumBytes": 467681280,
+          "rootPrivateWorkingSetBytes": 3883008,
+          "rootCommitBytes": 5410816,
+          "rootWorkingSetBytes": 27144192,
+          "processes": [
+            {
+              "processId": 66124,
+              "name": "msedgewebview2",
+              "role": "gpu-process",
+              "privateWorkingSetBytes": 78770176,
+              "workingSetBytes": 135368704,
+              "commitBytes": 110075904
+            },
+            {
+              "processId": 93832,
+              "name": "msedgewebview2",
+              "role": "browser",
+              "privateWorkingSetBytes": 37306368,
+              "workingSetBytes": 145833984,
+              "commitBytes": 49459200
+            },
+            {
+              "processId": 57528,
+              "name": "msedgewebview2",
+              "role": "renderer",
+              "privateWorkingSetBytes": 24576000,
+              "workingSetBytes": 79847424,
+              "commitBytes": 36589568
+            },
+            {
+              "processId": 64460,
+              "name": "msedgewebview2",
+              "role": "utility",
+              "privateWorkingSetBytes": 7831552,
+              "workingSetBytes": 42954752,
+              "commitBytes": 14696448
+            },
+            {
+              "processId": 8396,
+              "name": "apogee",
+              "role": "host(rust)",
+              "privateWorkingSetBytes": 3883008,
+              "workingSetBytes": 27144192,
+              "commitBytes": 5410816
+            },
+            {
+              "processId": 53928,
+              "name": "msedgewebview2",
+              "role": "utility",
+              "privateWorkingSetBytes": 3403776,
+              "workingSetBytes": 21360640,
+              "commitBytes": 9703424
+            },
+            {
+              "processId": 52532,
+              "name": "msedgewebview2",
+              "role": "crashpad-handler",
+              "privateWorkingSetBytes": 2351104,
+              "workingSetBytes": 15171584,
+              "commitBytes": 3469312
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "run": 15,
+      "classification": "clean-process-relaunch",
+      "externalReadyMs": 613.816650390625,
+      "harnessObservedMs": 630.5883,
+      "harnessOverheadMs": 16.771649609375004,
+      "systemCpuBeforeLaunchPercent": 19.0,
+      "cpuSettledBeforeLaunch": true,
+      "cpuSettleWaitedMs": 301.3263,
+      "systemCpuDuringIdleMedianPercent": 28.0,
+      "frontend": {
+        "firstPaintMs": 82.90000009536743,
+        "mountMs": 67.70000004768372,
+        "readyMs": 68.09999990463257
+      },
+      "idle": {
+        "sampleCount": 5,
+        "treePrivateWorkingSetMedianBytes": 163106816,
+        "treePrivateWorkingSetMaxBytes": 163287040,
+        "treeCommitMedianBytes": 235180032,
+        "treeWorkingSetSumMedianBytes": 470450176,
+        "rootPrivateWorkingSetMedianBytes": 3911680,
+        "rootCommitMedianBytes": 5394432,
+        "processCountMax": 7
+      },
+      "processBreakdown": [
+        {
+          "processId": 86492,
+          "name": "msedgewebview2",
+          "role": "gpu-process",
+          "privateWorkingSetBytes": 66695168,
+          "workingSetBytes": 123379712,
+          "commitBytes": 98054144
+        },
+        {
+          "processId": 93976,
+          "name": "msedgewebview2",
+          "role": "browser",
+          "privateWorkingSetBytes": 37543936,
+          "workingSetBytes": 146227200,
+          "commitBytes": 49643520
+        },
+        {
+          "processId": 95276,
+          "name": "msedgewebview2",
+          "role": "renderer",
+          "privateWorkingSetBytes": 24412160,
+          "workingSetBytes": 79769600,
+          "commitBytes": 36372480
+        },
+        {
+          "processId": 72728,
+          "name": "msedgewebview2",
+          "role": "utility",
+          "privateWorkingSetBytes": 8003584,
+          "workingSetBytes": 43249664,
+          "commitBytes": 14917632
+        },
+        {
+          "processId": 19868,
+          "name": "apogee",
+          "role": "host(rust)",
+          "privateWorkingSetBytes": 3911680,
+          "workingSetBytes": 27164672,
+          "commitBytes": 5394432
+        },
+        {
+          "processId": 94804,
+          "name": "msedgewebview2",
+          "role": "utility",
+          "privateWorkingSetBytes": 3399680,
+          "workingSetBytes": 21344256,
+          "commitBytes": 9703424
+        },
+        {
+          "processId": 49468,
+          "name": "msedgewebview2",
+          "role": "crashpad-handler",
+          "privateWorkingSetBytes": 2150400,
+          "workingSetBytes": 12726272,
+          "commitBytes": 3203072
+        }
+      ],
+      "memorySamples": [
+        {
+          "sampledAt": "2026-07-31T11:24:00.3981713+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 163119104,
+          "treeCommitBytes": 235180032,
+          "treeWorkingSetSumBytes": 470450176,
+          "rootPrivateWorkingSetBytes": 3928064,
+          "rootCommitBytes": 5394432,
+          "rootWorkingSetBytes": 27164672
+        },
+        {
+          "sampledAt": "2026-07-31T11:24:02.0203943+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 163106816,
+          "treeCommitBytes": 235188224,
+          "treeWorkingSetSumBytes": 470478848,
+          "rootPrivateWorkingSetBytes": 3911680,
+          "rootCommitBytes": 5394432,
+          "rootWorkingSetBytes": 27164672
+        },
+        {
+          "sampledAt": "2026-07-31T11:24:03.6440630+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 163287040,
+          "treeCommitBytes": 235253760,
+          "treeWorkingSetSumBytes": 470638592,
+          "rootPrivateWorkingSetBytes": 3911680,
+          "rootCommitBytes": 5394432,
+          "rootWorkingSetBytes": 27164672
+        },
+        {
+          "sampledAt": "2026-07-31T11:24:05.2550559+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 161550336,
+          "treeCommitBytes": 232906752,
+          "treeWorkingSetSumBytes": 468549632,
+          "rootPrivateWorkingSetBytes": 3911680,
+          "rootCommitBytes": 5394432,
+          "rootWorkingSetBytes": 27164672
+        },
+        {
+          "sampledAt": "2026-07-31T11:24:06.8539941+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 146116608,
+          "treeCommitBytes": 217288704,
+          "treeWorkingSetSumBytes": 453861376,
+          "rootPrivateWorkingSetBytes": 3911680,
+          "rootCommitBytes": 5394432,
+          "rootWorkingSetBytes": 27164672,
+          "processes": [
+            {
+              "processId": 86492,
+              "name": "msedgewebview2",
+              "role": "gpu-process",
+              "privateWorkingSetBytes": 66695168,
+              "workingSetBytes": 123379712,
+              "commitBytes": 98054144
+            },
+            {
+              "processId": 93976,
+              "name": "msedgewebview2",
+              "role": "browser",
+              "privateWorkingSetBytes": 37543936,
+              "workingSetBytes": 146227200,
+              "commitBytes": 49643520
+            },
+            {
+              "processId": 95276,
+              "name": "msedgewebview2",
+              "role": "renderer",
+              "privateWorkingSetBytes": 24412160,
+              "workingSetBytes": 79769600,
+              "commitBytes": 36372480
+            },
+            {
+              "processId": 72728,
+              "name": "msedgewebview2",
+              "role": "utility",
+              "privateWorkingSetBytes": 8003584,
+              "workingSetBytes": 43249664,
+              "commitBytes": 14917632
+            },
+            {
+              "processId": 19868,
+              "name": "apogee",
+              "role": "host(rust)",
+              "privateWorkingSetBytes": 3911680,
+              "workingSetBytes": 27164672,
+              "commitBytes": 5394432
+            },
+            {
+              "processId": 94804,
+              "name": "msedgewebview2",
+              "role": "utility",
+              "privateWorkingSetBytes": 3399680,
+              "workingSetBytes": 21344256,
+              "commitBytes": 9703424
+            },
+            {
+              "processId": 49468,
+              "name": "msedgewebview2",
+              "role": "crashpad-handler",
+              "privateWorkingSetBytes": 2150400,
+              "workingSetBytes": 12726272,
+              "commitBytes": 3203072
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "run": 16,
+      "classification": "clean-process-relaunch",
+      "externalReadyMs": 594.88232421875,
+      "harnessObservedMs": 617.0984,
+      "harnessOverheadMs": 22.21607578124997,
+      "systemCpuBeforeLaunchPercent": 19.0,
+      "cpuSettledBeforeLaunch": true,
+      "cpuSettleWaitedMs": 4287.8761,
+      "systemCpuDuringIdleMedianPercent": 26.0,
+      "frontend": {
+        "firstPaintMs": 75.59999990463257,
+        "mountMs": 61.59999990463257,
+        "readyMs": 61.90000009536743
+      },
+      "idle": {
+        "sampleCount": 5,
+        "treePrivateWorkingSetMedianBytes": 176521216,
+        "treePrivateWorkingSetMaxBytes": 179798016,
+        "treeCommitMedianBytes": 248438784,
+        "treeWorkingSetSumMedianBytes": 486858752,
+        "rootPrivateWorkingSetMedianBytes": 3956736,
+        "rootCommitMedianBytes": 5980160,
+        "processCountMax": 7
+      },
+      "processBreakdown": [
+        {
+          "processId": 61264,
+          "name": "msedgewebview2",
+          "role": "gpu-process",
+          "privateWorkingSetBytes": 94150656,
+          "workingSetBytes": 150753280,
+          "commitBytes": 125513728
+        },
+        {
+          "processId": 83324,
+          "name": "msedgewebview2",
+          "role": "browser",
+          "privateWorkingSetBytes": 38543360,
+          "workingSetBytes": 150048768,
+          "commitBytes": 50356224
+        },
+        {
+          "processId": 63932,
+          "name": "msedgewebview2",
+          "role": "renderer",
+          "privateWorkingSetBytes": 26595328,
+          "workingSetBytes": 82063360,
+          "commitBytes": 39063552
+        },
+        {
+          "processId": 1852,
+          "name": "msedgewebview2",
+          "role": "utility",
+          "privateWorkingSetBytes": 7774208,
+          "workingSetBytes": 42868736,
+          "commitBytes": 14671872
+        },
+        {
+          "processId": 68420,
+          "name": "apogee",
+          "role": "host(rust)",
+          "privateWorkingSetBytes": 3956736,
+          "workingSetBytes": 27119616,
+          "commitBytes": 5980160
+        },
+        {
+          "processId": 81232,
+          "name": "msedgewebview2",
+          "role": "utility",
+          "privateWorkingSetBytes": 3403776,
+          "workingSetBytes": 21356544,
+          "commitBytes": 9695232
+        },
+        {
+          "processId": 14464,
+          "name": "msedgewebview2",
+          "role": "crashpad-handler",
+          "privateWorkingSetBytes": 2097152,
+          "workingSetBytes": 12648448,
+          "commitBytes": 3158016
+        }
+      ],
+      "memorySamples": [
+        {
+          "sampledAt": "2026-07-31T11:24:15.8065529+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 164052992,
+          "treeCommitBytes": 236580864,
+          "treeWorkingSetSumBytes": 471896064,
+          "rootPrivateWorkingSetBytes": 3973120,
+          "rootCommitBytes": 5980160,
+          "rootWorkingSetBytes": 27119616
+        },
+        {
+          "sampledAt": "2026-07-31T11:24:17.3888942+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 164769792,
+          "treeCommitBytes": 236818432,
+          "treeWorkingSetSumBytes": 474828800,
+          "rootPrivateWorkingSetBytes": 3956736,
+          "rootCommitBytes": 5980160,
+          "rootWorkingSetBytes": 27119616
+        },
+        {
+          "sampledAt": "2026-07-31T11:24:18.9742109+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 179798016,
+          "treeCommitBytes": 252141568,
+          "treeWorkingSetSumBytes": 490143744,
+          "rootPrivateWorkingSetBytes": 3956736,
+          "rootCommitBytes": 5980160,
+          "rootWorkingSetBytes": 27119616
+        },
+        {
+          "sampledAt": "2026-07-31T11:24:20.5124818+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 177614848,
+          "treeCommitBytes": 249282560,
+          "treeWorkingSetSumBytes": 487673856,
+          "rootPrivateWorkingSetBytes": 3956736,
+          "rootCommitBytes": 5980160,
+          "rootWorkingSetBytes": 27119616
+        },
+        {
+          "sampledAt": "2026-07-31T11:24:22.0530471+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 176521216,
+          "treeCommitBytes": 248438784,
+          "treeWorkingSetSumBytes": 486858752,
+          "rootPrivateWorkingSetBytes": 3956736,
+          "rootCommitBytes": 5980160,
+          "rootWorkingSetBytes": 27119616,
+          "processes": [
+            {
+              "processId": 61264,
+              "name": "msedgewebview2",
+              "role": "gpu-process",
+              "privateWorkingSetBytes": 94150656,
+              "workingSetBytes": 150753280,
+              "commitBytes": 125513728
+            },
+            {
+              "processId": 83324,
+              "name": "msedgewebview2",
+              "role": "browser",
+              "privateWorkingSetBytes": 38543360,
+              "workingSetBytes": 150048768,
+              "commitBytes": 50356224
+            },
+            {
+              "processId": 63932,
+              "name": "msedgewebview2",
+              "role": "renderer",
+              "privateWorkingSetBytes": 26595328,
+              "workingSetBytes": 82063360,
+              "commitBytes": 39063552
+            },
+            {
+              "processId": 1852,
+              "name": "msedgewebview2",
+              "role": "utility",
+              "privateWorkingSetBytes": 7774208,
+              "workingSetBytes": 42868736,
+              "commitBytes": 14671872
+            },
+            {
+              "processId": 68420,
+              "name": "apogee",
+              "role": "host(rust)",
+              "privateWorkingSetBytes": 3956736,
+              "workingSetBytes": 27119616,
+              "commitBytes": 5980160
+            },
+            {
+              "processId": 81232,
+              "name": "msedgewebview2",
+              "role": "utility",
+              "privateWorkingSetBytes": 3403776,
+              "workingSetBytes": 21356544,
+              "commitBytes": 9695232
+            },
+            {
+              "processId": 14464,
+              "name": "msedgewebview2",
+              "role": "crashpad-handler",
+              "privateWorkingSetBytes": 2097152,
+              "workingSetBytes": 12648448,
+              "commitBytes": 3158016
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "run": 17,
+      "classification": "clean-process-relaunch",
+      "externalReadyMs": 590.7626953125,
+      "harnessObservedMs": 606.8659,
+      "harnessOverheadMs": 16.10320468750001,
+      "systemCpuBeforeLaunchPercent": 18.0,
+      "cpuSettledBeforeLaunch": true,
+      "cpuSettleWaitedMs": 1905.7442,
+      "systemCpuDuringIdleMedianPercent": 26.0,
+      "frontend": {
+        "firstPaintMs": 80.5,
+        "mountMs": 65.5,
+        "readyMs": 65.90000009536743
+      },
+      "idle": {
+        "sampleCount": 5,
+        "treePrivateWorkingSetMedianBytes": 171003904,
+        "treePrivateWorkingSetMaxBytes": 171364352,
+        "treeCommitMedianBytes": 243695616,
+        "treeWorkingSetSumMedianBytes": 490586112,
+        "rootPrivateWorkingSetMedianBytes": 9670656,
+        "rootCommitMedianBytes": 12574720,
+        "processCountMax": 7
+      },
+      "processBreakdown": [
+        {
+          "processId": 14900,
+          "name": "msedgewebview2",
+          "role": "gpu-process",
+          "privateWorkingSetBytes": 79278080,
+          "workingSetBytes": 123138048,
+          "commitBytes": 97816576
+        },
+        {
+          "processId": 66628,
+          "name": "msedgewebview2",
+          "role": "browser",
+          "privateWorkingSetBytes": 38408192,
+          "workingSetBytes": 150757376,
+          "commitBytes": 50061312
+        },
+        {
+          "processId": 24816,
+          "name": "msedgewebview2",
+          "role": "renderer",
+          "privateWorkingSetBytes": 26513408,
+          "workingSetBytes": 82231296,
+          "commitBytes": 38965248
+        },
+        {
+          "processId": 6304,
+          "name": "apogee",
+          "role": "host(rust)",
+          "privateWorkingSetBytes": 9670656,
+          "workingSetBytes": 40992768,
+          "commitBytes": 12574720
+        },
+        {
+          "processId": 46396,
+          "name": "msedgewebview2",
+          "role": "utility",
+          "privateWorkingSetBytes": 7888896,
+          "workingSetBytes": 43044864,
+          "commitBytes": 14786560
+        },
+        {
+          "processId": 64408,
+          "name": "msedgewebview2",
+          "role": "utility",
+          "privateWorkingSetBytes": 3416064,
+          "workingSetBytes": 21364736,
+          "commitBytes": 9711616
+        },
+        {
+          "processId": 10968,
+          "name": "msedgewebview2",
+          "role": "crashpad-handler",
+          "privateWorkingSetBytes": 2146304,
+          "workingSetBytes": 12689408,
+          "commitBytes": 3198976
+        }
+      ],
+      "memorySamples": [
+        {
+          "sampledAt": "2026-07-31T11:24:28.4470266+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 171364352,
+          "treeCommitBytes": 243851264,
+          "treeWorkingSetSumBytes": 490631168,
+          "rootPrivateWorkingSetBytes": 9687040,
+          "rootCommitBytes": 12574720,
+          "rootWorkingSetBytes": 40992768
+        },
+        {
+          "sampledAt": "2026-07-31T11:24:29.9429211+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 170987520,
+          "treeCommitBytes": 243658752,
+          "treeWorkingSetSumBytes": 490504192,
+          "rootPrivateWorkingSetBytes": 9670656,
+          "rootCommitBytes": 12574720,
+          "rootWorkingSetBytes": 40992768
+        },
+        {
+          "sampledAt": "2026-07-31T11:24:31.4481955+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 171089920,
+          "treeCommitBytes": 243793920,
+          "treeWorkingSetSumBytes": 490668032,
+          "rootPrivateWorkingSetBytes": 9670656,
+          "rootCommitBytes": 12574720,
+          "rootWorkingSetBytes": 40992768
+        },
+        {
+          "sampledAt": "2026-07-31T11:24:33.0055735+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 171003904,
+          "treeCommitBytes": 243695616,
+          "treeWorkingSetSumBytes": 490586112,
+          "rootPrivateWorkingSetBytes": 9670656,
+          "rootCommitBytes": 12574720,
+          "rootWorkingSetBytes": 40992768
+        },
+        {
+          "sampledAt": "2026-07-31T11:24:34.5797884+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 167321600,
+          "treeCommitBytes": 227115008,
+          "treeWorkingSetSumBytes": 474218496,
+          "rootPrivateWorkingSetBytes": 9670656,
+          "rootCommitBytes": 12574720,
+          "rootWorkingSetBytes": 40992768,
+          "processes": [
+            {
+              "processId": 14900,
+              "name": "msedgewebview2",
+              "role": "gpu-process",
+              "privateWorkingSetBytes": 79278080,
+              "workingSetBytes": 123138048,
+              "commitBytes": 97816576
+            },
+            {
+              "processId": 66628,
+              "name": "msedgewebview2",
+              "role": "browser",
+              "privateWorkingSetBytes": 38408192,
+              "workingSetBytes": 150757376,
+              "commitBytes": 50061312
+            },
+            {
+              "processId": 24816,
+              "name": "msedgewebview2",
+              "role": "renderer",
+              "privateWorkingSetBytes": 26513408,
+              "workingSetBytes": 82231296,
+              "commitBytes": 38965248
+            },
+            {
+              "processId": 6304,
+              "name": "apogee",
+              "role": "host(rust)",
+              "privateWorkingSetBytes": 9670656,
+              "workingSetBytes": 40992768,
+              "commitBytes": 12574720
+            },
+            {
+              "processId": 46396,
+              "name": "msedgewebview2",
+              "role": "utility",
+              "privateWorkingSetBytes": 7888896,
+              "workingSetBytes": 43044864,
+              "commitBytes": 14786560
+            },
+            {
+              "processId": 64408,
+              "name": "msedgewebview2",
+              "role": "utility",
+              "privateWorkingSetBytes": 3416064,
+              "workingSetBytes": 21364736,
+              "commitBytes": 9711616
+            },
+            {
+              "processId": 10968,
+              "name": "msedgewebview2",
+              "role": "crashpad-handler",
+              "privateWorkingSetBytes": 2146304,
+              "workingSetBytes": 12689408,
+              "commitBytes": 3198976
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "run": 18,
+      "classification": "clean-process-relaunch",
+      "externalReadyMs": 584.17724609375,
+      "harnessObservedMs": 603.5293,
+      "harnessOverheadMs": 19.352053906250035,
+      "systemCpuBeforeLaunchPercent": 20.0,
+      "cpuSettledBeforeLaunch": true,
+      "cpuSettleWaitedMs": 4252.5344,
+      "systemCpuDuringIdleMedianPercent": 23.0,
+      "frontend": {
+        "firstPaintMs": 82.79999995231628,
+        "mountMs": 67.5,
+        "readyMs": 67.90000009536743
+      },
+      "idle": {
+        "sampleCount": 5,
+        "treePrivateWorkingSetMedianBytes": 163450880,
+        "treePrivateWorkingSetMaxBytes": 163577856,
+        "treeCommitMedianBytes": 235851776,
+        "treeWorkingSetSumMedianBytes": 470540288,
+        "rootPrivateWorkingSetMedianBytes": 3870720,
+        "rootCommitMedianBytes": 5652480,
+        "processCountMax": 7
+      },
+      "processBreakdown": [
+        {
+          "processId": 95952,
+          "name": "msedgewebview2",
+          "role": "gpu-process",
+          "privateWorkingSetBytes": 79749120,
+          "workingSetBytes": 136343552,
+          "commitBytes": 111206400
+        },
+        {
+          "processId": 95204,
+          "name": "msedgewebview2",
+          "role": "browser",
+          "privateWorkingSetBytes": 37380096,
+          "workingSetBytes": 145952768,
+          "commitBytes": 49541120
+        },
+        {
+          "processId": 95964,
+          "name": "msedgewebview2",
+          "role": "renderer",
+          "privateWorkingSetBytes": 24440832,
+          "workingSetBytes": 79736832,
+          "commitBytes": 36474880
+        },
+        {
+          "processId": 85444,
+          "name": "msedgewebview2",
+          "role": "utility",
+          "privateWorkingSetBytes": 7880704,
+          "workingSetBytes": 43003904,
+          "commitBytes": 14774272
+        },
+        {
+          "processId": 35160,
+          "name": "apogee",
+          "role": "host(rust)",
+          "privateWorkingSetBytes": 3870720,
+          "workingSetBytes": 27136000,
+          "commitBytes": 5652480
+        },
+        {
+          "processId": 92264,
+          "name": "msedgewebview2",
+          "role": "utility",
+          "privateWorkingSetBytes": 3428352,
+          "workingSetBytes": 21405696,
+          "commitBytes": 9723904
+        },
+        {
+          "processId": 29332,
+          "name": "msedgewebview2",
+          "role": "crashpad-handler",
+          "privateWorkingSetBytes": 2154496,
+          "workingSetBytes": 12697600,
+          "commitBytes": 3211264
+        }
+      ],
+      "memorySamples": [
+        {
+          "sampledAt": "2026-07-31T11:24:43.4036716+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 163393536,
+          "treeCommitBytes": 235851776,
+          "treeWorkingSetSumBytes": 470540288,
+          "rootPrivateWorkingSetBytes": 3887104,
+          "rootCommitBytes": 5652480,
+          "rootWorkingSetBytes": 27136000
+        },
+        {
+          "sampledAt": "2026-07-31T11:24:44.9631452+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 163450880,
+          "treeCommitBytes": 235925504,
+          "treeWorkingSetSumBytes": 470630400,
+          "rootPrivateWorkingSetBytes": 3870720,
+          "rootCommitBytes": 5652480,
+          "rootWorkingSetBytes": 27136000
+        },
+        {
+          "sampledAt": "2026-07-31T11:24:46.5540634+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 163577856,
+          "treeCommitBytes": 236093440,
+          "treeWorkingSetSumBytes": 470843392,
+          "rootPrivateWorkingSetBytes": 3870720,
+          "rootCommitBytes": 5652480,
+          "rootWorkingSetBytes": 27136000
+        },
+        {
+          "sampledAt": "2026-07-31T11:24:48.1191906+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 163508224,
+          "treeCommitBytes": 233861120,
+          "treeWorkingSetSumBytes": 468701184,
+          "rootPrivateWorkingSetBytes": 3870720,
+          "rootCommitBytes": 5652480,
+          "rootWorkingSetBytes": 27136000
+        },
+        {
+          "sampledAt": "2026-07-31T11:24:49.6988272+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 158904320,
+          "treeCommitBytes": 230584320,
+          "treeWorkingSetSumBytes": 466276352,
+          "rootPrivateWorkingSetBytes": 3870720,
+          "rootCommitBytes": 5652480,
+          "rootWorkingSetBytes": 27136000,
+          "processes": [
+            {
+              "processId": 95952,
+              "name": "msedgewebview2",
+              "role": "gpu-process",
+              "privateWorkingSetBytes": 79749120,
+              "workingSetBytes": 136343552,
+              "commitBytes": 111206400
+            },
+            {
+              "processId": 95204,
+              "name": "msedgewebview2",
+              "role": "browser",
+              "privateWorkingSetBytes": 37380096,
+              "workingSetBytes": 145952768,
+              "commitBytes": 49541120
+            },
+            {
+              "processId": 95964,
+              "name": "msedgewebview2",
+              "role": "renderer",
+              "privateWorkingSetBytes": 24440832,
+              "workingSetBytes": 79736832,
+              "commitBytes": 36474880
+            },
+            {
+              "processId": 85444,
+              "name": "msedgewebview2",
+              "role": "utility",
+              "privateWorkingSetBytes": 7880704,
+              "workingSetBytes": 43003904,
+              "commitBytes": 14774272
+            },
+            {
+              "processId": 35160,
+              "name": "apogee",
+              "role": "host(rust)",
+              "privateWorkingSetBytes": 3870720,
+              "workingSetBytes": 27136000,
+              "commitBytes": 5652480
+            },
+            {
+              "processId": 92264,
+              "name": "msedgewebview2",
+              "role": "utility",
+              "privateWorkingSetBytes": 3428352,
+              "workingSetBytes": 21405696,
+              "commitBytes": 9723904
+            },
+            {
+              "processId": 29332,
+              "name": "msedgewebview2",
+              "role": "crashpad-handler",
+              "privateWorkingSetBytes": 2154496,
+              "workingSetBytes": 12697600,
+              "commitBytes": 3211264
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "run": 19,
+      "classification": "clean-process-relaunch",
+      "externalReadyMs": 608.117919921875,
+      "harnessObservedMs": 630.6728,
+      "harnessOverheadMs": 22.554880078125052,
+      "systemCpuBeforeLaunchPercent": 18.0,
+      "cpuSettledBeforeLaunch": true,
+      "cpuSettleWaitedMs": 2653.7721,
+      "systemCpuDuringIdleMedianPercent": 32.0,
+      "frontend": {
+        "firstPaintMs": 79.69999980926514,
+        "mountMs": 65.09999990463257,
+        "readyMs": 65.5
+      },
+      "idle": {
+        "sampleCount": 5,
+        "treePrivateWorkingSetMedianBytes": 163209216,
+        "treePrivateWorkingSetMaxBytes": 163360768,
+        "treeCommitMedianBytes": 235692032,
+        "treeWorkingSetSumMedianBytes": 470380544,
+        "rootPrivateWorkingSetMedianBytes": 3883008,
+        "rootCommitMedianBytes": 5709824,
+        "processCountMax": 7
+      },
+      "processBreakdown": [
+        {
+          "processId": 46920,
+          "name": "msedgewebview2",
+          "role": "gpu-process",
+          "privateWorkingSetBytes": 79114240,
+          "workingSetBytes": 135696384,
+          "commitBytes": 110481408
+        },
+        {
+          "processId": 95176,
+          "name": "msedgewebview2",
+          "role": "browser",
+          "privateWorkingSetBytes": 37498880,
+          "workingSetBytes": 146161664,
+          "commitBytes": 49668096
+        },
+        {
+          "processId": 54844,
+          "name": "msedgewebview2",
+          "role": "renderer",
+          "privateWorkingSetBytes": 24453120,
+          "workingSetBytes": 79802368,
+          "commitBytes": 36524032
+        },
+        {
+          "processId": 84252,
+          "name": "msedgewebview2",
+          "role": "utility",
+          "privateWorkingSetBytes": 7962624,
+          "workingSetBytes": 43171840,
+          "commitBytes": 14909440
+        },
+        {
+          "processId": 87728,
+          "name": "apogee",
+          "role": "host(rust)",
+          "privateWorkingSetBytes": 3883008,
+          "workingSetBytes": 27025408,
+          "commitBytes": 5709824
+        },
+        {
+          "processId": 94896,
+          "name": "msedgewebview2",
+          "role": "utility",
+          "privateWorkingSetBytes": 3407872,
+          "workingSetBytes": 21360640,
+          "commitBytes": 9695232
+        },
+        {
+          "processId": 13916,
+          "name": "msedgewebview2",
+          "role": "crashpad-handler",
+          "privateWorkingSetBytes": 2146304,
+          "workingSetBytes": 12693504,
+          "commitBytes": 3198976
+        }
+      ],
+      "memorySamples": [
+        {
+          "sampledAt": "2026-07-31T11:24:56.9741316+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 163209216,
+          "treeCommitBytes": 235696128,
+          "treeWorkingSetSumBytes": 470380544,
+          "rootPrivateWorkingSetBytes": 3899392,
+          "rootCommitBytes": 5709824,
+          "rootWorkingSetBytes": 27025408
+        },
+        {
+          "sampledAt": "2026-07-31T11:24:58.5417138+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 163196928,
+          "treeCommitBytes": 235692032,
+          "treeWorkingSetSumBytes": 470392832,
+          "rootPrivateWorkingSetBytes": 3883008,
+          "rootCommitBytes": 5709824,
+          "rootWorkingSetBytes": 27025408
+        },
+        {
+          "sampledAt": "2026-07-31T11:25:00.1322778+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 163360768,
+          "treeCommitBytes": 235892736,
+          "treeWorkingSetSumBytes": 470642688,
+          "rootPrivateWorkingSetBytes": 3883008,
+          "rootCommitBytes": 5709824,
+          "rootWorkingSetBytes": 27025408
+        },
+        {
+          "sampledAt": "2026-07-31T11:25:01.8508884+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 163270656,
+          "treeCommitBytes": 230436864,
+          "treeWorkingSetSumBytes": 466165760,
+          "rootPrivateWorkingSetBytes": 3883008,
+          "rootCommitBytes": 5709824,
+          "rootWorkingSetBytes": 27025408
+        },
+        {
+          "sampledAt": "2026-07-31T11:25:03.7206969+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 158466048,
+          "treeCommitBytes": 230187008,
+          "treeWorkingSetSumBytes": 465911808,
+          "rootPrivateWorkingSetBytes": 3883008,
+          "rootCommitBytes": 5709824,
+          "rootWorkingSetBytes": 27025408,
+          "processes": [
+            {
+              "processId": 46920,
+              "name": "msedgewebview2",
+              "role": "gpu-process",
+              "privateWorkingSetBytes": 79114240,
+              "workingSetBytes": 135696384,
+              "commitBytes": 110481408
+            },
+            {
+              "processId": 95176,
+              "name": "msedgewebview2",
+              "role": "browser",
+              "privateWorkingSetBytes": 37498880,
+              "workingSetBytes": 146161664,
+              "commitBytes": 49668096
+            },
+            {
+              "processId": 54844,
+              "name": "msedgewebview2",
+              "role": "renderer",
+              "privateWorkingSetBytes": 24453120,
+              "workingSetBytes": 79802368,
+              "commitBytes": 36524032
+            },
+            {
+              "processId": 84252,
+              "name": "msedgewebview2",
+              "role": "utility",
+              "privateWorkingSetBytes": 7962624,
+              "workingSetBytes": 43171840,
+              "commitBytes": 14909440
+            },
+            {
+              "processId": 87728,
+              "name": "apogee",
+              "role": "host(rust)",
+              "privateWorkingSetBytes": 3883008,
+              "workingSetBytes": 27025408,
+              "commitBytes": 5709824
+            },
+            {
+              "processId": 94896,
+              "name": "msedgewebview2",
+              "role": "utility",
+              "privateWorkingSetBytes": 3407872,
+              "workingSetBytes": 21360640,
+              "commitBytes": 9695232
+            },
+            {
+              "processId": 13916,
+              "name": "msedgewebview2",
+              "role": "crashpad-handler",
+              "privateWorkingSetBytes": 2146304,
+              "workingSetBytes": 12693504,
+              "commitBytes": 3198976
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "run": 20,
+      "classification": "clean-process-relaunch",
+      "externalReadyMs": 586.57421875,
+      "harnessObservedMs": 600.796,
+      "harnessOverheadMs": 14.22178125000005,
+      "systemCpuBeforeLaunchPercent": 20.0,
+      "cpuSettledBeforeLaunch": true,
+      "cpuSettleWaitedMs": 1887.4191,
+      "systemCpuDuringIdleMedianPercent": 36.0,
+      "frontend": {
+        "firstPaintMs": 86.90000009536743,
+        "mountMs": 73.40000009536743,
+        "readyMs": 73.79999995231628
+      },
+      "idle": {
+        "sampleCount": 5,
+        "treePrivateWorkingSetMedianBytes": 163414016,
+        "treePrivateWorkingSetMaxBytes": 163561472,
+        "treeCommitMedianBytes": 234483712,
+        "treeWorkingSetSumMedianBytes": 470589440,
+        "rootPrivateWorkingSetMedianBytes": 3870720,
+        "rootCommitMedianBytes": 5378048,
+        "processCountMax": 7
+      },
+      "processBreakdown": [
+        {
+          "processId": 81488,
+          "name": "msedgewebview2",
+          "role": "gpu-process",
+          "privateWorkingSetBytes": 79433728,
+          "workingSetBytes": 136056832,
+          "commitBytes": 110915584
+        },
+        {
+          "processId": 50676,
+          "name": "msedgewebview2",
+          "role": "browser",
+          "privateWorkingSetBytes": 37515264,
+          "workingSetBytes": 146325504,
+          "commitBytes": 49803264
+        },
+        {
+          "processId": 91552,
+          "name": "msedgewebview2",
+          "role": "renderer",
+          "privateWorkingSetBytes": 24023040,
+          "workingSetBytes": 79343616,
+          "commitBytes": 34988032
+        },
+        {
+          "processId": 65012,
+          "name": "msedgewebview2",
+          "role": "utility",
+          "privateWorkingSetBytes": 7995392,
+          "workingSetBytes": 43212800,
+          "commitBytes": 14958592
+        },
+        {
+          "processId": 34896,
+          "name": "apogee",
+          "role": "host(rust)",
+          "privateWorkingSetBytes": 3870720,
+          "workingSetBytes": 27033600,
+          "commitBytes": 5378048
+        },
+        {
+          "processId": 67052,
+          "name": "msedgewebview2",
+          "role": "utility",
+          "privateWorkingSetBytes": 3416064,
+          "workingSetBytes": 21377024,
+          "commitBytes": 9699328
+        },
+        {
+          "processId": 88176,
+          "name": "msedgewebview2",
+          "role": "crashpad-handler",
+          "privateWorkingSetBytes": 2150400,
+          "workingSetBytes": 12697600,
+          "commitBytes": 3203072
+        }
+      ],
+      "memorySamples": [
+        {
+          "sampledAt": "2026-07-31T11:25:10.2322425+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 163471360,
+          "treeCommitBytes": 234483712,
+          "treeWorkingSetSumBytes": 470589440,
+          "rootPrivateWorkingSetBytes": 3887104,
+          "rootCommitBytes": 5378048,
+          "rootWorkingSetBytes": 27033600
+        },
+        {
+          "sampledAt": "2026-07-31T11:25:11.8633915+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 163414016,
+          "treeCommitBytes": 234586112,
+          "treeWorkingSetSumBytes": 470700032,
+          "rootPrivateWorkingSetBytes": 3870720,
+          "rootCommitBytes": 5378048,
+          "rootWorkingSetBytes": 27033600
+        },
+        {
+          "sampledAt": "2026-07-31T11:25:13.6991200+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 163561472,
+          "treeCommitBytes": 234622976,
+          "treeWorkingSetSumBytes": 470765568,
+          "rootPrivateWorkingSetBytes": 3870720,
+          "rootCommitBytes": 5378048,
+          "rootWorkingSetBytes": 27033600
+        },
+        {
+          "sampledAt": "2026-07-31T11:25:15.6355428+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 158748672,
+          "treeCommitBytes": 229113856,
+          "treeWorkingSetSumBytes": 466206720,
+          "rootPrivateWorkingSetBytes": 3870720,
+          "rootCommitBytes": 5378048,
+          "rootWorkingSetBytes": 27033600
+        },
+        {
+          "sampledAt": "2026-07-31T11:25:17.3707006+08:00",
+          "processCount": 7,
+          "treePrivateWorkingSetBytes": 158404608,
+          "treeCommitBytes": 228945920,
+          "treeWorkingSetSumBytes": 466046976,
+          "rootPrivateWorkingSetBytes": 3870720,
+          "rootCommitBytes": 5378048,
+          "rootWorkingSetBytes": 27033600,
+          "processes": [
+            {
+              "processId": 81488,
+              "name": "msedgewebview2",
+              "role": "gpu-process",
+              "privateWorkingSetBytes": 79433728,
+              "workingSetBytes": 136056832,
+              "commitBytes": 110915584
+            },
+            {
+              "processId": 50676,
+              "name": "msedgewebview2",
+              "role": "browser",
+              "privateWorkingSetBytes": 37515264,
+              "workingSetBytes": 146325504,
+              "commitBytes": 49803264
+            },
+            {
+              "processId": 91552,
+              "name": "msedgewebview2",
+              "role": "renderer",
+              "privateWorkingSetBytes": 24023040,
+              "workingSetBytes": 79343616,
+              "commitBytes": 34988032
+            },
+            {
+              "processId": 65012,
+              "name": "msedgewebview2",
+              "role": "utility",
+              "privateWorkingSetBytes": 7995392,
+              "workingSetBytes": 43212800,
+              "commitBytes": 14958592
+            },
+            {
+              "processId": 34896,
+              "name": "apogee",
+              "role": "host(rust)",
+              "privateWorkingSetBytes": 3870720,
+              "workingSetBytes": 27033600,
+              "commitBytes": 5378048
+            },
+            {
+              "processId": 67052,
+              "name": "msedgewebview2",
+              "role": "utility",
+              "privateWorkingSetBytes": 3416064,
+              "workingSetBytes": 21377024,
+              "commitBytes": 9699328
+            },
+            {
+              "processId": 88176,
+              "name": "msedgewebview2",
+              "role": "crashpad-handler",
+              "privateWorkingSetBytes": 2150400,
+              "workingSetBytes": 12697600,
+              "commitBytes": 3203072
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
