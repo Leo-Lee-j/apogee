@@ -26,6 +26,10 @@ serde_json.workspace = true
 uuid.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+# 请求执行在 tokio 任务里跑，需要直接依赖（不仅是 tauri 的传递依赖）。
+tokio.workspace = true
+# `FutureExt::catch_unwind`,把 spawned task 的 panic 转成 IPC 错误事件。
+futures-util.workspace = true
 # 只读映射 spool 文件，索引构建不再复制完整响应体。
 memmap2 = "=0.9.11"
 

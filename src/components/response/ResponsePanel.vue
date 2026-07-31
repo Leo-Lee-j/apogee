@@ -27,12 +27,12 @@ const tierLabel: Record<string, string> = {
 }
 
 const statusClass = computed(() => {
-  const s = resp.value?.timing ? 200 : 0
-  if (!s) return ''
+  const s = resp.value?.status
+  if (s == null) return resp.value?.timing ? 'ok' : ''
   if (s < 300) return 'ok'
   if (s < 400) return 'redirect'
   if (s < 500) return 'warn'
-  return 'error'
+  return s < 600 ? 'error' : 'neterr'
 })
 
 function fmtBytes(n: number) {
@@ -47,7 +47,9 @@ function fmtBytes(n: number) {
     <div class="statusline">
       <template v-if="resp">
         <!-- 颜色 + 图标 + 文字三通道（02 文档 §7.2）。颜色只是加速识别。 -->
-        <span :class="['a-pill', 'status', statusClass]">● 200 OK</span>
+        <span :class="['a-pill', 'status', statusClass]">
+          ● {{ resp.status != null ? `${resp.status} ${resp.statusText ?? ''}`.trim() : '···' }}
+        </span>
         <span class="sep">·</span>
         <span>{{ resp.timing.totalMs.toFixed(0) }} ms</span>
         <span class="sep">·</span>

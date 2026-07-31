@@ -144,12 +144,20 @@ fn parse_range(raw: &str, total: u64) -> Option<(u64, u64)> {
 }
 
 fn err(code: StatusCode, msg: &str) -> Response<Vec<u8>> {
-    Response::builder()
+    // builder 在已知 status + 合法 header 名字下不会失败,这里 unwrap 只是
+    // 满足返回类型。改用 ok_or_else 兜底,避免 release abort 整进程。
+    match Response::builder()
         .status(code)
         .header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
         .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
         .body(msg.as_bytes().to_vec())
-        .expect("构造错误响应")
+    {
+        Ok(response) => response,
+        Err(error) => {
+            tracing::error!("构造错误响应失败:{};改用最简 fallback", error);
+            Response::new(msg.as_bytes().to_vec())
+        }
+    }
 }
 
 #[cfg(test)]

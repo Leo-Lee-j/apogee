@@ -18,3 +18,10 @@ serde.workspace = true
 serde_json.workspace = true
 uuid.workspace = true
 tracing.workspace = true
+# HTTP 执行放在本 crate 而不是 src-tauri，正是上面那条约束的用途：
+# v0.5 的 CLI 要用同一套请求执行逻辑，它不该为此依赖 Tauri。
+reqwest.workspace = true
+rustls.workspace = true
+# 只用到 sync（取消信号）与 time（超时）。这是本 crate 第一次直接依赖 tokio；
+# 在此之前 tokio 只是 tauri 的传递依赖。
+tokio = { workspace = true }

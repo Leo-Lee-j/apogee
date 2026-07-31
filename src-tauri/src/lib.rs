@@ -21,6 +21,8 @@ use std::time::Duration;
 use tauri::Manager;
 
 pub fn run() {
+    install_panic_hook();
+
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -55,6 +57,8 @@ pub fn run() {
             commands::process_memory,
             commands::spike_report,
             commands::spike_autorun,
+            commands::send_request,
+            commands::cancel_request,
         ])
         .setup(|app| {
             // 兜底：无论前端是否报告就绪，3 秒后强制显示窗口。
@@ -76,13 +80,29 @@ pub fn run() {
         .expect("Tauri 应用启动失败");
 }
 
+/// 把 panic 信息打到 stderr + tracing。
+///
+/// 在 `panic = "abort"` 下,Rust 会先调用 hook,再 abort,所以这是我们最后
+/// 一道「能看到点啥」的窗口。不写文件 —— 用户机器上日志目录路径不一定稳定,
+/// stderr 至少能被开发机抓到。
+fn install_panic_hook() {
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        // 先把信息打到 stderr(同步,即使后面的 tracing 已经失效也能落地)。
+        eprintln!("[apogee panic] {}", info);
+        // 再走 tracing —— release 下若还有订阅者,会写到日志。
+        tracing::error!("PANIC: {}", info);
+        previous(info);
+    }));
+}
+
 mod commands {
     use super::state::AppState;
     use serde::{Deserialize, Serialize};
     use std::path::PathBuf;
     use std::sync::Arc;
     use std::time::{SystemTime, UNIX_EPOCH};
-    use tauri::{Manager, State};
+    use tauri::{Emitter, Manager, State};
     use uuid::Uuid;
     use apogee_core::response::{ResponseSummary, TreeNode};
 
@@ -227,6 +247,163 @@ mod commands {
             .ok()
             .map(|value| value.trim().to_ascii_lowercase())
             .filter(|value| !value.is_empty())
+    }
+
+    /// 发送一个 HTTP 请求（03 文档 §3.2 / §4.5）。
+    ///
+    /// 立即返回句柄，不等网络。请求在后台执行，进度与结果通过事件推送。
+    #[tauri::command]
+    pub async fn send_request(
+        app: tauri::AppHandle,
+        state: State<'_, Arc<AppState>>,
+        spec: apogee_core::request::RequestSpec,
+        ctx: Option<apogee_core::request::ExecContext>,
+    ) -> Result<apogee_core::request::ExecHandle, String> {
+        let id = Uuid::new_v4();
+        let tab_id = ctx.as_ref().and_then(|item| item.tab_id.clone());
+        let cancel_rx = state.register_inflight(id, tab_id);
+
+        let spool = state.spool.clone();
+        let state2 = state.inner().clone();
+        let app2 = app.clone();
+
+        // 必须保证:无论 spawned future 是否 panic,都会发出一个终结事件。
+        // 否则前端按钮永远卡在「等待中」。
+        //
+        // release 下 `panic = "abort"`,task panic 直接整进程 abort,所以这里
+        // 用 `FutureExt::catch_unwind` 主动抓:tokio runtime 的默认行为是
+        // 在 panic hook 上报后继续运行,但我们要 fallback 事件,不能依赖 runtime。
+        tokio::spawn(async move {
+            use std::panic::AssertUnwindSafe;
+            use futures_util::FutureExt;
+
+            let app_for_cleanup = app2.clone();
+            let id_for_cleanup = id;
+
+            let cleanup = |event: &str, payload: serde_json::Value| {
+                state2.finish_inflight(id_for_cleanup);
+                let _ = app_for_cleanup.emit(event, payload);
+            };
+
+            let body = AssertUnwindSafe(async {
+                let outcome = apogee_core::http::execute(
+                    id,
+                    &spec,
+                    &spool,
+                    cancel_rx,
+                    |progress| {
+                        let _ = app2.emit("request:progress", serde_json::json!({
+                            "id": id,
+                            "received": progress.received,
+                            "total": progress.total,
+                        }));
+                    },
+                )
+                .await;
+
+                match outcome {
+                    apogee_core::http::Outcome::Done(meta) => {
+                        if let Err(error) = state2.record_http_meta(
+                            id, meta.size_bytes, meta.timing, meta.content_type.clone(),
+                        ) {
+                            tracing::error!(?error, "记录 HTTP 元信息失败");
+                            cleanup(
+                                "request:error",
+                                serde_json::json!({
+                                    "id": id,
+                                    "error": { "kind": "Internal", "message": error.to_string() },
+                                }),
+                            );
+                            return;
+                        }
+
+                        if meta.size_bytes < apogee_core::model::TIER_HIGHLIGHT_MAX {
+                            if let Err(error) = state2.index_response(id) {
+                                tracing::error!(?error, "索引响应失败");
+                            }
+                        }
+
+                        let summary = match state2.summarize_http(&meta) {
+                            Ok(summary) => summary,
+                            Err(error) => {
+                                tracing::error!(?error, "汇总响应失败");
+                                cleanup(
+                                    "request:error",
+                                    serde_json::json!({
+                                        "id": id,
+                                        "error": { "kind": "Internal", "message": error.to_string() },
+                                    }),
+                                );
+                                return;
+                            }
+                        };
+
+                        cleanup(
+                            "request:done",
+                            serde_json::json!({ "response": summary }),
+                        );
+                    }
+                    apogee_core::http::Outcome::Cancelled => {
+                        cleanup(
+                            "request:cancelled",
+                            serde_json::json!({ "id": id }),
+                        );
+                    }
+                    apogee_core::http::Outcome::Failed(error) => {
+                        cleanup(
+                            "request:error",
+                            serde_json::json!({
+                                "id": id,
+                                "error": error,
+                            }),
+                        );
+                    }
+                }
+            })
+            .catch_unwind()
+            .await;
+
+            if let Err(panic_payload) = body {
+                // 兜底:即使 catch_unwind 抓到,后续 emit 仍可能 panic(emit 本身
+                // 不会,但保险起见再包一层 try)。
+                let detail = if let Some(s) = panic_payload.downcast_ref::<&'static str>() {
+                    (*s).to_string()
+                } else if let Some(s) = panic_payload.downcast_ref::<String>() {
+                    s.clone()
+                } else {
+                    "未知 panic".to_string()
+                };
+                tracing::error!(
+                    panic = %detail,
+                    request_id = %id,
+                    "send_request 后台任务 panic,改为发送 request:error 兜底事件"
+                );
+                cleanup(
+                    "request:error",
+                    serde_json::json!({
+                        "id": id,
+                        "error": {
+                            "kind": "Internal",
+                            "message": format!("后台任务异常:{}", detail),
+                        },
+                    }),
+                );
+            }
+        });
+
+        Ok(apogee_core::request::ExecHandle { id })
+    }
+
+    /// 取消一个正在执行的请求。
+    ///
+    /// 幂等：请求不存在或已结束返回 `false`，前端据此决定要不要提示用户。
+    #[tauri::command]
+    pub fn cancel_request(
+        state: State<'_, Arc<AppState>>,
+        handle_id: String,
+    ) -> Result<bool, String> {
+        let id = parse_id(&handle_id)?;
+        Ok(state.cancel_inflight(id))
     }
 
     fn parse_id(s: &str) -> Result<Uuid, String> {

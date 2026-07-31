@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useTabsStore } from '@/stores/tabs'
+import { useRequest } from '@/stores/request'
 
 /**
  * URL 栏，40px —— 全产品最重要的一行（02 文档 §4.1）。
@@ -17,6 +18,7 @@ import { useTabsStore } from '@/stores/tabs'
 const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'] as const
 
 const tabs = useTabsStore()
+const { sending, send } = useRequest()
 const inputEl = ref<HTMLInputElement | null>(null)
 const methodOpen = ref(false)
 
@@ -41,6 +43,14 @@ function setMethod(m: string) {
 function onUrl(e: Event) {
   const v = (e.target as HTMLInputElement).value
   if (tab.value) tabs.patch(tab.value.id, { url: v, dirty: true })
+}
+
+/** Ctrl+Enter 发送（02 文档 §4.4 ResponsePanel 的快捷键提示）。 */
+function onKeydown(e: KeyboardEvent) {
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault()
+    if (!sending.value) send()
+  }
 }
 
 /** 分阶段启动的收尾动作：首屏就绪后聚焦 URL 栏，让用户能立刻打字（03 文档 §4.1）。 */
@@ -89,9 +99,17 @@ defineExpose({ focus: () => inputEl.value?.select() })
       aria-label="请求地址"
       :value="tab?.url ?? ''"
       @input="onUrl"
+      @keydown="onKeydown"
     />
 
-    <button class="send" type="button">发送</button>
+    <button
+      class="send"
+      type="button"
+      :disabled="sending"
+      @click="send"
+    >
+      {{ sending ? '等待中…' : '发送' }}
+    </button>
     <button class="save" type="button">保存</button>
   </div>
 </template>

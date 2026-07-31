@@ -64,6 +64,14 @@ export interface ResponseSummary {
   /** SpanIndex 的近似常驻堆内存，不包含响应体文件或 mmap。 */
   indexBytes?: number
   timing: Timing
+  // ── HTTP 语义（03 文档 §3.2）──
+  // 全部可选：Spike 合成响应没有 HTTP 语义，UI 据此显示「不可用」而非编造 200。
+  status?: number
+  statusText?: string
+  httpVersion?: string
+  headers?: [string, string][]
+  charset?: string
+  truncated?: boolean
 }
 
 export interface MemInfo {
@@ -179,6 +187,130 @@ export const ipc = {
   appReady(metrics: BootMetrics): Promise<void> {
     return call('app_ready', { metrics })
   },
+
+  // ── 请求执行（03 文档 §3.2 / §4.5）─────────────────────────────────
+
+  /** 发送一个 HTTP 请求。立即返回 ExecHandle，不等网络。 */
+  sendRequest(spec: RequestSpec, ctx?: ExecContext): Promise<ExecHandle> {
+    return call('send_request', { spec, ctx })
+  },
+
+  /** 取消一个正在执行的请求。返回 false 表示请求已结束或不存在。 */
+  cancelRequest(handleId: string): Promise<boolean> {
+    return call('cancel_request', { handleId })
+  },
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// 请求事件（03 文档 §3.2 / §4.5）
+// ─────────────────────────────────────────────────────────────────────
+
+import { listen as tauriListen } from '@tauri-apps/api/event'
+
+export interface ProgressEvent {
+  id: string
+  received: number
+  total: number | null
+}
+
+export interface DoneEvent {
+  response: ResponseSummary
+}
+
+export interface ErrorEvent {
+  id: string
+  error: AppError
+}
+
+export interface CancelledEvent {
+  id: string
+}
+
+/** 请求事件的统一分发。
+ *
+ * 调用方按事件类型注册回调。返回 clean-up 函数，组件销毁时调用即可，
+ * 内部自动取消所有四个监听。
+ */
+export function onRequestEvents(handlers: {
+  onProgress?: (e: ProgressEvent) => void
+  onDone?: (e: DoneEvent) => void
+  onError?: (e: ErrorEvent) => void
+  onCancelled?: (e: CancelledEvent) => void
+}): () => void {
+  if (!inTauri) return () => {}
+
+  const unlistens: (() => void)[] = []
+  const subs: [string, (payload: unknown) => void][] = [
+    ['request:progress', (p) => handlers.onProgress?.(p as ProgressEvent)],
+    ['request:done', (p) => handlers.onDone?.(p as DoneEvent)],
+    ['request:error', (p) => handlers.onError?.(p as ErrorEvent)],
+    ['request:cancelled', (p) => handlers.onCancelled?.(p as CancelledEvent)],
+  ]
+
+  for (const [event, cb] of subs) {
+    tauriListen<unknown>(event, (e) => cb(e.payload)).then((ul) => unlistens.push(ul))
+  }
+
+  return () => unlistens.forEach((ul) => ul())
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// 请求类型（同步自 crates/apogee-core/src/request.rs）
+// ─────────────────────────────────────────────────────────────────────
+
+export interface RequestSpec {
+  method: string
+  url: string
+  params?: KeyValue[]
+  pathParams?: KeyValue[]
+  headers?: KeyValue[]
+  body?: Body
+  auth?: AuthConfig
+  settings?: RequestSettings
+}
+
+export interface KeyValue {
+  enabled: boolean
+  key: string
+  value: string
+  description?: string
+  kind?: 'text' | 'file' | 'secret'
+}
+
+/** 请求体。`tag = "type"` 的 JSON 可辨识联合。 */
+export type Body =
+  | { type: 'none' }
+  | { type: 'json'; content: string }
+  | { type: 'text'; content: string; contentType: string }
+  | { type: 'formData'; rows: KeyValue[] }
+  | { type: 'urlEncoded'; rows: KeyValue[] }
+  | { type: 'binary'; path: string }
+  | { type: 'graphQl'; query: string; variables: string; operationName?: string }
+
+export type AuthConfig =
+  | { type: 'inherit' }
+  | { type: 'none' }
+  | { type: 'basic'; username: string; password: string }
+  | { type: 'bearer'; token: string }
+  | { type: 'apiKey'; key: string; value: string; location: 'header' | 'query' | 'cookie' }
+
+/** 请求级设置。全部可选：不传 = 继承默认。 */
+export interface RequestSettings {
+  timeoutMs?: number
+  followRedirects?: boolean
+  maxRedirects?: number
+  verifyTls?: boolean
+  httpVersion?: 'http1' | 'http2'
+  encodeUrl?: boolean
+  sendCookies?: boolean
+}
+
+export interface ExecContext {
+  tabId?: string
+}
+
+export interface ExecHandle {
+  id: string
 }
 
 // ─────────────────────────────────────────────────────────────────────

@@ -50,6 +50,10 @@ const MAX_CHILDREN: usize = (u32::MAX >> META_CHILD_SHIFT) as usize;
 /// 响应体磁盘缓存。
 ///
 /// 每个响应体一个文件，前端通过 `apogee://response/{id}` + Range 头读取。
+///
+/// `Clone` 是为了让 spawned task 能拿到自己的引用，
+/// 里面的 `PathBuf` clone 很便宜。
+#[derive(Clone)]
 pub struct Spool {
     root: PathBuf,
 }
@@ -90,6 +94,24 @@ impl Spool {
         Ok(written)
     }
 
+    /// 增量写入句柄，供 async 场景逐块落盘。
+    ///
+    /// 为什么不能用 `write_stream`：它的签名是 `IntoIterator`，而 reqwest 的响应流
+    /// 是 `chunk().await` —— 一个同步迭代器无法表达「下一块要 await」。硬要适配就得
+    /// 先把整个 body 收进 `Vec` 再交给迭代器，那正好破坏了流式落盘的全部意义。
+    ///
+    /// 原子性与 `write_stream` 一致：先写 `.part`，`finish()` 时才 rename。
+    pub fn writer(&self, id: Uuid) -> std::io::Result<SpoolWriter> {
+        let final_path = self.path_for(id);
+        let temp_path = final_path.with_extension("part");
+        Ok(SpoolWriter {
+            file: Some(File::create(&temp_path)?),
+            temp_path,
+            final_path,
+            written: 0,
+        })
+    }
+
     /// 按 Range 读取分片。这是自定义协议 handler 的底层实现。
     ///
     /// 只 seek + 读需要的那一段，不整体加载 —— 100MB 文件读首屏 64KB 的成本
@@ -122,6 +144,57 @@ impl Spool {
     }
 }
 
+/// 增量写入句柄。由 `Spool::writer` 创建，见那里的说明。
+pub struct SpoolWriter {
+    /// `Option` 是为了能在 rename **之前**显式关掉句柄。
+    ///
+    /// Windows 上重命名一个仍被打开的文件会失败（sharing violation）。
+    /// 这类问题在 macOS 上开发时完全不会出现，到 Windows 才炸 —— 而 Windows
+    /// 是我们的首要目标平台（决策 D2）。
+    file: Option<File>,
+    temp_path: PathBuf,
+    final_path: PathBuf,
+    written: u64,
+}
+
+impl SpoolWriter {
+    /// 追加一块。调用方负责在块之间检查取消与上报进度。
+    pub fn write(&mut self, chunk: &[u8]) -> std::io::Result<()> {
+        if let Some(file) = self.file.as_mut() {
+            file.write_all(chunk)?;
+            self.written += chunk.len() as u64;
+        }
+        Ok(())
+    }
+
+    pub fn written(&self) -> u64 {
+        self.written
+    }
+
+    /// 收尾：flush、关句柄、原子发布。返回总字节数。
+    pub fn finish(mut self) -> std::io::Result<u64> {
+        if let Some(mut file) = self.file.take() {
+            file.flush()?;
+            // drop 掉句柄再 rename，理由见 `file` 字段的注释
+            drop(file);
+        }
+        fs::rename(&self.temp_path, &self.final_path)?;
+        Ok(self.written)
+    }
+}
+
+impl Drop for SpoolWriter {
+    /// 没走到 `finish()` 就被丢弃（请求取消或出错）时清掉临时文件。
+    ///
+    /// 不清理的后果是 `.part` 文件在 spool 目录里永久堆积：LRU 淘汰只认正式
+    /// 文件名，扫不到这些残片。
+    fn drop(&mut self) {
+        if self.file.is_some() {
+            let _ = fs::remove_file(&self.temp_path);
+        }
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // JSON SpanIndex
 // ─────────────────────────────────────────────────────────────────────
@@ -147,7 +220,12 @@ impl NodeKind {
             3 => Self::Number,
             4 => Self::Bool,
             5 => Self::Null,
-            _ => unreachable!("无效的节点类型"),
+            // 防御式:文件被外部改动 / 版本不兼容时,落到 Null 而不是 abort 进程。
+            // 视图层拿到的是"未知节点显示为空",而不是整个 app 闪退。
+            _ => {
+                tracing::warn!("解析到未知节点类型 meta={:#x},按 Null 处理", meta);
+                Self::Null
+            }
         }
     }
 
@@ -986,6 +1064,81 @@ pub struct ResponseSummary {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub index_bytes: Option<usize>,
     pub timing: Timing,
+
+    // ── HTTP 语义 ───────────────────────────────────────────────────
+    //
+    // 为什么加在这里，而不是把 `model::ResponseMeta` 直接序列化给前端：
+    // `ResponseMeta` 有 `body_path: PathBuf`。把它送过 IPC 就等于把 spool 的真实
+    // 路径交给 WebView，而前端本来连文件系统权限都没有（PRD §10.2 能力最小化）。
+    // 所以 `ResponseMeta` 留在 Rust 侧，这里只挑前端渲染真正需要的字段。
+    //
+    // 全部 `Option`/默认空：Spike 的合成响应没有 HTTP 语义，那时为 `None`，
+    // UI 应显示「不可用」而不是编一个 200 出来。
+    /// HTTP 状态码。`None` = 非 HTTP 来源（合成响应）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status_text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub http_version: Option<String>,
+    /// 用 `Vec` 而非 `Map`：HTTP 允许同名头重复（`Set-Cookie` 是常态），
+    /// 用 map 会静默丢掉重复项。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub headers: Vec<(String, String)>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub charset: Option<String>,
+    /// 超过 `MAX_BODY_BYTES` 被截断
+    #[serde(default)]
+    pub truncated: bool,
+}
+
+impl ResponseSummary {
+    /// 无 HTTP 语义的摘要（Spike 合成响应）。
+    ///
+    /// 索引相关字段留给调用方填 —— 那要查 `ResponseStore` 的当前状态，
+    /// 而索引可以在响应落盘之后才建，不能在这里定死。
+    pub fn without_http(id: Uuid, size_bytes: u64, timing: Timing) -> Self {
+        let tier = RenderTier::from_size(size_bytes);
+        Self {
+            id,
+            size_bytes,
+            tier,
+            syntax_highlight: tier.syntax_highlight(),
+            content_type: None,
+            indexed: false,
+            total_nodes: None,
+            index_bytes: None,
+            timing,
+            status: None,
+            status_text: None,
+            http_version: None,
+            headers: Vec::new(),
+            charset: None,
+            truncated: false,
+        }
+    }
+
+    /// 从 Rust 侧的 `ResponseMeta` 投影出可过 IPC 的摘要（丢掉 `body_path`）。
+    pub fn from_meta(meta: &crate::model::ResponseMeta) -> Self {
+        let tier = RenderTier::from_size(meta.size_bytes);
+        Self {
+            id: meta.id,
+            size_bytes: meta.size_bytes,
+            tier,
+            syntax_highlight: tier.syntax_highlight(),
+            content_type: meta.content_type.clone(),
+            indexed: false,
+            total_nodes: None,
+            index_bytes: None,
+            timing: meta.timing,
+            status: Some(meta.status),
+            status_text: Some(meta.status_text.clone()),
+            http_version: Some(meta.http_version.clone()),
+            headers: meta.headers.clone(),
+            charset: meta.charset.clone(),
+            truncated: meta.truncated,
+        }
+    }
 }
 
 struct CacheEntry {
@@ -1027,9 +1180,20 @@ impl ResponseStore {
         }
     }
 
+    /// 锁中毒时仍然返回数据(`Mutex::lock` 失败意味着持锁线程 panic)。
+    /// 与 `src-tauri/src/state.rs` 的 `in_flight` / `meta` 处理风格保持一致。
+    /// `panic = "abort"` 的 release 下,这里如果崩了就是真的 abort 整进程,
+    /// 所以宁可读到中毒后的脏状态也不能让产品闪退。
+    fn lock_inner(&self) -> std::sync::MutexGuard<'_, IndexCache> {
+        self.inner.lock().unwrap_or_else(|poisoned| {
+            tracing::warn!("ResponseStore 锁中毒,采用 into_inner() 恢复");
+            poisoned.into_inner()
+        })
+    }
+
     pub fn insert_index(&self, id: Uuid, index: SpanIndex) {
         let bytes = index.estimated_bytes();
-        let mut cache = self.inner.lock().expect("lock");
+        let mut cache = self.lock_inner();
         if let Some(previous) = cache.entries.remove(&id) {
             cache.total_bytes = cache.total_bytes.saturating_sub(previous.bytes);
             cache.order.retain(|cached| *cached != id);
@@ -1056,7 +1220,7 @@ impl ResponseStore {
     }
 
     pub fn index(&self, id: Uuid) -> Option<Arc<SpanIndex>> {
-        let mut cache = self.inner.lock().expect("lock");
+        let mut cache = self.lock_inner();
         let index = cache.entries.get(&id).map(|entry| entry.index.clone());
         if index.is_some() {
             cache.order.retain(|cached| *cached != id);
@@ -1067,7 +1231,7 @@ impl ResponseStore {
 
     /// 标签进入 Cold 状态时调用；Arc 允许正在执行的分页请求安全完成。
     pub fn drop_index(&self, id: Uuid) {
-        let mut cache = self.inner.lock().expect("lock");
+        let mut cache = self.lock_inner();
         if let Some(removed) = cache.entries.remove(&id) {
             cache.total_bytes = cache.total_bytes.saturating_sub(removed.bytes);
         }
@@ -1075,11 +1239,11 @@ impl ResponseStore {
     }
 
     pub fn indexed_count(&self) -> usize {
-        self.inner.lock().expect("lock").entries.len()
+        self.lock_inner().entries.len()
     }
 
     pub fn index_bytes(&self) -> usize {
-        self.inner.lock().expect("lock").total_bytes
+        self.lock_inner().total_bytes
     }
 }
 

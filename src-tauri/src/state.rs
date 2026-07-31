@@ -1,35 +1,99 @@
-//! 应用状态：响应体 spool + JSON SpanIndex 缓存。
+//! 应用状态：响应体 spool + JSON SpanIndex 缓存 + 请求中注册表。
 
 use anyhow::{Context, Result};
 use memmap2::MmapOptions;
+use std::collections::HashMap;
 use std::fs::File;
 use std::path::PathBuf;
 use std::sync::RwLock;
 use std::time::Instant;
+use tokio::sync::oneshot;
 use uuid::Uuid;
-use apogee_core::model::{RenderTier, Timing};
+use apogee_core::model::{ResponseMeta, Timing};
 use apogee_core::response::{
     scalar_preview, synth_json_payload, ResponseStore, ResponseSummary, SpanIndex, Spool, TreeNode,
     PREVIEW_READ_BYTES,
 };
 
+/// 正在飞行的请求。
+///
+/// 取消用 `oneshot::Sender` 而不是 `CancellationToken`：
+/// `apogee_core::http::execute` 的签名就是 `oneshot::Receiver<()>`，
+/// 直接用 sender 当注册表条目，取消时 `send(())` 一发即达，不需要桥接层。
+struct InFlight {
+    cancel: oneshot::Sender<()>,
+    #[allow(dead_code)]
+    tab_id: Option<String>,
+}
+
 pub struct AppState {
     pub spool: Spool,
     pub store: ResponseStore,
     /// 只存元信息（体积、耗时），**不存 body**。
-    meta: RwLock<Vec<(Uuid, u64, Timing, Option<String>)>>,
+    pub(crate) meta: RwLock<Vec<(Uuid, u64, Timing, Option<String>)>>,
+    /// 请求中注册表。key 是 ExecHandle.id（= 响应 id）。
+    in_flight: RwLock<HashMap<Uuid, InFlight>>,
 }
 
 impl AppState {
     pub fn new() -> Result<Self> {
-        // 响应体缓存目录。真实产品里放应用数据目录，
-        // 并按 LRU 限额淘汰（默认 500MB，见 03 文档 §4.2）。
         let root = std::env::temp_dir().join("apogee-spool");
         Ok(Self {
             spool: Spool::new(root)?,
             store: ResponseStore::new(),
             meta: RwLock::new(Vec::new()),
+            in_flight: RwLock::new(HashMap::new()),
         })
+    }
+
+    /// 注册一个正在执行的请求，返回 receiver 给 execute() 当取消信号。
+    pub fn register_inflight(&self, id: Uuid, tab_id: Option<String>) -> oneshot::Receiver<()> {
+        let (tx, rx) = oneshot::channel();
+        let mut guard = self
+            .in_flight
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        guard.insert(id, InFlight { cancel: tx, tab_id });
+        rx
+    }
+
+    /// 取消一个请求。`true` = 找到了并发了取消信号。
+    /// `oneshot::send` 消费 sender，取消后该条目自动失效。
+    pub fn cancel_inflight(&self, id: Uuid) -> bool {
+        let mut guard = self
+            .in_flight
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(inflight) = guard.remove(&id) {
+            let _ = inflight.cancel.send(());
+            true
+        } else {
+            false
+        }
+    }
+
+    /// 记录完成的 HTTP 响应元信息，供后续 query 拿到 HTTP 语义。
+    pub fn record_http_meta(
+        &self,
+        id: Uuid,
+        size: u64,
+        timing: Timing,
+        content_type: Option<String>,
+    ) -> Result<()> {
+        self.meta
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .push((id, size, timing, content_type));
+        Ok(())
+    }
+
+    /// 请求完成或出错后清理注册表条目。
+    pub fn finish_inflight(&self, id: Uuid) {
+        let mut guard = self
+            .in_flight
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        guard.remove(&id);
     }
 
     /// 生成合成响应并流式落盘（Spike S2）。
@@ -75,14 +139,14 @@ impl AppState {
         };
         self.meta
             .write()
-            .unwrap()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
             .push((id, size, timing, Some("application/json".into())));
 
         Ok(self.build_summary(id, size, timing, Some("application/json".into())))
     }
 
     pub fn summary(&self, id: Uuid) -> Result<ResponseSummary> {
-        let m = self.meta.read().unwrap();
+        let m = self.meta.read().unwrap_or_else(|poisoned| poisoned.into_inner());
         let (_, size, timing, ct) = m
             .iter()
             .find(|(x, ..)| *x == id)
@@ -98,19 +162,30 @@ impl AppState {
         timing: Timing,
         content_type: Option<String>,
     ) -> ResponseSummary {
-        let tier = RenderTier::from_size(size);
         let index = self.store.index(id);
         ResponseSummary {
-            id,
-            size_bytes: size,
-            tier,
-            syntax_highlight: tier.syntax_highlight(),
             content_type,
             indexed: index.is_some(),
             total_nodes: index.as_ref().map(|item| item.total_nodes()),
             index_bytes: index.as_ref().map(|item| item.estimated_bytes()),
-            timing,
+            // 合成响应没有 HTTP 语义，status/headers 保持 None —— 前端据此
+            // 显示「不可用」，而不是编一个 200 出来。
+            ..ResponseSummary::without_http(id, size, timing)
         }
+    }
+
+    /// 带 HTTP 语义的完整摘要：把 `ResponseMeta` 的投影与当前索引状态合并。
+    ///
+    /// 为什么不直接用 `build_summary`：它走 `without_http`，会丢掉 status/headers。
+    /// 为什么不直接用 `ResponseSummary::from_meta`：它把 `indexed` 写死为 false。
+    /// 请求完成路径两者都要，所以在这里合并。
+    pub fn summarize_http(&self, meta: &ResponseMeta) -> Result<ResponseSummary> {
+        let index = self.store.index(meta.id);
+        let mut summary = ResponseSummary::from_meta(meta);
+        summary.indexed = index.is_some();
+        summary.total_nodes = index.as_ref().map(|item| item.total_nodes());
+        summary.index_bytes = index.as_ref().map(|item| item.estimated_bytes());
+        Ok(summary)
     }
 
     /// 直接对不可变 spool 文件做只读 mmap 并构建 SpanIndex。
