@@ -915,7 +915,7 @@ h2 { margin: 0 0 4px; font: 600 13px/1.3 var(--a-font-ui); color: var(--a-text);
 
 /* 量测位给固定高度：视口高度直接决定要渲染多少行，不能让它随窗口漂。 */
 .slot {
-  flex: 0 0 auto; width: var(--a-w-sidebar); height: 600px;
+  flex: 0 0 auto; width: var(--a-w-sidebar-bench); height: 600px;
   display: flex; overflow: hidden;
   border: 1px solid var(--a-border); border-radius: var(--a-radius-md);
 }

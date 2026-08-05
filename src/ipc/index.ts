@@ -88,6 +88,31 @@ export interface BootMetrics {
   firstPaintMs: number
 }
 
+export type WorkspaceNodeKind = 'collection' | 'folder' | 'request'
+
+export interface WorkspaceNode {
+  id: string
+  parentId?: string | null
+  depth: number
+  name: string
+  method?: string
+  isFolder: boolean
+  expanded: boolean
+  kind?: WorkspaceNodeKind
+}
+
+export interface WorkspaceSnapshot {
+  id: string
+  name: string
+  nodes: WorkspaceNode[]
+}
+
+export interface WorkspaceRequest {
+  id: string
+  name: string
+  spec: RequestSpec
+}
+
 export type NodeKind = 'object' | 'array' | 'string' | 'number' | 'bool' | 'null'
 
 /** 扁平树节点。**没有 children 字段** —— 前端不做递归构造（03 文档 §4.4）。 */
@@ -186,6 +211,43 @@ export const ipc = {
    */
   appReady(metrics: BootMetrics): Promise<void> {
     return call('app_ready', { metrics })
+  },
+
+  // ── 工作区持久化（03 文档 §3.2 / §6）─────────────────────────────
+
+  /** 读取 Rust 侧已经扁平化的集合树。 */
+  workspaceLoad(): Promise<WorkspaceSnapshot> {
+    return call('workspace_load')
+  },
+
+  /** 读取一个请求的完整编辑模型。 */
+  workspaceReadRequest(requestId: string): Promise<WorkspaceRequest> {
+    return call('workspace_read_request', { requestId })
+  },
+
+  /** 保存请求的持久化字段；请求体和大响应体都不通过额外的前端缓存传递。 */
+  workspaceSaveRequest(requestId: string, name: string, spec: RequestSpec): Promise<void> {
+    return call('workspace_save_request', { requestId, name, spec })
+  },
+
+  workspaceCreateCollection(name: string): Promise<WorkspaceSnapshot> {
+    return call('workspace_create_collection', { name })
+  },
+
+  workspaceCreateFolder(parentId: string, name: string): Promise<WorkspaceSnapshot> {
+    return call('workspace_create_folder', { parentId, name })
+  },
+
+  workspaceCreateRequest(parentId: string, name: string): Promise<WorkspaceRequest> {
+    return call('workspace_create_request', { parentId, name })
+  },
+
+  workspaceRenameNode(nodeId: string, name: string): Promise<WorkspaceSnapshot> {
+    return call('workspace_rename_node', { nodeId, name })
+  },
+
+  workspaceDeleteNode(nodeId: string): Promise<WorkspaceSnapshot> {
+    return call('workspace_delete_node', { nodeId })
   },
 
   // ── 请求执行（03 文档 §3.2 / §4.5）─────────────────────────────────

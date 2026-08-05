@@ -146,7 +146,9 @@
   --a-h-urlbar: 40px;
   --a-h-toolbar: 32px;
   --a-h-statusbar: 24px;
-  --a-w-sidebar: 240px;
+  --a-w-sidebar: 370px;
+  /* S3 虚拟树对照实验保持固定测量宽度，不随产品默认布局变化。 */
+  --a-w-sidebar-bench: 240px;
   --a-row: 28px;
   --a-row-compact: 24px;
 

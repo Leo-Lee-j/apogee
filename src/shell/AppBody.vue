@@ -8,6 +8,7 @@ import RequestPanel from '@/components/request/RequestPanel.vue'
 import ResponsePanel from '@/components/response/ResponsePanel.vue'
 import { useUiStore, SIDEBAR_MIN_W } from '@/stores/ui'
 import { useTabsStore } from '@/stores/tabs'
+import { useWorkspaceStore } from '@/stores/workspace'
 import { ipc } from '@/ipc'
 
 /**
@@ -33,6 +34,7 @@ const S3Panel = defineAsyncComponent(() => import('@/spike/S3Panel.vue'))
 
 const ui = useUiStore()
 const tabs = useTabsStore()
+const workspace = useWorkspaceStore()
 
 /** 侧边栏延后到首帧之后再挂，避免和首屏抢主线程（03 文档 §4.1 分阶段启动）。 */
 const sidebarReady = ref(false)
@@ -161,7 +163,7 @@ function onKeydown(e: KeyboardEvent) {
     <TitleBar />
     <div class="mid">
       <template v-if="ui.sidebarVisible && sidebarReady">
-        <Sidebar class="a-block" :style="sidebarStyle" />
+        <Sidebar class="a-block" :style="sidebarStyle" :nodes="workspace.nodes" />
         <!--
           宽度分隔条。role=separator + tabindex 让它成为一个可聚焦的
           「值可调的分隔符」，读屏会念出当前宽度与上下限。

@@ -6,7 +6,7 @@ export type LayoutMode = 'stacked' | 'side-by-side' | 'focus'
 export type ThemeMode = 'dark' | 'light' | 'system'
 
 /**
- * 侧边栏宽度区间（02 文档 §3.2：「240px，可拖拽 180～480」）。
+ * 侧边栏宽度区间（02 文档 §3.2：「370px，可拖拽 180～480」）。
  *
  * 上限不是随手定的：侧边栏是**导航**，主区才是工作面。没有上限时用户一拖到底，
  * URL 栏和响应区会被压到不可用，而这个状态还会被持久化下来 —— 下次启动直接
@@ -14,7 +14,7 @@ export type ThemeMode = 'dark' | 'light' | 'system'
  */
 export const SIDEBAR_MIN_W = 180
 export const SIDEBAR_MAX_W = 480
-export const SIDEBAR_DEFAULT_W = 240
+export const SIDEBAR_DEFAULT_W = 370
 
 /**
  * 主区的最小可用宽度。窗口窄到放不下「侧边栏上限 + 这个值」时，上限按窗口收紧。

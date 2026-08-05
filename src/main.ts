@@ -4,6 +4,7 @@ import './styles/tokens.css'
 import AppShell from '@app-shell'
 import { useUiStore } from './stores/ui'
 import { useTabsStore } from './stores/tabs'
+import { useWorkspaceStore } from './stores/workspace'
 import { ipc, inTauri, type BootMetrics } from './ipc'
 
 /**
@@ -39,6 +40,10 @@ ui.applyTheme()
 // 首屏给一个空标签，让用户能立刻打字。这是 TTFR 指标的一部分（PRD §3.2）
 const tabs = useTabsStore()
 if (tabs.tabs.length === 0) tabs.open({ title: '新建请求' })
+
+// 工作区在首帧之后异步加载：不阻塞「立即输入 URL」的启动路径。
+const workspace = useWorkspaceStore()
+if (inTauri) void workspace.load()
 
 bootMarks.readyMs = performance.now() - t0
 

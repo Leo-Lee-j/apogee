@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, defineAsyncComponent } from 'vue'
+import type { AppError } from '@/ipc'
 import { useTabsStore } from '@/stores/tabs'
 
 /**
@@ -17,6 +18,7 @@ const view = ref<View>('tree')
 
 const tabs = useTabsStore()
 const resp = computed(() => tabs.active?.response ?? null)
+const requestError = computed<AppError | null>(() => tabs.active?.error ?? null)
 
 /** 分级降级（02 文档 §4.4）。唯一的高亮阈值是 2MB。 */
 const tierLabel: Record<string, string> = {
@@ -45,7 +47,12 @@ function fmtBytes(n: number) {
 <template>
   <section class="resp">
     <div class="statusline">
-      <template v-if="resp">
+      <template v-if="requestError">
+        <span class="a-pill status neterr">✕ 请求失败</span>
+        <span class="sep">·</span>
+        <span>{{ requestError.kind }}</span>
+      </template>
+      <template v-else-if="resp">
         <!-- 颜色 + 图标 + 文字三通道（02 文档 §7.2）。颜色只是加速识别。 -->
         <span :class="['a-pill', 'status', statusClass]">
           ● {{ resp.status != null ? `${resp.status} ${resp.statusText ?? ''}`.trim() : '···' }}
@@ -62,7 +69,7 @@ function fmtBytes(n: number) {
       <span v-else class="hint">按 <kbd>Ctrl</kbd><kbd>Enter</kbd> 发送请求</span>
 
       <span class="spacer" />
-      <div class="views" role="tablist">
+      <div v-if="!requestError" class="views" role="tablist">
         <button
           v-for="v in (['tree', 'raw', 'table', 'preview'] as View[])"
           :key="v"
@@ -78,7 +85,22 @@ function fmtBytes(n: number) {
     </div>
 
     <div class="pane">
-      <template v-if="resp">
+      <div v-if="requestError" class="error-state" role="alert">
+        <h3>请求未完成</h3>
+        <p class="error-message">{{ requestError.message }}</p>
+        <p class="error-kind">错误类型：{{ requestError.kind }}</p>
+        <details v-if="requestError.detail" class="error-detail">
+          <summary>技术详情</summary>
+          <pre>{{ requestError.detail }}</pre>
+        </details>
+        <ul v-if="requestError.hints.length" class="hints">
+          <li v-for="hint in requestError.hints" :key="`${hint.label}-${hint.action ?? ''}`">
+            <span>{{ hint.label }}</span>
+            <code v-if="hint.action">{{ hint.action }}</code>
+          </li>
+        </ul>
+      </div>
+      <template v-else-if="resp">
         <!-- >50MB：不渲染，只给摘要 + 出口（02 文档 §4.4 SummaryOnly 分级） -->
         <div v-if="resp.tier === 'summaryOnly'" class="summary">
           <p class="big">{{ fmtBytes(resp.sizeBytes) }} 响应体</p>
@@ -143,7 +165,17 @@ function fmtBytes(n: number) {
 .views button:hover { background: var(--a-hover); }
 .views button.on { background: var(--a-selected); color: var(--a-text); }
 .pane { flex: 1 1 auto; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
-.empty, .summary, .todo { padding: 16px; color: var(--a-text-dim); font-size: 12px; }
+.error-state, .empty, .summary, .todo { padding: 16px; color: var(--a-text-dim); font-size: 12px; }
+.error-state { overflow: auto; }
+.error-state h3 { margin: 0 0 8px; color: var(--a-error); font-size: 14px; }
+.error-message { margin: 0 0 6px; color: var(--a-text); font-size: 13px; }
+.error-kind { margin: 0; color: var(--a-text-faint); font-family: var(--a-font-mono); }
+.error-detail { margin-top: 12px; color: var(--a-text-dim); }
+.error-detail summary { cursor: pointer; color: var(--a-text); }
+.error-detail pre { margin: 6px 0 0; white-space: pre-wrap; font: 11px/1.5 var(--a-font-mono); }
+.hints { margin: 14px 0 0; padding-left: 18px; color: var(--a-text-dim); }
+.hints li { margin: 5px 0; }
+.hints code { margin-left: 6px; color: var(--a-primary); font: 11px var(--a-font-mono); }
 .dim { color: var(--a-text-faint); }
 .big { font-size: 16px; color: var(--a-text); }
 .actions { display: flex; gap: 8px; margin-top: 12px; }

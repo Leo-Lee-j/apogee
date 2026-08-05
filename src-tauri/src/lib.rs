@@ -14,6 +14,7 @@
 mod mem;
 mod protocol;
 mod state;
+mod workspace;
 
 use state::AppState;
 use std::sync::Arc;
@@ -32,6 +33,7 @@ pub fn run() {
 
     let state = Arc::new(AppState::new().expect("初始化应用状态失败"));
     let proto_state = state.clone();
+    let workspace_state = state.clone();
 
     tauri::Builder::default()
         .manage(state)
@@ -59,8 +61,24 @@ pub fn run() {
             commands::spike_autorun,
             commands::send_request,
             commands::cancel_request,
+            commands::workspace_load,
+            commands::workspace_read_request,
+            commands::workspace_save_request,
+            commands::workspace_create_collection,
+            commands::workspace_create_folder,
+            commands::workspace_create_request,
+            commands::workspace_rename_node,
+            commands::workspace_delete_node,
         ])
-        .setup(|app| {
+        .setup(move |app| {
+            let data_dir = app
+                .path()
+                .app_data_dir()
+                .map_err(|error| std::io::Error::other(error.to_string()))?;
+            workspace_state
+                .initialize_workspace(data_dir.join("workspace"))
+                .map_err(|error| std::io::Error::other(error.to_string()))?;
+
             // 兜底：无论前端是否报告就绪，3 秒后强制显示窗口。
             // 没有这层兜底，一个前端异常就会变成「双击图标什么都不出现」，
             // 那是最难排查的一类用户报障。
@@ -98,13 +116,15 @@ fn install_panic_hook() {
 
 mod commands {
     use super::state::AppState;
+    use apogee_core::request::RequestSpec;
+    use apogee_core::response::{ResponseSummary, TreeNode};
+    use apogee_core::workspace::{WorkspaceRequest, WorkspaceSnapshot};
     use serde::{Deserialize, Serialize};
     use std::path::PathBuf;
     use std::sync::Arc;
     use std::time::{SystemTime, UNIX_EPOCH};
     use tauri::{Emitter, Manager, State};
     use uuid::Uuid;
-    use apogee_core::response::{ResponseSummary, TreeNode};
 
     #[derive(Debug, Clone, Copy, Deserialize, Serialize)]
     #[serde(rename_all = "camelCase")]
@@ -116,10 +136,7 @@ mod commands {
 
     /// 前端首帧就绪 → 显示窗口（03 文档 §4.1 分阶段启动）。
     #[tauri::command]
-    pub fn app_ready(
-        window: tauri::Window,
-        metrics: Option<BootMetrics>,
-    ) -> Result<(), String> {
+    pub fn app_ready(window: tauri::Window, metrics: Option<BootMetrics>) -> Result<(), String> {
         if let Some(w) = window.get_webview_window("main") {
             w.show().map_err(|e| e.to_string())?;
         }
@@ -274,8 +291,8 @@ mod commands {
         // 用 `FutureExt::catch_unwind` 主动抓:tokio runtime 的默认行为是
         // 在 panic hook 上报后继续运行,但我们要 fallback 事件,不能依赖 runtime。
         tokio::spawn(async move {
-            use std::panic::AssertUnwindSafe;
             use futures_util::FutureExt;
+            use std::panic::AssertUnwindSafe;
 
             let app_for_cleanup = app2.clone();
             let id_for_cleanup = id;
@@ -292,8 +309,7 @@ mod commands {
             //
             // 50ms 一次 = 最多 20 帧/秒的进度更新,人眼看不出与逐块更新的差别。
             // 不需要补发最后一次:终结值由 `request:done` 的 summary 带过去。
-            const PROGRESS_MIN_INTERVAL: std::time::Duration =
-                std::time::Duration::from_millis(50);
+            const PROGRESS_MIN_INTERVAL: std::time::Duration = std::time::Duration::from_millis(50);
             let mut last_progress: Option<std::time::Instant> = None;
             let on_progress = move |progress: apogee_core::http::Progress| {
                 let now = std::time::Instant::now();
@@ -301,11 +317,14 @@ mod commands {
                     return;
                 }
                 last_progress = Some(now);
-                let _ = app2.emit("request:progress", serde_json::json!({
-                    "id": id,
-                    "received": progress.received,
-                    "total": progress.total,
-                }));
+                let _ = app2.emit(
+                    "request:progress",
+                    serde_json::json!({
+                        "id": id,
+                        "received": progress.received,
+                        "total": progress.total,
+                    }),
+                );
             };
 
             let body = AssertUnwindSafe(async {
@@ -427,6 +446,102 @@ mod commands {
     ) -> Result<bool, String> {
         let id = parse_id(&handle_id)?;
         Ok(state.cancel_inflight(id))
+    }
+
+    /// 读取当前工作区的扁平树。
+    #[tauri::command]
+    pub fn workspace_load(state: State<'_, Arc<AppState>>) -> Result<WorkspaceSnapshot, String> {
+        state
+            .with_workspace(|repository| repository.snapshot())
+            .map_err(|error| error.to_string())
+    }
+
+    /// 读取一个请求的完整编辑模型。
+    #[tauri::command]
+    pub fn workspace_read_request(
+        state: State<'_, Arc<AppState>>,
+        request_id: String,
+    ) -> Result<WorkspaceRequest, String> {
+        let id = parse_id(&request_id)?;
+        state
+            .with_workspace(|repository| repository.read_request(id))
+            .map_err(|error| error.to_string())
+    }
+
+    /// 自动保存请求编辑器的持久化字段。前端在 300ms 防抖后调用。
+    #[tauri::command]
+    pub fn workspace_save_request(
+        state: State<'_, Arc<AppState>>,
+        request_id: String,
+        name: String,
+        spec: RequestSpec,
+    ) -> Result<(), String> {
+        let id = parse_id(&request_id)?;
+        state
+            .with_workspace(|repository| repository.save_request(id, name, spec))
+            .map_err(|error| error.to_string())
+    }
+
+    /// 创建集合并返回刷新后的扁平树。
+    #[tauri::command]
+    pub fn workspace_create_collection(
+        state: State<'_, Arc<AppState>>,
+        name: String,
+    ) -> Result<WorkspaceSnapshot, String> {
+        state
+            .with_workspace(|repository| repository.create_collection(name))
+            .map_err(|error| error.to_string())
+    }
+
+    /// 在集合或文件夹下创建文件夹。
+    #[tauri::command]
+    pub fn workspace_create_folder(
+        state: State<'_, Arc<AppState>>,
+        parent_id: String,
+        name: String,
+    ) -> Result<WorkspaceSnapshot, String> {
+        let parent = parse_id(&parent_id)?;
+        state
+            .with_workspace(|repository| repository.create_folder(parent, name))
+            .map_err(|error| error.to_string())
+    }
+
+    /// 在集合或文件夹下创建请求，并返回初始请求模型。
+    #[tauri::command]
+    pub fn workspace_create_request(
+        state: State<'_, Arc<AppState>>,
+        parent_id: String,
+        name: String,
+    ) -> Result<WorkspaceRequest, String> {
+        let parent = parse_id(&parent_id)?;
+        state
+            .with_workspace(|repository| repository.create_request(parent, name))
+            .map_err(|error| error.to_string())
+    }
+
+    /// 重命名集合、文件夹或请求。
+    #[tauri::command]
+    pub fn workspace_rename_node(
+        state: State<'_, Arc<AppState>>,
+        node_id: String,
+        name: String,
+    ) -> Result<WorkspaceSnapshot, String> {
+        let id = parse_id(&node_id)?;
+        state
+            .with_workspace(|repository| repository.rename_node(id, name))
+            .map_err(|error| error.to_string())
+    }
+
+    /// 删除集合、文件夹或请求。删除容器会递归删除其目录。
+    #[tauri::command]
+    pub fn workspace_delete_node(
+        state: State<'_, Arc<AppState>>,
+        node_id: String,
+    ) -> Result<WorkspaceSnapshot, String> {
+        let id = parse_id(&node_id)?;
+        state
+            .with_workspace(|repository| repository.delete_node(id))
+            .map_err(|error| error.to_string())
     }
 
     fn parse_id(s: &str) -> Result<Uuid, String> {

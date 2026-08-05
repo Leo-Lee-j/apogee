@@ -1,6 +1,19 @@
 <script setup lang="ts">
-import { ref, computed, shallowRef, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { h, ref, computed, shallowRef, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useTabsStore } from '@/stores/tabs'
+import { useWorkspaceStore } from '@/stores/workspace'
+import {
+  AppAlert,
+  AppButton,
+  AppDropdown,
+  AppForm,
+  AppFormItem,
+  AppInput,
+  AppModal,
+  AppPopconfirm,
+  AppSpace,
+} from '@/components/ui'
+import NaiveThemeScope from '@/components/NaiveThemeScope.vue'
 import {
   ROW_H,
   OVERSCAN,
@@ -53,6 +66,40 @@ const scrollTop = ref(0)
 const viewportH = ref(400)
 const scroller = ref<HTMLElement | null>(null)
 const tabs = useTabsStore()
+const workspace = useWorkspaceStore()
+const selectedId = ref<string | null>(null)
+type ActionKind = 'collection' | 'folder' | 'request' | 'rename'
+const actionKind = ref<ActionKind | null>(null)
+const actionName = ref('')
+const actionError = ref('')
+const deleteError = ref('')
+const actionSaving = ref(false)
+const actionOpen = computed({
+  get: () => actionKind.value !== null,
+  set: (show: boolean) => {
+    if (!show) closeAction()
+  },
+})
+
+const selectedNode = computed(() => all.value.find((node) => node.id === selectedId.value) ?? null)
+const actionModalTitle = computed(() => {
+  if (actionKind.value === 'rename') return '重命名'
+  if (actionKind.value === 'collection') return '新建集合'
+  if (actionKind.value === 'folder') return '新建文件夹'
+  return '新建请求'
+})
+const actionModalHint = computed(() => {
+  if (actionKind.value === 'rename') return '名称只影响显示，不会改变稳定 ID 或文件路径。'
+  if (actionKind.value === 'collection') return '集合会保存到本地工作区，并立即出现在侧边栏。'
+  if (actionKind.value === 'folder') return '文件夹用于组织请求，可继续嵌套在当前选中容器下。'
+  return '请求会创建为独立 YAML 文件，编辑内容会自动保存。'
+})
+const actionNamePlaceholder = computed(() => {
+  if (actionKind.value === 'collection') return '例如：用户服务'
+  if (actionKind.value === 'folder') return '例如：认证'
+  if (actionKind.value === 'rename' && selectedNode.value) return selectedNode.value.name
+  return '例如：获取用户详情'
+})
 
 /**
  * 当前打开的那个接口对应的节点 id（02 文档 §4.5 里标着「← 当前打开（高亮）」）。
@@ -61,6 +108,18 @@ const tabs = useTabsStore()
  * 草稿标签没有 nodeId，此时「定位」按钮置灰 —— 它确实没有可定位的位置。
  */
 const activeNodeId = computed(() => tabs.active?.nodeId ?? null)
+
+const CREATE_OPTIONS = [
+  { label: '新建请求', key: 'request' },
+  { label: '新建文件夹', key: 'folder' },
+  { label: '新建集合', key: 'collection' },
+]
+
+function onCreateSelect(key: string) {
+  if (key === 'collection') openAction('collection')
+  else if (key === 'folder') openAction('folder')
+  else if (key === 'request') openAction('request')
+}
 
 // ── 排序 ──────────────────────────────────────────────────────────────
 
@@ -71,12 +130,32 @@ const SORT_OPTIONS: { mode: SortMode; label: string; hint: string }[] = [
 ]
 
 const sortMode = ref<SortMode>(null)
-const sortOpen = ref(false)
-const sortBtn = ref<HTMLButtonElement | null>(null)
-
 const sortLabel = computed(
   () => SORT_OPTIONS.find((o) => o.mode === sortMode.value)?.label ?? '默认顺序',
 )
+const sortDropdownOptions = computed(() => [
+  {
+    type: 'render' as const,
+    key: 'sort-description',
+    render: () =>
+      h(
+        'div',
+        { class: 'sort-description', role: 'presentation' },
+        '选择请求列表的排序方式',
+      ),
+  },
+  { type: 'divider' as const, key: 'sort-divider' },
+  ...SORT_OPTIONS.map((option) => ({
+    key: option.mode ?? 'default',
+    label: sortMode.value === option.mode ? `✓ ${option.label}` : option.label,
+    extra: option.hint,
+  })),
+])
+
+function onSortSelect(key: string | number) {
+  const option = SORT_OPTIONS.find((item) => (item.mode ?? 'default') === key)
+  if (option) sortMode.value = option.mode
+}
 
 /**
  * 图标本身就区分三种状态，不靠颜色。
@@ -90,38 +169,6 @@ const sortGlyph = computed(() => {
   if (sortMode.value === 'name-desc') return 'M2.5 4h9.5M2.5 8h6.5M2.5 12h3.5'
   return 'M2.5 4h9.5M2.5 8h9.5M2.5 12h9.5'
 })
-
-function pickSort(m: SortMode) {
-  sortMode.value = m
-  sortOpen.value = false
-  sortBtn.value?.focus()
-}
-
-/**
- * 鼠标移出即收起（需求：鼠标放上弹出）。但键盘焦点还在菜单里时不收 ——
- * 用键盘打开菜单、鼠标恰好扫过再离开，菜单在焦点下消失会让键盘用户丢失落点。
- *
- * `mouseleave` 不会因为指针进入子元素而触发（含绝对定位的菜单，它仍是 DOM
- * 后代），所以「按钮 → 菜单」这段移动是安全的 —— 前提是两者之间**没有缝**，
- * 见 .menu 的 top: 100%。
- */
-function onSortLeave(e: MouseEvent) {
-  const wrap = e.currentTarget as HTMLElement
-  if (wrap.contains(document.activeElement)) return
-  sortOpen.value = false
-}
-
-function onSortFocusOut(e: FocusEvent) {
-  const wrap = e.currentTarget as HTMLElement
-  const next = e.relatedTarget as Node | null
-  if (next && wrap.contains(next)) return
-  sortOpen.value = false
-}
-
-function closeSort() {
-  sortOpen.value = false
-  sortBtn.value?.focus()
-}
 
 /** 可见节点：折叠的文件夹下的子节点不参与渲染。只改这个计算，不重建原数组。 */
 const visible = computed(() => sortVisible(visibleNodes(all.value, filter.value), sortMode.value))
@@ -164,16 +211,21 @@ onBeforeUnmount(() => {
 })
 
 function toggle(n: FlatNode) {
+  selectedId.value = n.id
+  deleteError.value = ''
   if (!n.isFolder) {
-    // 单击预览（02 文档 §4.5）：复用临时标签，避免浏览集合时开出一堆标签。
-    // 必须带上 nodeId，否则标签认不回它来自树的哪一行，「定位」和高亮都失效。
-    tabs.open({
-      title: n.name,
-      method: n.method ?? 'GET',
-      url: `{{baseUrl}}/${n.id}`,
-      nodeId: n.id,
-      preview: true,
-    })
+    if (n.kind === 'request') {
+      void workspace.openRequest(n)
+    } else {
+      // Spike / 浏览器回退数据仍可打开一个合成草稿。
+      tabs.open({
+        title: n.name,
+        method: n.method ?? 'GET',
+        url: `{{baseUrl}}/${n.id}`,
+        nodeId: n.id,
+        preview: true,
+      })
+    }
     return
   }
   n.expanded = !n.expanded
@@ -181,6 +233,99 @@ function toggle(n: FlatNode) {
   // 数组本身不重建（slice 是浅拷贝），只是换个引用 —— 03 文档 §4.4 的
   // 「展开/折叠只改 visible 计算，不重建数组」指的正是这个。
   all.value = [...all.value]
+}
+
+function selectedContainerId(): string | undefined {
+  const selected = all.value.find((node) => node.id === selectedId.value)
+  if (selected?.isFolder) return selected.id
+  return selected?.parentId ?? all.value.find((node) => node.kind === 'collection')?.id
+}
+
+function openAction(kind: ActionKind) {
+  actionKind.value = kind
+  actionError.value = ''
+  deleteError.value = ''
+  if (kind === 'rename') {
+    if (!selectedNode.value?.kind) {
+      actionKind.value = null
+      return
+    }
+    actionName.value = selectedNode.value.name
+    return
+  }
+
+  actionName.value = kind === 'collection'
+    ? ''
+    : kind === 'folder'
+      ? ''
+      : ''
+  if (kind !== 'collection' && !selectedContainerId()) {
+    actionError.value = '请先在集合树中选择一个集合或文件夹。'
+  }
+}
+
+function closeAction() {
+  if (actionSaving.value) return
+  actionKind.value = null
+  actionName.value = ''
+  actionError.value = ''
+}
+
+async function submitAction() {
+  const kind = actionKind.value
+  if (!kind) return
+  const name = actionName.value.trim()
+  if (!name) {
+    actionError.value = '名称不能为空。'
+    return
+  }
+
+  const parentId = kind === 'folder' || kind === 'request' ? selectedContainerId() : undefined
+  if ((kind === 'folder' || kind === 'request') && !parentId) {
+    actionError.value = '请先在集合树中选择一个集合或文件夹。'
+    return
+  }
+  if (kind === 'rename' && !selectedNode.value?.kind) {
+    actionError.value = '请选择要重命名的集合、文件夹或请求。'
+    return
+  }
+
+  actionSaving.value = true
+  actionError.value = ''
+  try {
+    let success = false
+    if (kind === 'collection') {
+      success = await workspace.createCollection(name)
+    } else if (kind === 'folder') {
+      success = await workspace.createFolder(parentId, name)
+    } else if (kind === 'request') {
+      success = (await workspace.createRequest(parentId, name)) !== null
+    } else if (selectedNode.value) {
+      success = await workspace.renameNode(selectedNode.value.id, name)
+    }
+
+    if (success) {
+      actionKind.value = null
+      actionName.value = ''
+      actionError.value = ''
+    } else {
+      actionError.value = workspace.lastError?.message ?? '操作失败，请稍后重试。'
+    }
+  } finally {
+    actionSaving.value = false
+  }
+}
+
+async function deleteSelected() {
+  const selected = selectedNode.value
+  if (!selected?.kind) return
+  deleteError.value = ''
+  const success = await workspace.deleteNode(selected.id)
+  if (success) {
+    if (selectedId.value === selected.id) selectedId.value = null
+  } else {
+    deleteError.value = workspace.lastError?.message ?? '删除失败，请稍后重试。'
+  }
 }
 
 // ── 定位当前接口 ──────────────────────────────────────────────────────
@@ -285,77 +430,165 @@ defineExpose({
 
 <template>
   <aside class="sidebar">
-    <div class="head">
-      <input v-model="filter" class="filter" placeholder="过滤请求…" aria-label="过滤请求" spellcheck="false" />
+    <NaiveThemeScope>
+      <div class="head">
+        <div class="head-tools">
+        <AppDropdown :options="CREATE_OPTIONS" @select="onCreateSelect">
+          <AppButton class="head-button" quaternary circle size="small" aria-label="新建" title="新建">
+            <template #icon>
+              <svg class="ico" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+                <path d="M8 3v10M3 8h10" />
+              </svg>
+            </template>
+          </AppButton>
+        </AppDropdown>
 
-      <!-- 定位当前接口。置灰时也保留 title，说明为什么不能点。 -->
-      <button
-        class="tool"
-        type="button"
-        :disabled="!activeNodeId"
-        :title="activeNodeId ? '定位当前接口' : '当前标签不是集合里的接口'"
-        aria-label="定位当前接口"
-        @click="locateActive"
-      >
-        <svg class="ico" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-          <circle cx="8" cy="8" r="3.1" />
-          <path d="M8 1v2.2M8 12.8V15M1 8h2.2M12.8 8H15" />
-        </svg>
-      </button>
-
-      <!--
-        排序。悬停即开（需求指定的交互），点击/回车同样能开合 ——
-        只认 hover 的菜单在键盘和触摸下等于不存在。
-
-        刻意**不**在 focusin 上开：选完一项后 pickSort 要把焦点还给按钮，
-        那次 focus 会冒泡出 focusin，菜单当场又被开回来。开合只由
-        click（回车/空格也会触发它）和 hover 驱动。
-      -->
-      <div
-        class="sort"
-        @mouseenter="sortOpen = true"
-        @mouseleave="onSortLeave"
-        @focusout="onSortFocusOut"
-        @keydown.esc.stop="closeSort"
-      >
-        <button
-          ref="sortBtn"
-          class="tool"
-          :class="{ on: sortMode !== null }"
-          type="button"
-          aria-haspopup="menu"
-          :aria-expanded="sortOpen"
-          :title="`排序：${sortLabel}`"
-          aria-label="排序方式"
-          @click="sortOpen = !sortOpen"
+        <AppButton
+          class="head-button"
+          quaternary
+          circle
+          size="small"
+          aria-label="重命名选中项"
+          title="重命名选中项"
+          :disabled="!selectedId"
+          @click="openAction('rename')"
         >
-          <svg class="ico" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-            <path :d="sortGlyph" />
-          </svg>
-        </button>
-        <ul v-if="sortOpen" class="menu" role="menu">
-          <li v-for="o in SORT_OPTIONS" :key="o.label" role="none">
-            <button
-              type="button"
-              role="menuitemradio"
-              :aria-checked="sortMode === o.mode"
-              @click="pickSort(o.mode)"
+          <template #icon>
+            <svg class="ico" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+              <path d="M3 11.8V13h1.2L12.7 4.5 11.5 3.3 3 11.8Z" />
+              <path d="m10.7 4.1 1.2 1.2M3 13h10" />
+            </svg>
+          </template>
+        </AppButton>
+
+        <AppPopconfirm
+          v-if="workspace.available"
+          :show-icon="false"
+          positive-text="删除"
+          negative-text="取消"
+          @positive-click="deleteSelected"
+        >
+          <template #trigger>
+            <AppButton
+              class="head-button danger-button"
+              quaternary
+              circle
+              size="small"
+              aria-label="删除选中项"
+              title="删除选中项"
+              :disabled="!selectedId"
             >
-              <span class="mark" aria-hidden="true">{{ sortMode === o.mode ? '✓' : '' }}</span>
-              <span class="txt">{{ o.label }}</span>
-              <span class="hint">{{ o.hint }}</span>
-            </button>
-          </li>
-        </ul>
+              <template #icon>
+                <svg class="ico" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+                  <path d="M3.5 4.5h9M6 4.5V3h4v1.5M5 6.5v5.8h6V6.5M7 8v2.5M9 8v2.5" />
+                </svg>
+              </template>
+            </AppButton>
+          </template>
+          确定删除“{{ selectedNode?.name ?? '当前选中项' }}”及其内容吗？
+        </AppPopconfirm>
+
+        <!-- 定位当前接口。置灰时也保留 title，说明为什么不能点。 -->
+        <AppButton
+          class="head-button"
+          quaternary
+          circle
+          size="small"
+          :disabled="!activeNodeId"
+          :title="activeNodeId ? '定位当前接口' : '当前标签不是集合里的接口'"
+          aria-label="定位当前接口"
+          @click="locateActive"
+        >
+          <template #icon>
+            <svg class="ico" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+              <circle cx="8" cy="8" r="3.1" />
+              <path d="M8 1v2.2M8 12.8V15M1 8h2.2M12.8 8H15" />
+            </svg>
+          </template>
+        </AppButton>
+
+        <AppDropdown :options="sortDropdownOptions" @select="onSortSelect">
+          <AppButton
+            class="head-button"
+            :class="{ on: sortMode !== null }"
+            quaternary
+            circle
+            size="small"
+            aria-haspopup="menu"
+            :title="`排序：${sortLabel}`"
+            aria-label="排序方式"
+          >
+            <template #icon>
+              <svg class="ico" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+                <path :d="sortGlyph" />
+              </svg>
+            </template>
+          </AppButton>
+        </AppDropdown>
+        </div>
+        <AppInput
+          v-model:value="filter"
+          class="filter"
+          size="small"
+          placeholder="过滤请求…"
+          aria-label="过滤请求"
+          :input-props="{ spellcheck: false }"
+        />
       </div>
-    </div>
+
+      <AppAlert
+        v-if="deleteError"
+        class="delete-error"
+        type="error"
+        :show-icon="false"
+        closable
+        @close="deleteError = ''"
+      >
+        {{ deleteError }}
+      </AppAlert>
+
+      <AppModal
+        v-model:show="actionOpen"
+        preset="card"
+        :title="actionModalTitle"
+        :style="{ width: '420px' }"
+        :mask-closable="!actionSaving"
+        :closable="!actionSaving"
+      >
+        <div class="action-modal">
+          <p class="action-hint">{{ actionModalHint }}</p>
+          <AppAlert v-if="actionError" class="action-error" type="error" :show-icon="false">
+            {{ actionError }}
+          </AppAlert>
+          <AppForm @submit.prevent="submitAction">
+            <AppFormItem label="名称" required>
+              <AppInput
+                v-model:value="actionName"
+                autofocus
+                clearable
+                maxlength="120"
+                show-count
+                :placeholder="actionNamePlaceholder"
+                @keyup.enter="submitAction"
+              />
+            </AppFormItem>
+          </AppForm>
+        </div>
+        <template #footer>
+          <AppSpace justify="end">
+            <AppButton :disabled="actionSaving" @click="closeAction">取消</AppButton>
+            <AppButton type="primary" :loading="actionSaving" @click="submitAction">确认</AppButton>
+          </AppSpace>
+        </template>
+      </AppModal>
+    </NaiveThemeScope>
     <div ref="scroller" class="scroller" @scroll.passive="onScroll">
       <div class="spacer" :style="{ height: `${totalH}px` }">
         <div
           v-for="(n, i) in slice"
           :key="n.id"
           class="row"
-          :class="{ folder: n.isFolder, active: n.id === activeNodeId }"
+          :class="{ folder: n.isFolder, active: n.id === activeNodeId, selected: n.id === selectedId }"
           :aria-current="n.id === activeNodeId ? 'true' : undefined"
           :style="{
             transform: `translateY(${(startIdx + i) * ROW_H}px)`,
@@ -383,87 +616,80 @@ defineExpose({
      背景由 .a-block 提供，这里保留一份是为了组件单独使用时也有底色。 */
   background: var(--a-bg-2);
 }
-/* 过滤框与右侧工具按钮同一行、同 24px 高，基线对齐。
-   工具按钮不占固定槽位（flex: 0 0 auto），宽度全给过滤框 —— 侧边栏可以窄到
-   180px，那时每一像素都该留给接口名。 */
-.head { padding: 6px; flex: 0 0 auto; display: flex; align-items: center; gap: 2px; }
-.filter {
-  flex: 1 1 auto; min-width: 0;
-  height: 24px; background: var(--a-bg-3);
-  border: 1px solid var(--a-border); border-radius: 4px;
-  color: var(--a-text); font: 12px/1 var(--a-font-ui); padding: 0 6px;
+/* 功能按钮单独一行，过滤框独占下一行，避免侧边栏变窄时控件互相挤压。 */
+.head {
+  padding: 6px;
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
 }
-/* 不能写 outline: none —— 那会盖掉 tokens.css 里的全局 :focus-visible 焦点环
-   （`.filter:focus` 特异性高于 `:focus-visible`），等于把键盘焦点指示器去掉，
-   违反 PRD §10.4。改成把焦点环画在边框内侧。 */
-.filter:focus-visible {
+.head-tools { display: flex; align-items: center; gap: 2px; min-height: 24px; }
+.head-button {
+  flex: 0 0 auto;
+  color: var(--a-text-dim);
+}
+.head-button:hover:not(:disabled) { color: var(--a-text); }
+.head-button.danger-button { color: var(--a-text-faint); }
+.head-button.danger-button:hover:not(:disabled) { color: var(--a-error); }
+.filter {
+  flex: 0 0 auto;
+  width: 100%;
+  min-width: 0;
+  height: 24px;
+  padding: 0;
+  background: var(--a-bg-3);
+  border-radius: 4px;
+  color: var(--a-text);
+  font: 12px/1 var(--a-font-ui);
+}
+.filter :deep(.n-input__input-el) {
+  color: var(--a-text);
+  font: 12px/1 var(--a-font-ui);
+  padding: 0 6px;
+}
+.filter :deep(.n-input__border),
+.filter :deep(.n-input__state-border) { border-radius: 4px; }
+/* 不能写 outline: none —— 那会盖掉 tokens.css 里的全局 :focus-visible 焦点环。 */
+.filter:focus-within :deep(.n-input__state-border) {
   border-color: var(--a-focus);
-  outline: 2px solid var(--a-focus);
-  outline-offset: -2px;
+  box-shadow: 0 0 0 2px var(--a-focus) inset;
 }
 
 /* ── 头部工具按钮 ──
-   24×24 命中区（图标只有 14px）。方形而不是圆形：它们和过滤框同属一行控件，
-   圆角对齐 --a-radius-sm 就够，胶囊只留给徽章。 */
-.tool {
-  flex: 0 0 auto;
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 24px; height: 24px; padding: 0;
-  background: transparent;
-  border: 1px solid transparent; border-radius: var(--a-radius-sm);
-  color: var(--a-text-dim); cursor: pointer;
-}
-.tool:hover:not(:disabled) { background: var(--a-hover); color: var(--a-text); }
-/* 置灰用 ghost 档。它对比度不达 4.5:1，但 WCAG 对禁用控件豁免，
-   而且「不可点」本身要看得出来 —— 这里的低对比是信息，不是缺陷。 */
-.tool:disabled { color: var(--a-text-ghost); cursor: default; }
-/* 已启用排序时的强调态。形状已经区分了三种模式（见 sortGlyph），
-   颜色只是加速识别，不是唯一通道。 */
-.tool.on { color: var(--a-primary); background: var(--a-selected); }
+   功能按钮集中在同一行，24×24 命中区（图标只有 14px）。方形而不是圆形：
+   它们和排序按钮同属工具栏，圆角对齐 --a-radius-sm 就够，胶囊只留给徽章。 */
+.head-button.on { color: var(--a-primary); background: var(--a-selected); }
 .ico {
   width: 14px; height: 14px;
   fill: none; stroke: currentcolor; stroke-width: 1.5;
   stroke-linecap: round; stroke-linejoin: round;
 }
-
-/* ── 排序下拉 ──
-   自研而不是 n-dropdown：侧边栏头部在首屏路径上，02 文档 §7.5 把 naive-ui
-   限定在低频非热路径。菜单紧贴按钮底边（top: 100%），中间不留缝 ——
-   留缝会让指针在移向菜单的途中离开 .sort，菜单当场收起。 */
-.sort { position: relative; flex: 0 0 auto; display: flex; }
-.menu {
-  position: absolute; top: 100%; right: 0; z-index: 20;
-  margin: 0; padding: 4px; list-style: none;
-  min-width: 148px;
-  background: var(--a-bg-3);
-  border: 1px solid var(--a-border-strong);
-  border-radius: var(--a-radius-md);
-  box-shadow: var(--a-shadow-md);
-}
-.menu button {
-  display: flex; align-items: center; gap: 6px;
-  width: 100%; text-align: left;
-  background: transparent; border: none; border-radius: var(--a-radius-sm);
-  padding: 3px 6px; color: var(--a-text-soft);
-  font: var(--a-fs-sm) / 1.6 var(--a-font-ui); cursor: pointer;
+:global(.sort-description) {
+  padding: 3px 8px 2px;
+  color: var(--a-text-faint);
+  font: var(--a-fs-xs) / 1.5 var(--a-font-ui);
   white-space: nowrap;
+  pointer-events: none;
 }
-.menu button:hover { background: var(--a-hover); color: var(--a-text); }
-.menu button[aria-checked='true'] { color: var(--a-text); }
-/* 勾选标记占固定宽度，三项文字才能左对齐成一列 */
-.menu .mark { flex: 0 0 auto; width: 10px; color: var(--a-primary); }
-.menu .txt { flex: 1 1 auto; }
-.menu .hint { flex: 0 0 auto; font: var(--a-fs-xs) / 1 var(--a-font-mono); color: var(--a-text-faint); }
+
+.delete-error { margin: 0 6px 4px; }
+.action-modal { display: flex; flex-direction: column; gap: 10px; }
+.action-hint { margin: 0; color: var(--a-text-dim); font-size: 12px; line-height: 1.5; }
+.action-error { margin-bottom: 2px; }
 
 .scroller { flex: 1 1 auto; overflow-y: auto; min-height: 0; }
 .spacer { position: relative; }
 .row {
   position: absolute; left: 0; right: 0; height: 22px;
   display: flex; align-items: center; gap: 5px;
-  font: 12px/1 var(--a-font-ui); color: var(--a-text-dim);
+  /* transform only positions the virtual row; the row owns vertical alignment. */
+  font: 12px/normal var(--a-font-ui); color: var(--a-text-dim);
   white-space: nowrap; cursor: pointer;
 }
 .row:hover { background: var(--a-hover); color: var(--a-text); }
+.row.selected:not(.active) { box-shadow: inset 2px 0 0 var(--a-border-strong); }
 .row.folder { color: var(--a-text); }
 /*
  * 当前打开的接口（02 文档 §4.5 的「← 当前打开（高亮）」）。
@@ -479,9 +705,27 @@ defineExpose({
   box-shadow: inset 2px 0 0 var(--a-primary);
 }
 .row.active:hover { background: var(--a-selected); }
-.caret { width: 10px; color: var(--a-text-faint); }
-.m { font: 600 10px/1 var(--a-font-mono); width: 42px; }
-.name { overflow: hidden; text-overflow: ellipsis; }
+.caret {
+  display: flex;
+  align-items: center;
+  width: 10px;
+  height: 100%;
+  color: var(--a-text-faint);
+}
+.m,
+.name {
+  display: block;
+  align-self: center;
+  height: auto;
+  line-height: normal;
+}
+.m { font: 600 10px/normal var(--a-font-mono); width: 42px; }
+.name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .foot {
   flex: 0 0 auto; padding: 3px 6px; border-top: 1px solid var(--a-border);
   font: 10px/14px var(--a-font-mono); color: var(--a-text-faint);

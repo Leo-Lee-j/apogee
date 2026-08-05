@@ -5,8 +5,10 @@ import AppBody from './AppBody.vue'
  * Spike S5 变体 B —— 对照方案：首屏**零 naive-ui**。
  *
  * 首屏完全靠 CSS 变量 + 自研组件（见 src/styles/tokens.css）。
- * naive-ui 只在动态 import 的模块里出现（目前是设置页），
- * 因此整个 vendor-naive chunk 变成按需下载。
+ * naive-ui 只在动态 import 的模块里出现（设置页、新建面板和侧边栏过滤框），
+ * 因此这些低频控件按需下载，首屏仍不引入 Naive UI。每个动态入口通过
+ * `NaiveThemeScope` 取得与根变体相同的主题；变体 A 会透传根 provider，变体 B
+ * 才会创建本地 provider。
  *
  * 代价：
  *   - 用不了 `n-config-provider` 的全局主题，naive-ui 组件的主题需要在

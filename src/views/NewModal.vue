@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { onMounted, onBeforeUnmount, nextTick, ref } from 'vue'
+import { AppAlert, AppButton, AppModal, AppTag } from '@/components/ui'
 import { useUiStore } from '@/stores/ui'
 import { useTabsStore } from '@/stores/tabs'
+import { useWorkspaceStore } from '@/stores/workspace'
+import NaiveThemeScope from '@/components/NaiveThemeScope.vue'
 
 /**
  * 「新建」面板 —— 标签栏 `+` 的落点（Postman 的 New 弹窗 / Apifox 的新建入口）。
@@ -14,11 +17,12 @@ import { useTabsStore } from '@/stores/tabs'
  *   - 点 `+`：探索路径，把「还能新建什么」摊开给用户看
  * Apifox 就是这么分的，Postman 也是（`+` 给标签，New 按钮给弹窗）。
  *
- * # 为什么不用 naive-ui 的 NModal
+ * # 为什么复用 AppModal 与少量 Naive UI 控件
  *
- * 设置页用 NModal 是对的（低频 + 表单密集，见 SettingsModal.vue）。这里不行：
- * 点 `+` 是高频动作，用 NModal 会让第一次点击去下载 234KB 的 naive-ui chunk。
- * 一个卡片网格不值这个价钱。
+ * 这个面板复用 Naive UI 的遮罩、焦点陷阱、Esc 关闭和滚动锁定，并使用 AppButton
+ * 和 AppTag 处理低频的关闭与状态标记；卡片网格仍然保留自研，因为它是产品专用的
+ * 二维键盘布局，不是通用对话框内容。NewModal 本身走动态 import，所以首次点击才
+ * 加载这段低频交互，不影响首屏。
  *
  * # 未落地的选项为什么还摆在这里
  *
@@ -30,8 +34,11 @@ import { useTabsStore } from '@/stores/tabs'
 
 const ui = useUiStore()
 const tabs = useTabsStore()
+const workspace = useWorkspaceStore()
 
 const dialog = ref<HTMLElement | null>(null)
+const actionError = ref('')
+const actionBusy = ref(false)
 
 /**
  * 打开面板前的焦点持有者（通常是标签栏的 `+`）。
@@ -52,8 +59,8 @@ interface NewOption {
   badge?: string
   /** 未落地的原因，进 title 属性 —— 灰按钮必须能解释自己。 */
   reason?: string
-  /** 没有 run 就是未落地。可用性只由这一个字段决定，不另设 disabled 标志。 */
-  run?: () => void
+  /** 可用项可以是同步动作，也可以等待一次持久化操作完成。 */
+  run?: () => void | Promise<void>
 }
 
 const ICONS = {
@@ -65,6 +72,13 @@ const ICONS = {
 
 function quickRequest() {
   tabs.openQuick()
+}
+
+async function savedRequest() {
+  const request = await workspace.createRequest(undefined, '新建请求')
+  if (!request) {
+    throw new Error(workspace.lastError?.message ?? '创建请求失败，请先创建一个集合。')
+  }
 }
 
 const GROUPS: { title: string; items: NewOption[] }[] = [
@@ -82,11 +96,9 @@ const GROUPS: { title: string; items: NewOption[] }[] = [
       {
         id: 'saved',
         title: '集合内接口',
-        desc: '保存进集合，落盘为单个文件（Git 可见）',
+        desc: '保存到默认集合，落盘为单个文件（Git 可见）',
         icon: 'file',
-        badge: '待落盘层',
-        reason:
-          '需要集合读写落地。当前侧边栏那棵树还是合成数据（synthTree），没有写盘通道，新建出来的接口无处安放。',
+        run: savedRequest,
       },
     ],
   },
@@ -115,15 +127,24 @@ const GROUPS: { title: string; items: NewOption[] }[] = [
   },
 ]
 
-function close() {
+function close(force = false) {
+  if (actionBusy.value && !force) return
   ui.newOpen = false
 }
 
-function pick(o: NewOption) {
-  if (!o.run) return
-  chose = true
-  o.run()
-  close()
+async function pick(o: NewOption) {
+  if (!o.run || actionBusy.value) return
+  actionError.value = ''
+  actionBusy.value = true
+  try {
+    await o.run()
+    chose = true
+    close(true)
+  } catch (error) {
+    actionError.value = error instanceof Error ? error.message : '创建失败，请稍后重试。'
+  } finally {
+    actionBusy.value = false
+  }
 }
 
 /**
@@ -153,39 +174,13 @@ function moveFocus(step: number) {
 }
 
 /**
- * 焦点陷阱。
- *
- * `aria-modal="true"` 只告诉读屏「后面的内容别念」，它**不**阻止 Tab 把焦点
- * 移出去。不自己兜住的话，Tab 几下焦点就跑到底下的 URL 栏和发送按钮上，
- * 而那些控件在视觉上是被遮住的 —— 用户看不见自己在操作什么。
+ * 方向键仍由本组件负责二维卡片导航；Tab 键的焦点陷阱交给 AppModal，避免重复实现通用模态行为。
  */
-function trapTab(e: KeyboardEvent) {
-  const el = dialog.value
-  if (!el) return
-  const focusable = [
-    ...el.querySelectorAll<HTMLElement>('button:not([disabled]), [href], input, [tabindex]:not([tabindex="-1"])'),
-  ]
-  if (focusable.length === 0) return
-  const first = focusable[0]!
-  const last = focusable[focusable.length - 1]!
-  const at = document.activeElement
-  if (e.shiftKey && (at === first || !el.contains(at))) {
-    e.preventDefault()
-    last.focus()
-  } else if (!e.shiftKey && at === last) {
-    e.preventDefault()
-    first.focus()
-  }
-}
-
 function onKeydown(e: KeyboardEvent) {
   switch (e.key) {
     case 'Escape':
       e.preventDefault()
       close()
-      break
-    case 'Tab':
-      trapTab(e)
       break
     case 'ArrowRight':
       e.preventDefault()
@@ -219,11 +214,14 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <!--
-    遮罩点击关闭。用 .self 保证只有点在遮罩本身上才关 —— 点面板内部时
-    事件冒泡到这里，target 是面板里的元素，.self 不匹配。
-  -->
-  <div class="scrim" @click.self="close">
+  <NaiveThemeScope>
+    <AppModal
+      v-model:show="ui.newOpen"
+      :mask-closable="!actionBusy"
+      :close-on-esc="!actionBusy"
+      :auto-focus="false"
+      :trap-focus="true"
+    >
     <div
       ref="dialog"
       class="panel"
@@ -234,12 +232,34 @@ onBeforeUnmount(() => {
     >
       <header class="hd">
         <h2 id="new-title">新建</h2>
-        <button class="x" type="button" aria-label="关闭" @click="close">
-          <svg class="ico" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-            <path d="M4 4l8 8M12 4l-8 8" />
-          </svg>
-        </button>
+        <AppButton
+          class="x"
+          quaternary
+          circle
+          size="small"
+          :disabled="actionBusy"
+          aria-label="关闭"
+          title="关闭"
+          @click="close()"
+        >
+          <template #icon>
+            <svg class="ico" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+              <path d="M4 4l8 8M12 4l-8 8" />
+            </svg>
+          </template>
+        </AppButton>
       </header>
+
+      <AppAlert
+        v-if="actionError"
+        class="action-error"
+        type="error"
+        :show-icon="false"
+        closable
+        @close="actionError = ''"
+      >
+        {{ actionError }}
+      </AppAlert>
 
       <div class="groups">
         <section v-for="g in GROUPS" :key="g.title">
@@ -259,7 +279,7 @@ onBeforeUnmount(() => {
               class="card"
               :class="{ off: !o.run }"
               type="button"
-              :aria-disabled="!o.run"
+              :aria-disabled="!o.run || actionBusy"
               :title="o.reason"
               @click="pick(o)"
             >
@@ -272,7 +292,15 @@ onBeforeUnmount(() => {
                 <span class="top">
                   <span class="t">{{ o.title }}</span>
                   <kbd v-if="o.kbd">{{ o.kbd }}</kbd>
-                  <span v-else-if="o.badge" class="badge">{{ o.badge }}</span>
+                  <AppTag
+                    v-else-if="o.badge"
+                    class="badge"
+                    size="small"
+                    type="warning"
+                    :bordered="false"
+                  >
+                    {{ o.badge }}
+                  </AppTag>
                 </span>
                 <span class="d">{{ o.desc }}</span>
               </span>
@@ -286,25 +314,12 @@ onBeforeUnmount(() => {
         <span class="dim">灰色项带版本徽章，鼠标放上看原因</span>
       </footer>
     </div>
-  </div>
+    </AppModal>
+  </NaiveThemeScope>
 </template>
 
 <style scoped>
-/*
- * 遮罩色写死不走令牌：暗、亮两个主题下遮罩都该是「压暗下层」，
- * 令牌里没有语义对应物，为它单开一个 token 反而要在两套主题里各配一遍。
- * 不用 backdrop-filter —— 02 文档 §7.5 记着大面积 blur 在 Windows WebView2
- * 上的代价，遮罩正是最大面积的那种。
- */
-.scrim {
-  position: fixed;
-  inset: 0;
-  z-index: 100;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgb(0 0 0 / 45%);
-}
+/* AppModal 负责遮罩、层级、焦点陷阱和滚动锁定；这里仅保留产品专用的面板布局。 */
 .panel {
   width: 560px;
   max-width: calc(100vw - 32px);
@@ -316,15 +331,6 @@ onBeforeUnmount(() => {
   /* 模态用 10px 圆角（§7.3 的圆角分档） */
   border-radius: var(--a-radius-lg);
   box-shadow: var(--a-shadow-lg);
-  /* 面板展开是 §7.4 白名单里的四类动效之一。只动 transform + opacity，150ms。 */
-  animation: pop var(--a-dur) var(--a-ease);
-}
-@keyframes pop {
-  from { opacity: 0; transform: scale(0.98); }
-  to { opacity: 1; transform: scale(1); }
-}
-@media (prefers-reduced-motion: reduce) {
-  .panel { animation: none; }
 }
 
 .hd {
@@ -338,13 +344,11 @@ onBeforeUnmount(() => {
   color: var(--a-text);
 }
 .x {
-  display: inline-flex; align-items: center; justify-content: center;
+  flex: 0 0 auto;
   width: 24px; height: 24px; padding: 0;
-  background: transparent; border: 1px solid transparent;
-  border-radius: var(--a-radius-sm);
-  color: var(--a-text-dim); cursor: pointer;
+  color: var(--a-text-dim);
 }
-.x:hover { background: var(--a-hover); color: var(--a-text); }
+.x:hover { color: var(--a-text); }
 .ico {
   width: 14px; height: 14px;
   fill: none; stroke: currentcolor; stroke-width: 1.5;
@@ -396,14 +400,15 @@ onBeforeUnmount(() => {
   font: var(--a-fs-sm) / 1.5 var(--a-font-ui);
   color: var(--a-text-dim);
 }
-/* 徽章用胶囊 —— §7.3 里胶囊只留给徽章 */
+/* AppTag 提供语义色与无边框胶囊；这里仅对齐卡片里的字号和间距。 */
 .badge {
-  padding: 0 6px;
-  background: var(--a-warn-bg); color: var(--a-warn);
+  flex: 0 0 auto;
   border-radius: var(--a-radius-pill);
   font: var(--a-fw-medium) var(--a-fs-xs) / 16px var(--a-font-ui);
   white-space: nowrap;
 }
+
+.action-error { margin: 0 16px 4px; }
 
 kbd {
   padding: 0 4px;

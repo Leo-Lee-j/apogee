@@ -1,6 +1,15 @@
 import { defineStore } from 'pinia'
 import { ref, shallowRef, computed, markRaw } from 'vue'
-import type { ResponseSummary } from '@/ipc'
+import type {
+  AppError,
+  AuthConfig,
+  Body,
+  KeyValue,
+  RequestSettings,
+  RequestSpec,
+  ResponseSummary,
+} from '@/ipc'
+import { inTauri, ipc } from '@/ipc'
 import { useUiStore } from '@/stores/ui'
 
 /**
@@ -24,6 +33,15 @@ export interface Tab {
   title: string
   method: string
   url: string
+  /** 执行请求所需的可编辑字段。数组字段通过 store 整体替换，保持 shallowRef 约束。 */
+  params: KeyValue[]
+  pathParams: KeyValue[]
+  headers: KeyValue[]
+  body: Body
+  auth: AuthConfig
+  settings: RequestSettings
+  /** 最近一次请求错误；成功发送后清除。 */
+  error: AppError | null
   /**
    * 这个标签对应的集合树节点 id。从侧边栏打开时带上，草稿标签（新建请求）没有。
    *
@@ -46,6 +64,22 @@ function nextId() {
   return `tab-${++seq}`
 }
 
+/** 从 URL 路径中识别 :id / {id} 占位符，不把 {{variable}} 当成路径参数。 */
+function pathParamNames(url: string): string[] {
+  const path = url.split(/[?#]/, 1)[0] ?? ''
+  const names: string[] = []
+  const seen = new Set<string>()
+  const pattern = /:([A-Za-z_][A-Za-z0-9_-]*)|(?<!\{)\{([A-Za-z_][A-Za-z0-9_-]*)\}(?!\})/g
+  for (const match of path.matchAll(pattern)) {
+    const name = match[1] ?? match[2]
+    if (name && !seen.has(name)) {
+      seen.add(name)
+      names.push(name)
+    }
+  }
+  return names
+}
+
 export const useTabsStore = defineStore('tabs', () => {
   /**
    * 用 shallowRef 而不是 ref：标签数组可能到几十项，深度响应式会为每个嵌套字段
@@ -56,6 +90,56 @@ export const useTabsStore = defineStore('tabs', () => {
   const activeId = ref<string | null>(null)
   /** 最近访问顺序，队首最新。用来判定 warm/cold。 */
   const mru = ref<string[]>([])
+  const persistTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  const PERSISTED_FIELDS = new Set([
+    'title', 'method', 'url', 'params', 'pathParams', 'headers', 'body', 'auth', 'settings',
+  ])
+
+  function requestSpec(tab: Tab): RequestSpec {
+    return {
+      method: tab.method,
+      url: tab.url,
+      params: tab.params,
+      pathParams: tab.pathParams,
+      headers: tab.headers,
+      body: tab.body,
+      auth: tab.auth,
+      settings: tab.settings,
+    }
+  }
+
+  async function persist(tab: Tab): Promise<boolean> {
+    if (!inTauri || !tab.nodeId) return true
+    try {
+      await ipc.workspaceSaveRequest(tab.nodeId, tab.title, requestSpec(tab))
+      return true
+    } catch (error) {
+      console.error('[workspace] 保存请求失败', error)
+      return false
+    }
+  }
+
+  function schedulePersist(tab: Tab) {
+    if (!inTauri || !tab.nodeId) return
+    const oldTimer = persistTimers.get(tab.nodeId)
+    if (oldTimer !== undefined) clearTimeout(oldTimer)
+    persistTimers.set(
+      tab.nodeId,
+      setTimeout(() => {
+        persistTimers.delete(tab.nodeId!)
+        void persist(tab)
+      }, 300),
+    )
+  }
+
+  function markClean(id: string) {
+    const index = tabs.value.findIndex((item) => item.id === id)
+    if (index < 0) return
+    const current = tabs.value[index]
+    if (!current || !current.dirty) return
+    const next = markRaw({ ...current, dirty: false })
+    tabs.value = tabs.value.map((item, itemIndex) => (itemIndex === index ? next : item))
+  }
 
   const active = computed(() => tabs.value.find((t) => t.id === activeId.value) ?? null)
 
@@ -96,6 +180,13 @@ export const useTabsStore = defineStore('tabs', () => {
       title: '新建请求',
       method: 'GET',
       url: '',
+      params: [],
+      pathParams: [],
+      headers: [],
+      body: { type: 'none' },
+      auth: { type: 'inherit' },
+      settings: {},
+      error: null,
       dirty: false,
       preview: false,
       response: null,
@@ -128,7 +219,13 @@ export const useTabsStore = defineStore('tabs', () => {
 
   function close(id: string) {
     const idx = tabs.value.findIndex((t) => t.id === id)
-    if (idx < 0) return
+    const current = tabs.value[idx]
+    if (current?.nodeId) {
+      const timer = persistTimers.get(current.nodeId)
+      if (timer !== undefined) clearTimeout(timer)
+      persistTimers.delete(current.nodeId)
+      void persist(current)
+    }
     tabs.value = tabs.value.filter((t) => t.id !== id)
     mru.value = mru.value.filter((x) => x !== id)
     if (activeId.value === id) {
@@ -139,12 +236,73 @@ export const useTabsStore = defineStore('tabs', () => {
   }
 
   function patch(id: string, delta: Partial<Tab>) {
-    const t = tabs.value.find((x) => x.id === id)
-    if (!t) return
-    Object.assign(t, delta)
-    // shallowRef 下必须整体替换才能触发更新
-    tabs.value = [...tabs.value]
+    const index = tabs.value.findIndex((x) => x.id === id)
+    if (index < 0) return
+
+    // 不要原地修改 markRaw 的 Tab。active 是一个 computed，如果更新后仍返回
+    // 同一个对象引用，Vue 可能认为值没有变化，依赖它的 editorSections 直到
+    // 切换标签才会重新计算。创建新对象同时满足 shallowRef 的整体替换约束。
+    const current = tabs.value[index]
+    const next = markRaw({ ...current, ...delta })
+    tabs.value = tabs.value.map((tab, tabIndex) => (tabIndex === index ? next : tab))
+
+    if (Object.keys(delta).some((key) => PERSISTED_FIELDS.has(key))) schedulePersist(next)
   }
 
-  return { tabs, activeId, active, mru, mountedIds, stateOf, open, openQuick, activate, close, patch }
+  /** 立即保存当前标签，并清除未保存标记。 */
+  async function save(id: string): Promise<boolean> {
+    const tab = tabs.value.find((item) => item.id === id)
+    if (!tab) return false
+    if (tab.nodeId) {
+      const timer = persistTimers.get(tab.nodeId)
+      if (timer !== undefined) {
+        clearTimeout(timer)
+        persistTimers.delete(tab.nodeId)
+      }
+      if (!(await persist(tab))) return false
+    }
+    markClean(id)
+    return true
+  }
+
+  /** URL 改变时同步路径参数行，保留用户已经填写的值。 */
+  function syncPathParams(id: string, url: string) {
+    const t = tabs.value.find((x) => x.id === id)
+    if (!t) return
+
+    const oldRows = t.pathParams ?? []
+    const nextRows = pathParamNames(url).map((name) => {
+      const existing = oldRows.find((row) => row.key === name)
+      return existing ?? {
+        enabled: true,
+        key: name,
+        value: '',
+        description: '路径参数',
+        kind: 'text' as const,
+      }
+    })
+    const unchanged =
+      nextRows.length === oldRows.length &&
+      nextRows.every((row, index) => {
+        const old = oldRows[index]
+        return old?.key === row.key && old?.value === row.value && old?.enabled === row.enabled
+      })
+    if (!unchanged) patch(id, { pathParams: nextRows })
+  }
+
+  return {
+    tabs,
+    activeId,
+    active,
+    mru,
+    mountedIds,
+    stateOf,
+    open,
+    openQuick,
+    activate,
+    close,
+    patch,
+    save,
+    syncPathParams,
+  }
 })

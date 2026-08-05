@@ -1,6 +1,19 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { NModal, NCard, NTabs, NTabPane, NForm, NFormItem, NSelect, NSwitch, NInputNumber, NButton, NAlert } from 'naive-ui'
+import {
+  AppAlert,
+  AppButton,
+  AppCard,
+  AppForm,
+  AppFormItem,
+  AppInputNumber,
+  AppModal,
+  AppSelect,
+  AppSwitch,
+  AppTabPane,
+  AppTabs,
+} from '@/components/ui'
+import NaiveThemeScope from '@/components/NaiveThemeScope.vue'
 import { useUiStore } from '@/stores/ui'
 
 /**
@@ -25,30 +38,31 @@ const telemetry = ref(false)
 </script>
 
 <template>
-  <NModal v-model:show="ui.settingsOpen">
-    <NCard style="width: 640px" title="设置" :bordered="false" size="small" role="dialog">
-      <NTabs type="line" animated>
-        <NTabPane name="appearance" tab="外观">
-          <NForm label-placement="left" label-width="96" size="small">
-            <NFormItem label="主题">
-              <NSelect
+  <NaiveThemeScope>
+    <AppModal v-model:show="ui.settingsOpen">
+    <AppCard style="width: 640px" title="设置" :bordered="false" size="small" role="dialog">
+      <AppTabs type="line" animated>
+        <AppTabPane name="appearance" tab="外观">
+          <AppForm label-placement="left" label-width="96" size="small">
+            <AppFormItem label="主题">
+              <AppSelect
                 :value="ui.themeMode"
                 :options="themeOptions"
                 @update:value="(v: any) => { ui.themeMode = v; ui.applyTheme() }"
               />
-            </NFormItem>
-            <NFormItem label="布局">
-              <NButton size="small" @click="ui.cycleLayout()">
+            </AppFormItem>
+            <AppFormItem label="布局">
+              <AppButton size="small" @click="ui.cycleLayout()">
                 {{ ui.layout }}（Ctrl+Shift+L 循环）
-              </NButton>
-            </NFormItem>
-          </NForm>
-        </NTabPane>
+              </AppButton>
+            </AppFormItem>
+          </AppForm>
+        </AppTabPane>
 
-        <NTabPane name="network" tab="网络">
-          <NForm label-placement="left" label-width="96" size="small">
-            <NFormItem label="代理">
-              <NSelect
+        <AppTabPane name="network" tab="网络">
+          <AppForm label-placement="left" label-width="96" size="small">
+            <AppFormItem label="代理">
+              <AppSelect
                 v-model:value="proxyMode"
                 :options="[
                   { label: '系统代理', value: 'system' },
@@ -56,32 +70,33 @@ const telemetry = ref(false)
                   { label: '不使用', value: 'none' },
                 ]"
               />
-            </NFormItem>
-            <NFormItem label="超时 (ms)">
-              <NInputNumber v-model:value="timeout" :min="0" :step="1000" />
-            </NFormItem>
-            <NFormItem label="校验 TLS">
-              <NSwitch v-model:value="verifyTls" />
-            </NFormItem>
-          </NForm>
-          <NAlert v-if="!verifyTls" type="warning" :bordered="false" style="margin-top: 8px">
+            </AppFormItem>
+            <AppFormItem label="超时 (ms)">
+              <AppInputNumber v-model:value="timeout" :min="0" :step="1000" />
+            </AppFormItem>
+            <AppFormItem label="校验 TLS">
+              <AppSwitch v-model:value="verifyTls" />
+            </AppFormItem>
+          </AppForm>
+          <AppAlert v-if="!verifyTls" type="warning" :bordered="false" style="margin-top: 8px">
             关闭 TLS 校验后，连接可被中间人窃听。仅在明确知道风险的测试环境使用。
-          </NAlert>
-        </NTabPane>
+          </AppAlert>
+        </AppTabPane>
 
-        <NTabPane name="privacy" tab="隐私">
-          <NForm label-placement="left" label-width="140" size="small">
-            <NFormItem label="发送使用数据">
-              <NSwitch v-model:value="telemetry" />
-            </NFormItem>
-          </NForm>
-          <NAlert type="info" :bordered="false">
+        <AppTabPane name="privacy" tab="隐私">
+          <AppForm label-placement="left" label-width="140" size="small">
+            <AppFormItem label="发送使用数据">
+              <AppSwitch v-model:value="telemetry" />
+            </AppFormItem>
+          </AppForm>
+          <AppAlert type="info" :bordered="false">
             默认零遥测，默认关闭且需显式开启（PRD §10.2）。
             产品闭源（决策 D6），所以这条承诺靠「网络行为清单 + 断网可用」自证，
             而不是靠你相信我们 —— 见 PRD §9.3。
-          </NAlert>
-        </NTabPane>
-      </NTabs>
-    </NCard>
-  </NModal>
+          </AppAlert>
+        </AppTabPane>
+      </AppTabs>
+    </AppCard>
+    </AppModal>
+  </NaiveThemeScope>
 </template>

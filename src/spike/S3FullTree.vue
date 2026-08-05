@@ -65,7 +65,7 @@ defineExpose({
 
 <style scoped>
 .full-tree {
-  width: var(--a-w-sidebar); flex: 0 0 auto;
+  width: var(--a-w-sidebar-bench); flex: 0 0 auto;
   display: flex; flex-direction: column; min-height: 0;
   background: var(--a-bg-2);
 }
@@ -73,11 +73,30 @@ defineExpose({
 /* 与 Sidebar 的行样式一致，只是靠文档流堆叠而不是 absolute + translateY */
 .row {
   height: 22px; display: flex; align-items: center; gap: 5px;
-  font: 12px/1 var(--a-font-ui); color: var(--a-text-dim);
+  /* transform only positions the virtual row; the row owns vertical alignment. */
+  font: 12px/normal var(--a-font-ui); color: var(--a-text-dim);
   white-space: nowrap; cursor: pointer;
 }
 .row.folder { color: var(--a-text); }
-.caret { width: 10px; color: var(--a-text-faint); }
-.m { font: 600 10px/1 var(--a-font-mono); width: 42px; }
-.name { overflow: hidden; text-overflow: ellipsis; }
+.caret {
+  display: flex;
+  align-items: center;
+  width: 10px;
+  height: 100%;
+  color: var(--a-text-faint);
+}
+.m,
+.name {
+  display: block;
+  align-self: center;
+  height: auto;
+  line-height: normal;
+}
+.m { font: 600 10px/normal var(--a-font-mono); width: 42px; }
+.name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 </style>

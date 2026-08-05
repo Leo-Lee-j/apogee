@@ -96,9 +96,60 @@ const commonLight = {
 
 /** 组件级只覆写必要的部分。改得越多，样式计算越慢。 */
 const components = {
-  Input: { heightMedium: '28px', paddingMedium: '0 8px' },
-  Button: { heightMedium: '28px', paddingMedium: '0 12px' },
-  Select: { peers: { InternalSelection: { heightMedium: '28px' } } },
+  Input: {
+    heightSmall: '24px',
+    paddingSmall: '0 6px',
+    fontSizeSmall: '12px',
+    lineHeight: '20px',
+    borderRadius: '4px',
+    heightMedium: '28px',
+    paddingMedium: '0 8px',
+    fontSizeMedium: '13px',
+  },
+  Button: {
+    heightSmall: '24px',
+    paddingSmall: '0 8px',
+    fontSizeSmall: '12px',
+    borderRadiusSmall: '4px',
+    heightMedium: '28px',
+    paddingMedium: '0 12px',
+    fontSizeMedium: '13px',
+    borderRadiusMedium: '6px',
+  },
+  Card: {
+    borderRadius: '6px',
+    paddingSmall: '12px',
+    fontSizeSmall: '12px',
+    titleFontSizeSmall: '13px',
+  },
+  Form: {
+    lineHeight: '20px',
+    labelFontSizeLeftSmall: '12px',
+    labelFontSizeTopSmall: '12px',
+  },
+  Alert: {
+    fontSize: '12px',
+    lineHeight: '20px',
+    borderRadius: '6px',
+    padding: '8px 10px',
+  },
+  Tabs: {
+    tabFontSizeSmall: '12px',
+    tabGapSmallLine: '2px',
+    tabPaddingSmallLine: '0 8px',
+  },
+  Select: {
+    peers: {
+      InternalSelection: {
+        fontSizeSmall: '12px',
+        heightSmall: '24px',
+        borderRadius: '4px',
+        paddingSingle: '0 8px',
+        fontSizeMedium: '13px',
+        heightMedium: '28px',
+      },
+    },
+  },
 } as const
 
 /** 暗色覆写。**不要在渲染函数里重建这个对象。** */

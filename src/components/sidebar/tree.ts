@@ -25,11 +25,13 @@ export const OVERSCAN = 10
  */
 export interface FlatNode {
   id: string
+  parentId?: string | null
   depth: number
   name: string
   method?: string
   isFolder: boolean
   expanded: boolean
+  kind?: 'collection' | 'folder' | 'request'
 }
 
 const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const

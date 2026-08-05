@@ -1,5 +1,6 @@
 import { defineConfig, type Plugin } from 'vite'
 import vue from '@vitejs/plugin-vue'
+import AutoImport from 'unplugin-auto-import/vite'
 import Components from 'unplugin-vue-components/vite'
 import { NaiveUiResolver } from 'unplugin-vue-components/resolvers'
 import { fileURLToPath, URL } from 'node:url'
@@ -61,8 +62,22 @@ export default defineConfig({
   plugins: [
     vue(),
     dumpChunkMap(),
-    // Naive UI 按需引入（02 文档 §7.5 第 1 条）。
-    // 不做全量 import —— 全量会把整个组件库拖进首屏。
+    // Vue 与 Naive UI composable 按需自动导入；只生成实际使用到的导入。
+    AutoImport({
+      imports: [
+        'vue',
+        {
+          'naive-ui': [
+            'useDialog',
+            'useMessage',
+            'useNotification',
+            'useLoadingBar',
+          ],
+        },
+      ],
+      dts: 'src/types/auto-imports.d.ts',
+    }),
+    // Naive UI 组件按需自动导入；不做全量 import。
     Components({
       dts: 'src/types/components.d.ts',
       resolvers: [NaiveUiResolver()],

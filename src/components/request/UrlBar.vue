@@ -47,6 +47,20 @@ function onUrl(e: Event) {
   if (tab.value) tabs.patch(tab.value.id, { url: v, dirty: true })
 }
 
+function save() {
+  if (tab.value) void tabs.save(tab.value.id)
+}
+
+/** URL 中出现 :id / {id} 时自动创建对应的路径参数行。 */
+watch(
+  () => tab.value?.url,
+  (url) => {
+    const current = tab.value
+    if (current && url !== undefined) tabs.syncPathParams(current.id, url)
+  },
+  { immediate: true },
+)
+
 /** Ctrl+Enter 发送（02 文档 §4.4 ResponsePanel 的快捷键提示）。 */
 function onKeydown(e: KeyboardEvent) {
   if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
@@ -126,7 +140,7 @@ defineExpose({ focus: () => inputEl.value?.select() })
     >
       {{ sending ? '等待中…' : '发送' }}
     </button>
-    <button class="save" type="button">保存</button>
+    <button class="save" type="button" @click="save">保存</button>
   </div>
 </template>
 

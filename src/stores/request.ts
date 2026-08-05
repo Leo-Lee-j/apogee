@@ -1,5 +1,6 @@
 import {
   ipc,
+  normalizeError,
   onRequestEvents,
   type RequestSpec,
   type ExecContext,
@@ -82,10 +83,14 @@ export function useRequest() {
   /** 把一个终结状态落到 UI 上，并复位发送状态。 */
   function apply(tabId: string, settlement: Settlement) {
     if (settlement.kind === 'done') {
-      tabs.patch(tabId, { response: settlement.event.response, dirty: false })
+      tabs.patch(tabId, {
+        response: settlement.event.response,
+        error: null,
+        dirty: false,
+      })
     } else if (settlement.kind === 'error') {
-      // 完整错误条(02 文档 §8 三段式)等响应面板落地后做，先留痕。
-      console.error('[request] 后端报告错误', settlement.event.error)
+      // 错误进入 Tab 状态，由 ResponsePanel 渲染三段式错误，而不是只留在控制台。
+      tabs.patch(tabId, { response: null, error: settlement.event.error })
     }
     sending.value = false
     active.value = null
@@ -133,10 +138,17 @@ export function useRequest() {
     const spec: RequestSpec = {
       method: tab.method,
       url: tab.url,
-      // 本切片只传方法 + URL。params/headers/body/auth 在各自的
-      // 面板完整落地后由这里拼装 —— 现在传空等于发一个最简 GET/POST。
+      params: tab.params,
+      pathParams: tab.pathParams,
+      headers: tab.headers,
+      body: tab.body,
+      auth: tab.auth,
+      settings: tab.settings,
     }
     const ctx: ExecContext = { tabId: tab.id }
+
+    // 新请求开始后清除上一次错误；旧响应先保留，直到新请求成功或失败。
+    tabs.patch(tab.id, { error: null })
 
     sending.value = true
     armPendingTimeout()
@@ -151,8 +163,10 @@ export function useRequest() {
         active.value = { handle: handle.id, tabId: tab.id }
       }
     } catch (error) {
-      // invoke 本身失败（命令注册问题等）
-      console.error('[request] invoke sendRequest 失败', error)
+      // invoke 本身失败（命令注册问题等）也进入同一套错误展示。
+      const appError = normalizeError(error)
+      tabs.patch(tab.id, { response: null, error: appError })
+      console.error('[request] invoke sendRequest 失败', appError)
       sending.value = false
       active.value = null
       clearPendingTimeout()

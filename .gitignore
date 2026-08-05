@@ -6,8 +6,9 @@
 /src-tauri/target
 
 # ── 自动生成，不入库 ─────────────────────────────────────────────────
-# unplugin-vue-components 生成的组件类型声明
+# unplugin-vue-components / unplugin-auto-import 生成的类型声明
 /src/types/components.d.ts
+/src/types/auto-imports.d.ts
 # ts-rs 从 Rust 类型生成的 TS 定义（03 文档 §9「类型契约」）
 /src/types/generated
 # cargo-about 生成的归属声明。发布流程里生成并随安装包分发（PRD §9.5），

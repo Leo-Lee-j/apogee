@@ -1,6 +1,12 @@
 //! 应用状态：响应体 spool + JSON SpanIndex 缓存 + 请求中注册表。
 
+use crate::workspace::WorkspaceRepository;
 use anyhow::{Context, Result};
+use apogee_core::model::{ResponseMeta, Timing};
+use apogee_core::response::{
+    scalar_preview, synth_json_payload, ResponseStore, ResponseSummary, SpanIndex, Spool, TreeNode,
+    PREVIEW_READ_BYTES,
+};
 use memmap2::MmapOptions;
 use std::collections::HashMap;
 use std::fs::File;
@@ -9,11 +15,6 @@ use std::sync::RwLock;
 use std::time::Instant;
 use tokio::sync::oneshot;
 use uuid::Uuid;
-use apogee_core::model::{ResponseMeta, Timing};
-use apogee_core::response::{
-    scalar_preview, synth_json_payload, ResponseStore, ResponseSummary, SpanIndex, Spool, TreeNode,
-    PREVIEW_READ_BYTES,
-};
 
 /// 正在飞行的请求。
 ///
@@ -31,6 +32,8 @@ pub struct AppState {
     pub store: ResponseStore,
     /// 只存元信息（体积、耗时），**不存 body**。
     pub(crate) meta: RwLock<Vec<(Uuid, u64, Timing, Option<String>)>>,
+    /// 工作区文件仓库。启动时由 Tauri setup 根据 app data 目录初始化。
+    pub workspace: RwLock<Option<WorkspaceRepository>>,
     /// 请求中注册表。key 是 ExecHandle.id（= 响应 id）。
     in_flight: RwLock<HashMap<Uuid, InFlight>>,
 }
@@ -42,8 +45,34 @@ impl AppState {
             spool: Spool::new(root)?,
             store: ResponseStore::new(),
             meta: RwLock::new(Vec::new()),
+            workspace: RwLock::new(None),
             in_flight: RwLock::new(HashMap::new()),
         })
+    }
+
+    /// 在 Tauri 完成 app data 路径解析后初始化本地工作区。
+    pub fn initialize_workspace(&self, root: PathBuf) -> Result<()> {
+        let repository = WorkspaceRepository::open(root)?;
+        *self
+            .workspace
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(repository);
+        Ok(())
+    }
+
+    /// 对工作区仓库执行一次读写操作，统一处理「尚未初始化」错误。
+    pub fn with_workspace<T>(
+        &self,
+        operation: impl FnOnce(&WorkspaceRepository) -> Result<T>,
+    ) -> Result<T> {
+        let guard = self
+            .workspace
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let repository = guard
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("工作区尚未初始化"))?;
+        operation(repository)
     }
 
     /// 注册一个正在执行的请求，返回 receiver 给 execute() 当取消信号。
@@ -146,7 +175,10 @@ impl AppState {
     }
 
     pub fn summary(&self, id: Uuid) -> Result<ResponseSummary> {
-        let m = self.meta.read().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let m = self
+            .meta
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let (_, size, timing, ct) = m
             .iter()
             .find(|(x, ..)| *x == id)
