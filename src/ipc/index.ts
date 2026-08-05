@@ -101,10 +101,23 @@ export interface WorkspaceNode {
   kind?: WorkspaceNodeKind
 }
 
+export interface EnvironmentVariable {
+  key: string
+  value: string
+  enabled: boolean
+}
+
+export interface Environment {
+  id: string
+  name: string
+  variables: EnvironmentVariable[]
+}
+
 export interface WorkspaceSnapshot {
   id: string
   name: string
   nodes: WorkspaceNode[]
+  environments: Environment[]
 }
 
 export interface WorkspaceRequest {
@@ -218,6 +231,14 @@ export const ipc = {
   /** 读取 Rust 侧已经扁平化的集合树。 */
   workspaceLoad(): Promise<WorkspaceSnapshot> {
     return call('workspace_load')
+  },
+
+  workspaceCreateEnvironment(name: string): Promise<Environment> {
+    return call('workspace_create_environment', { name })
+  },
+
+  workspaceSaveEnvironment(environment: Environment): Promise<Environment> {
+    return call('workspace_save_environment', { environment })
   },
 
   /** 读取一个请求的完整编辑模型。 */
@@ -381,6 +402,7 @@ export interface RequestSettings {
 
 export interface ExecContext {
   tabId?: string
+  environmentId?: string
 }
 
 export interface ExecHandle {

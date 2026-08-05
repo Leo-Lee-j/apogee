@@ -19,6 +19,7 @@ use crate::request::{
     ApiKeyIn, AuthConfig, Body, HttpVersion, RequestSpec, ResolvedSettings,
 };
 use crate::response::Spool;
+use crate::vars::{resolve_request, Environment};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
@@ -675,11 +676,12 @@ pub enum Outcome {
 pub async fn execute(
     id: Uuid,
     spec: &RequestSpec,
+    environment: Option<&Environment>,
     spool: &Spool,
     cancel: tokio::sync::oneshot::Receiver<()>,
     on_progress: impl FnMut(Progress),
 ) -> Outcome {
-    match execute_inner(id, spec, spool, cancel, on_progress).await {
+    match execute_inner(id, spec, environment, spool, cancel, on_progress).await {
         Ok(Some(meta)) => Outcome::Done(Box::new(meta)),
         Ok(None) => Outcome::Cancelled,
         Err(error) => Outcome::Failed(error),
@@ -691,13 +693,17 @@ pub async fn execute(
 async fn execute_inner(
     id: Uuid,
     spec: &RequestSpec,
+    environment: Option<&Environment>,
     spool: &Spool,
     mut cancel: tokio::sync::oneshot::Receiver<()>,
     on_progress: impl FnMut(Progress),
 ) -> Result<Option<ResponseMeta>, AppError> {
-    let settings = spec.settings.resolve();
+    // 解析在执行层入口完成，保证 URL、参数、Header、Body 和鉴权共享同一份
+    // 环境快照。原始 spec 仍保留模板，不会被解析结果覆盖。
+    let resolved = resolve_request(spec, environment)?;
+    let settings = resolved.settings.resolve();
     let client = client_for(&settings)?;
-    let (builder, url) = build_request(&client, spec)?;
+    let (builder, url) = build_request(&client, &resolved)?;
 
     let t0 = Instant::now();
 

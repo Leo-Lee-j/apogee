@@ -64,14 +64,15 @@ pub struct RequestSpec {
 
 /// 执行上下文（03 文档 §3.2 的 `ExecContext`）。
 ///
-/// 变量作用域、Cookie jar、代理配置最终都挂在这里。本切片只需要一个东西：
-/// 让前端把标签 id 传进来，好把事件路由回正确的标签 —— 一个窗口里可以同时
-/// 有多个请求在飞，事件必须能分辨是哪个的。
+/// 变量作用域、Cookie jar、代理配置最终都挂在这里。当前切片接入两项：
+/// 标签 id 用于事件路由，环境 id 用于在 Rust 侧读取同一份环境快照并解析请求。
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExecContext {
     #[serde(default)]
     pub tab_id: Option<String>,
+    #[serde(default)]
+    pub environment_id: Option<String>,
 }
 
 /// `send_request` 的返回值（03 文档 §3.2）。命令**立即**返回它，不等网络。

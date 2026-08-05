@@ -12,6 +12,7 @@ pub mod http;
 pub mod model;
 pub mod request;
 pub mod response;
+pub mod vars;
 pub mod workspace;
 
 pub use error::{AppError, ErrorKind, Hint};

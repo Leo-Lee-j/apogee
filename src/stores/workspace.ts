@@ -5,6 +5,8 @@ import {
   ipc,
   normalizeError,
   type AppError,
+  type Environment,
+  type EnvironmentVariable,
   type WorkspaceNode,
   type WorkspaceRequest,
   type WorkspaceSnapshot,
@@ -20,6 +22,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const nodes = shallowRef<WorkspaceNode[] | undefined>(undefined)
   const workspaceId = ref<string | null>(null)
   const workspaceName = ref('')
+  const environments = shallowRef<Environment[]>([])
+  const activeEnvironmentId = ref<string | null>(null)
+  const activeEnvironment = computed(
+    () => environments.value.find((environment) => environment.id === activeEnvironmentId.value) ?? null,
+  )
+  /** 尚未落盘的环境 id；发送前统一 flush，避免 Rust 从磁盘读到旧值。 */
+  const dirtyEnvironmentIds = new Set<string>()
   const loading = ref(false)
   const ready = ref(false)
   const lastError = ref<AppError | null>(null)
@@ -32,6 +41,19 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     workspaceId.value = snapshot.id
     workspaceName.value = snapshot.name
     nodes.value = snapshot.nodes
+    const incomingEnvironments = snapshot.environments ?? []
+    const localEnvironments = new Map(environments.value.map((environment) => [environment.id, environment]))
+    environments.value = incomingEnvironments.map((environment) =>
+      dirtyEnvironmentIds.has(environment.id)
+        ? localEnvironments.get(environment.id) ?? environment
+        : environment,
+    )
+    for (const id of dirtyEnvironmentIds) {
+      if (!environments.value.some((environment) => environment.id === id)) dirtyEnvironmentIds.delete(id)
+    }
+    if (!environments.value.some((environment) => environment.id === activeEnvironmentId.value)) {
+      activeEnvironmentId.value = environments.value[0]?.id ?? null
+    }
     ready.value = true
     lastError.value = null
   }
@@ -75,6 +97,90 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (parentId) return parentId
     if (!ready.value) await load()
     return collections.value[0]?.id
+  }
+
+  function selectEnvironment(id: string | null) {
+    activeEnvironmentId.value = id && environments.value.some((environment) => environment.id === id)
+      ? id
+      : null
+  }
+
+  function updateEnvironment(id: string, delta: Partial<Environment>) {
+    const current = environments.value.find((environment) => environment.id === id)
+    if (!current) return
+    environments.value = environments.value.map((environment) =>
+      environment.id === id ? { ...environment, ...delta } : environment,
+    )
+    dirtyEnvironmentIds.add(id)
+  }
+
+  function updateEnvironmentVariable(
+    environmentId: string,
+    index: number,
+    delta: Partial<EnvironmentVariable>,
+  ) {
+    const environment = environments.value.find((item) => item.id === environmentId)
+    if (!environment) return
+    updateEnvironment(environmentId, {
+      variables: environment.variables.map((variable, variableIndex) =>
+        variableIndex === index ? { ...variable, ...delta } : variable,
+      ),
+    })
+  }
+
+  function addEnvironmentVariable(environmentId: string) {
+    const environment = environments.value.find((item) => item.id === environmentId)
+    if (!environment) return
+    updateEnvironment(environmentId, {
+      variables: [
+        ...environment.variables,
+        { key: '', value: '', enabled: true },
+      ],
+    })
+  }
+
+  function removeEnvironmentVariable(environmentId: string, index: number) {
+    const environment = environments.value.find((item) => item.id === environmentId)
+    if (!environment) return
+    updateEnvironment(environmentId, {
+      variables: environment.variables.filter((_, variableIndex) => variableIndex !== index),
+    })
+  }
+
+  async function saveEnvironment(environmentId = activeEnvironmentId.value): Promise<boolean> {
+    const environment = environments.value.find((item) => item.id === environmentId)
+    if (!environment || !inTauri || !dirtyEnvironmentIds.has(environment.id)) return true
+    try {
+      const saved = await ipc.workspaceSaveEnvironment(environment)
+      environments.value = environments.value.map((item) =>
+        item.id === saved.id ? saved : item,
+      )
+      dirtyEnvironmentIds.delete(saved.id)
+      return true
+    } catch (error) {
+      report(error)
+      return false
+    }
+  }
+
+  async function saveDirtyEnvironments(): Promise<boolean> {
+    for (const id of [...dirtyEnvironmentIds]) {
+      if (!(await saveEnvironment(id))) return false
+    }
+    return true
+  }
+
+  async function createEnvironment(name = '新环境'): Promise<Environment | null> {
+    if (!inTauri) return null
+    try {
+      const environment = await ipc.workspaceCreateEnvironment(name)
+      environments.value = [...environments.value, environment]
+      activeEnvironmentId.value = environment.id
+      return environment
+    } catch (error) {
+      report(error)
+      return null
+    }
   }
 
   async function openRequest(node: WorkspaceNode, preview = true): Promise<WorkspaceRequest | null> {
@@ -164,12 +270,23 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     nodes,
     workspaceId,
     workspaceName,
+    environments,
+    activeEnvironmentId,
+    activeEnvironment,
     loading,
     ready,
     lastError,
     available,
     collections,
     load,
+    selectEnvironment,
+    updateEnvironment,
+    updateEnvironmentVariable,
+    addEnvironmentVariable,
+    removeEnvironmentVariable,
+    saveEnvironment,
+    saveDirtyEnvironments,
+    createEnvironment,
     openRequest,
     createCollection,
     createFolder,

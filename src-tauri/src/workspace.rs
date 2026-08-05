@@ -17,9 +17,10 @@
 
 use anyhow::{bail, Context, Result};
 use apogee_core::request::{AuthConfig, Body, RequestSettings, RequestSpec};
+use apogee_core::vars::Environment;
 use apogee_core::workspace::{
-    CollectionEntry, ContainerDocument, PersistedRequest, WorkspaceManifest, WorkspaceNode,
-    WorkspaceNodeKind, WorkspaceRequest, WorkspaceSnapshot, WORKSPACE_FORMAT_VERSION,
+    CollectionEntry, ContainerDocument, EnvironmentEntry, PersistedRequest, WorkspaceManifest,
+    WorkspaceNode, WorkspaceNodeKind, WorkspaceRequest, WorkspaceSnapshot, WORKSPACE_FORMAT_VERSION,
 };
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -29,6 +30,7 @@ use uuid::Uuid;
 
 const COLLECTION_MARKER: &str = "_collection.yaml";
 const FOLDER_MARKER: &str = "_folder.yaml";
+const ENVIRONMENT_DIR: &str = "environments";
 
 pub struct WorkspaceRepository {
     root: PathBuf,
@@ -43,6 +45,7 @@ impl WorkspaceRepository {
     pub fn open(root: impl Into<PathBuf>) -> Result<Self> {
         let root = root.into();
         fs::create_dir_all(root.join("collections"))?;
+        fs::create_dir_all(root.join(ENVIRONMENT_DIR))?;
         let repository = Self { root };
         if repository.manifest_path().exists() {
             repository.read_manifest()?;
@@ -54,6 +57,7 @@ impl WorkspaceRepository {
 
     pub fn snapshot(&self) -> Result<WorkspaceSnapshot> {
         let manifest = self.read_manifest()?;
+        let environments = self.read_environments(&manifest)?;
         let mut located = Vec::new();
 
         for entry in &manifest.collections {
@@ -84,6 +88,7 @@ impl WorkspaceRepository {
             id: manifest.id,
             name: manifest.name,
             nodes: located.into_iter().map(|item| item.node).collect(),
+            environments,
         })
     }
 
@@ -98,6 +103,51 @@ impl WorkspaceRepository {
             bail!("请求文件 {} 的 id 不一致", location.path.display());
         }
         Ok(document.as_ipc())
+    }
+
+    pub fn read_environment(&self, id: Uuid) -> Result<Environment> {
+        let manifest = self.read_manifest()?;
+        if !manifest.environments.iter().any(|entry| entry.id == id) {
+            bail!("未知的环境：{id}");
+        }
+        let environment: Environment = read_yaml(&self.environment_path(id))
+            .with_context(|| format!("读取环境文件失败：{}", self.environment_path(id).display()))?;
+        if environment.id != id {
+            bail!("环境文件 {} 的 id 不一致", self.environment_path(id).display());
+        }
+        Ok(environment)
+    }
+
+    pub fn create_environment(&self, name: String) -> Result<Environment> {
+        let name = required_name(&name)?;
+        let environment = Environment {
+            id: Uuid::new_v4(),
+            name: name.clone(),
+            variables: Vec::new(),
+        };
+        write_yaml(&self.environment_path(environment.id), &environment)?;
+
+        let mut manifest = self.read_manifest()?;
+        manifest.environments.push(EnvironmentEntry {
+            id: environment.id,
+            name,
+        });
+        write_yaml(&self.manifest_path(), &manifest)?;
+        Ok(environment)
+    }
+
+    pub fn save_environment(&self, mut environment: Environment) -> Result<Environment> {
+        environment.name = required_name(&environment.name)?;
+        let mut manifest = self.read_manifest()?;
+        let entry = manifest
+            .environments
+            .iter_mut()
+            .find(|entry| entry.id == environment.id)
+            .with_context(|| format!("未知的环境：{}", environment.id))?;
+        entry.name = environment.name.clone();
+        write_yaml(&self.environment_path(environment.id), &environment)?;
+        write_yaml(&self.manifest_path(), &manifest)?;
+        Ok(environment)
     }
 
     pub fn save_request(&self, id: Uuid, name: String, spec: RequestSpec) -> Result<()> {
@@ -254,6 +304,7 @@ impl WorkspaceRepository {
     fn create_default_workspace(&self) -> Result<()> {
         let workspace_id = Uuid::new_v4();
         let collection_id = Uuid::new_v4();
+        let environment_id = Uuid::new_v4();
         let directory = format!("collections/{collection_id}");
         let collection_path = self.root.join(&directory);
         fs::create_dir_all(&collection_path)?;
@@ -266,6 +317,14 @@ impl WorkspaceRepository {
             },
         )?;
         write_yaml(
+            &self.environment_path(environment_id),
+            &Environment {
+                id: environment_id,
+                name: "本地".to_string(),
+                variables: Vec::new(),
+            },
+        )?;
+        write_yaml(
             &self.manifest_path(),
             &WorkspaceManifest {
                 apogee: WORKSPACE_FORMAT_VERSION,
@@ -275,6 +334,10 @@ impl WorkspaceRepository {
                     id: collection_id,
                     name: "我的集合".to_string(),
                     directory,
+                }],
+                environments: vec![EnvironmentEntry {
+                    id: environment_id,
+                    name: "本地".to_string(),
                 }],
             },
         )
@@ -384,6 +447,27 @@ impl WorkspaceRepository {
             bail!("集合目录包含非法路径：{}", entry.directory);
         }
         Ok(self.root.join(relative))
+    }
+
+    fn read_environments(&self, manifest: &WorkspaceManifest) -> Result<Vec<Environment>> {
+        manifest
+            .environments
+            .iter()
+            .map(|entry| {
+                let environment: Environment = read_yaml(&self.environment_path(entry.id))
+                    .with_context(|| format!("读取环境文件失败：{}", self.environment_path(entry.id).display()))?;
+                if environment.id != entry.id {
+                    bail!("环境文件 {} 的 id 与工作区清单不一致", self.environment_path(entry.id).display());
+                }
+                Ok(environment)
+            })
+            .collect()
+    }
+
+    fn environment_path(&self, id: Uuid) -> PathBuf {
+        self.root
+            .join(ENVIRONMENT_DIR)
+            .join(format!("{id}.yaml"))
     }
 
     fn manifest_path(&self) -> PathBuf {

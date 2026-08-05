@@ -4,10 +4,12 @@ import {
   onRequestEvents,
   type RequestSpec,
   type ExecContext,
+  type AppError,
   type DoneEvent,
   type ErrorEvent,
 } from '@/ipc'
 import { useTabsStore } from '@/stores/tabs'
+import { useWorkspaceStore } from '@/stores/workspace'
 import { ref, onMounted, onUnmounted } from 'vue'
 
 /**
@@ -50,6 +52,7 @@ const MAX_ORPHANS = 8
 
 export function useRequest() {
   const tabs = useTabsStore()
+  const workspace = useWorkspaceStore()
   const sending = ref(false)
   /** 当前在飞的请求：句柄 id → 它属于哪个标签。 */
   const active = ref<{ handle: string; tabId: string } | null>(null)
@@ -135,6 +138,21 @@ export function useRequest() {
     const tab = tabs.active
     if (!tab || !tab.url.trim() || sending.value) return
 
+    // 工作区是首屏之后异步加载的。发送必须等它完成，否则默认环境还没
+    // 选出来时会把带 {{variable}} 的请求误判成缺少变量。
+    if (workspace.available && !workspace.ready) {
+      await workspace.load()
+      if (!workspace.ready) {
+        const error: AppError = workspace.lastError ?? {
+          kind: 'io',
+          message: '工作区尚未加载，无法发送请求',
+          hints: [{ label: '检查工作区目录是否可读，并重试' }],
+        }
+        tabs.patch(tab.id, { response: null, error })
+        return
+      }
+    }
+
     const spec: RequestSpec = {
       method: tab.method,
       url: tab.url,
@@ -145,7 +163,6 @@ export function useRequest() {
       auth: tab.auth,
       settings: tab.settings,
     }
-    const ctx: ExecContext = { tabId: tab.id }
 
     // 新请求开始后清除上一次错误；旧响应先保留，直到新请求成功或失败。
     tabs.patch(tab.id, { error: null })
@@ -153,6 +170,25 @@ export function useRequest() {
     sending.value = true
     armPendingTimeout()
     try {
+      // 环境编辑器采用显式保存按钮，但发送不能读到旧磁盘快照；把所有
+      // 尚未保存的环境先 flush，再只传环境 id 给 Rust。
+      if (!(await workspace.saveDirtyEnvironments())) {
+        const error: AppError = workspace.lastError ?? {
+          kind: 'io',
+          message: '环境保存失败，未发送请求',
+          hints: [{ label: '检查环境名称和工作区目录后重试' }],
+        }
+        tabs.patch(tab.id, { response: null, error })
+        sending.value = false
+        active.value = null
+        clearPendingTimeout()
+        return
+      }
+
+      const ctx: ExecContext = {
+        tabId: tab.id,
+        environmentId: workspace.activeEnvironmentId ?? undefined,
+      }
       const handle = await ipc.sendRequest(spec, ctx)
       const early = orphans.get(handle.id)
       if (early) {

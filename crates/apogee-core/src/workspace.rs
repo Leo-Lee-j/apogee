@@ -4,6 +4,7 @@
 //! 和公开的 YAML 格式共享同一份模型。
 
 use crate::request::RequestSpec;
+use crate::vars::Environment;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -18,6 +19,16 @@ pub struct WorkspaceManifest {
     pub name: String,
     #[serde(default)]
     pub collections: Vec<CollectionEntry>,
+    #[serde(default)]
+    pub environments: Vec<EnvironmentEntry>,
+}
+
+/// 清单中的环境入口。实际变量值单独保存在 environments/<id>.yaml。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EnvironmentEntry {
+    pub id: Uuid,
+    pub name: String,
 }
 
 /// 清单中的集合入口。目录名使用稳定 ID，重命名不会移动文件。
@@ -67,6 +78,7 @@ pub struct WorkspaceSnapshot {
     pub id: Uuid,
     pub name: String,
     pub nodes: Vec<WorkspaceNode>,
+    pub environments: Vec<Environment>,
 }
 
 /// 前端打开请求时使用的轻量投影。

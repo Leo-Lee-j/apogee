@@ -69,6 +69,8 @@ pub fn run() {
             commands::workspace_create_request,
             commands::workspace_rename_node,
             commands::workspace_delete_node,
+            commands::workspace_create_environment,
+            commands::workspace_save_environment,
         ])
         .setup(move |app| {
             let data_dir = app
@@ -117,6 +119,7 @@ fn install_panic_hook() {
 mod commands {
     use super::state::AppState;
     use apogee_core::request::RequestSpec;
+    use apogee_core::vars::Environment;
     use apogee_core::response::{ResponseSummary, TreeNode};
     use apogee_core::workspace::{WorkspaceRequest, WorkspaceSnapshot};
     use serde::{Deserialize, Serialize};
@@ -276,6 +279,22 @@ mod commands {
         spec: apogee_core::request::RequestSpec,
         ctx: Option<apogee_core::request::ExecContext>,
     ) -> Result<apogee_core::request::ExecHandle, String> {
+        let environment = match ctx
+            .as_ref()
+            .and_then(|item| item.environment_id.as_deref())
+        {
+            Some(raw_id) => {
+                let environment_id = Uuid::parse_str(raw_id)
+                    .map_err(|_| format!("非法的环境 id：{raw_id}"))?;
+                Some(
+                    state
+                        .with_workspace(|repository| repository.read_environment(environment_id))
+                        .map_err(|error| error.to_string())?,
+                )
+            }
+            None => None,
+        };
+
         let id = Uuid::new_v4();
         let tab_id = ctx.as_ref().and_then(|item| item.tab_id.clone());
         let cancel_rx = state.register_inflight(id, tab_id);
@@ -329,7 +348,15 @@ mod commands {
 
             let body = AssertUnwindSafe(async {
                 let outcome =
-                    apogee_core::http::execute(id, &spec, &spool, cancel_rx, on_progress).await;
+                    apogee_core::http::execute(
+                        id,
+                        &spec,
+                        environment.as_ref(),
+                        &spool,
+                        cancel_rx,
+                        on_progress,
+                    )
+                    .await;
 
                 match outcome {
                     apogee_core::http::Outcome::Done(meta) => {
@@ -479,6 +506,28 @@ mod commands {
         let id = parse_id(&request_id)?;
         state
             .with_workspace(|repository| repository.save_request(id, name, spec))
+            .map_err(|error| error.to_string())
+    }
+
+    /// 创建一个空环境。前端随后可通过 workspace_save_environment 写入变量。
+    #[tauri::command]
+    pub fn workspace_create_environment(
+        state: State<'_, Arc<AppState>>,
+        name: String,
+    ) -> Result<Environment, String> {
+        state
+            .with_workspace(|repository| repository.create_environment(name))
+            .map_err(|error| error.to_string())
+    }
+
+    /// 原子保存环境名称与变量值。
+    #[tauri::command]
+    pub fn workspace_save_environment(
+        state: State<'_, Arc<AppState>>,
+        environment: Environment,
+    ) -> Result<Environment, String> {
+        state
+            .with_workspace(|repository| repository.save_environment(environment))
             .map_err(|error| error.to_string())
     }
 
