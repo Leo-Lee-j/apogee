@@ -193,11 +193,11 @@ defineExpose({ focus: () => inputEl.value?.select() })
 }
 /* 不能写 outline: none（原来是这么写的）—— `.url:focus` 的特异性高于
    tokens.css 里的全局 `:focus-visible`，会把键盘焦点环整个盖掉，违反 PRD §10.4。
-   改成把焦点环画在边框内侧，视觉上仍然干净。 */
+   改成 1px 内侧焦点线，保留键盘可见性但不增加输入框视觉重量。 */
 .url:focus-visible {
   border-color: var(--a-focus);
-  outline: 2px solid var(--a-focus);
-  outline-offset: -2px;
+  outline: 1px solid var(--a-focus);
+  outline-offset: -1px;
 }
 .send, .save {
   height: 28px; padding: 0 14px; border-radius: var(--a-radius-md); cursor: pointer;

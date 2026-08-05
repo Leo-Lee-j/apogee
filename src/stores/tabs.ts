@@ -49,6 +49,13 @@ export interface Tab {
    * 侧边栏的「定位当前接口」和「高亮当前打开的行」都只认这个字段。
    */
   nodeId?: string
+  /**
+   * 新建请求标签处于选项面板状态时为 true。状态归属标签，而不是全局 UI，
+   * 这样切换回其他接口时不会把它们的内容替换掉。
+   */
+  newPanel?: boolean
+  /** 从侧栏发起新建请求时继承的集合/文件夹目标。 */
+  newRequestParentId?: string
   /** 有未保存改动，标签上显示 `•` */
   dirty: boolean
   /** 临时标签（单击预览）：标题斜体，被下一次单击复用（02 文档 §4.5） */
@@ -190,6 +197,7 @@ export const useTabsStore = defineStore('tabs', () => {
       dirty: false,
       preview: false,
       response: null,
+      newPanel: false,
       ...init,
     })
     tabs.value = [...tabs.value, tab]
@@ -198,18 +206,30 @@ export const useTabsStore = defineStore('tabs', () => {
   }
 
   /**
-   * 新建一个「快捷请求」：不属于任何集合的临时请求，发完即走。
-   *
-   * `Ctrl+T` 和新建面板里的第一张卡片都走这里，所以「什么算快捷请求」
-   * （标题、不落盘、开完就聚焦 URL 栏）只有一处定义。两边各写一遍的话，
-   * 迟早有一边忘了聚焦。
-   *
-   * 这里用 useUiStore 是单向依赖（ui 不认识 tabs），不构成环。
+   * 新建一个独立的空白请求标签：不属于任何集合，打开后立即聚焦 URL 栏。
+   * Ctrl+T 走这里；标签栏“+”和侧边栏“新建请求”走 openNewPanel()，先显示选项面板。
    */
   function openQuick(): Tab {
-    const tab = open({ title: '快捷请求' })
+    const tab = open({ title: '新建请求' })
     useUiStore().focusUrl()
     return tab
+  }
+
+  /** 创建一个独立的“新建请求”标签，内容区随后显示选项面板。 */
+  function openNewPanel(parentId?: string): Tab {
+    return open({
+      title: '新建请求',
+      newPanel: true,
+      newRequestParentId: parentId,
+    })
+  }
+
+  /** 将当前新建面板标签转换为空白请求编辑标签。 */
+  function resolveNewPanel() {
+    const tab = active.value
+    if (!tab?.newPanel) return
+    patch(tab.id, { newPanel: false, newRequestParentId: undefined })
+    useUiStore().focusUrl()
   }
 
   function activate(id: string) {
@@ -299,6 +319,8 @@ export const useTabsStore = defineStore('tabs', () => {
     stateOf,
     open,
     openQuick,
+    openNewPanel,
+    resolveNewPanel,
     activate,
     close,
     patch,

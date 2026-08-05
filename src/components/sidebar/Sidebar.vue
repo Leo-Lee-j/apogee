@@ -68,7 +68,7 @@ const scroller = ref<HTMLElement | null>(null)
 const tabs = useTabsStore()
 const workspace = useWorkspaceStore()
 const selectedId = ref<string | null>(null)
-type ActionKind = 'collection' | 'folder' | 'request' | 'rename'
+type ActionKind = 'collection' | 'folder' | 'rename'
 const actionKind = ref<ActionKind | null>(null)
 const actionName = ref('')
 const actionError = ref('')
@@ -86,13 +86,13 @@ const actionModalTitle = computed(() => {
   if (actionKind.value === 'rename') return '重命名'
   if (actionKind.value === 'collection') return '新建集合'
   if (actionKind.value === 'folder') return '新建文件夹'
-  return '新建请求'
+  return '新建'
 })
 const actionModalHint = computed(() => {
   if (actionKind.value === 'rename') return '名称只影响显示，不会改变稳定 ID 或文件路径。'
   if (actionKind.value === 'collection') return '集合会保存到本地工作区，并立即出现在侧边栏。'
   if (actionKind.value === 'folder') return '文件夹用于组织请求，可继续嵌套在当前选中容器下。'
-  return '请求会创建为独立 YAML 文件，编辑内容会自动保存。'
+  return ''
 })
 const actionNamePlaceholder = computed(() => {
   if (actionKind.value === 'collection') return '例如：用户服务'
@@ -118,7 +118,7 @@ const CREATE_OPTIONS = [
 function onCreateSelect(key: string) {
   if (key === 'collection') openAction('collection')
   else if (key === 'folder') openAction('folder')
-  else if (key === 'request') openAction('request')
+  else if (key === 'request') tabs.openNewPanel(selectedRequestParentId())
 }
 
 // ── 排序 ──────────────────────────────────────────────────────────────
@@ -241,6 +241,13 @@ function selectedContainerId(): string | undefined {
   return selected?.parentId ?? all.value.find((node) => node.kind === 'collection')?.id
 }
 
+/** 新建请求继承当前选中的集合/文件夹；未选中时由工作区选择默认集合。 */
+function selectedRequestParentId(): string | undefined {
+  const selected = all.value.find((node) => node.id === selectedId.value)
+  if (selected?.isFolder) return selected.id
+  return selected?.kind === 'request' ? selected.parentId ?? undefined : undefined
+}
+
 function openAction(kind: ActionKind) {
   actionKind.value = kind
   actionError.value = ''
@@ -254,11 +261,7 @@ function openAction(kind: ActionKind) {
     return
   }
 
-  actionName.value = kind === 'collection'
-    ? ''
-    : kind === 'folder'
-      ? ''
-      : ''
+  actionName.value = ''
   if (kind !== 'collection' && !selectedContainerId()) {
     actionError.value = '请先在集合树中选择一个集合或文件夹。'
   }
@@ -280,8 +283,8 @@ async function submitAction() {
     return
   }
 
-  const parentId = kind === 'folder' || kind === 'request' ? selectedContainerId() : undefined
-  if ((kind === 'folder' || kind === 'request') && !parentId) {
+  const parentId = kind === 'folder' ? selectedContainerId() : undefined
+  if (kind === 'folder' && !parentId) {
     actionError.value = '请先在集合树中选择一个集合或文件夹。'
     return
   }
@@ -298,8 +301,6 @@ async function submitAction() {
       success = await workspace.createCollection(name)
     } else if (kind === 'folder') {
       success = await workspace.createFolder(parentId, name)
-    } else if (kind === 'request') {
-      success = (await workspace.createRequest(parentId, name)) !== null
     } else if (selectedNode.value) {
       success = await workspace.renameNode(selectedNode.value.id, name)
     }
@@ -654,7 +655,7 @@ defineExpose({
 /* 不能写 outline: none —— 那会盖掉 tokens.css 里的全局 :focus-visible 焦点环。 */
 .filter:focus-within :deep(.n-input__state-border) {
   border-color: var(--a-focus);
-  box-shadow: 0 0 0 2px var(--a-focus) inset;
+  box-shadow: 0 0 0 1px var(--a-focus) inset;
 }
 
 /* ── 头部工具按钮 ──

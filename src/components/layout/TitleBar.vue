@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useUiStore } from '@/stores/ui'
+import { useWorkspaceStore } from '@/stores/workspace'
 import { windowControls, type Unlisten } from '@/ipc'
 
 /**
@@ -12,6 +13,10 @@ import { windowControls, type Unlisten } from '@/ipc'
  * 会把鼠标「甩」到屏幕角落点关闭，按钮不贴边就接不住这个动作。
  */
 const ui = useUiStore()
+const workspace = useWorkspaceStore()
+const workspaceLabel = computed(() =>
+  workspace.workspaceName || (workspace.loading ? '加载中…' : '本地草稿'),
+)
 
 /** 最大化状态只用来决定中间那个按钮画「最大化」还是「还原」。 */
 const maximized = ref(false)
@@ -34,8 +39,8 @@ onBeforeUnmount(() => stopWatching?.())
   <header class="titlebar" data-tauri-drag-region>
     <span class="brand">Apogee</span>
 
-    <button class="chip" type="button" aria-label="切换工作区">
-      工作区: my-api <span class="caret">▾</span>
+    <button class="chip" type="button" aria-label="当前工作区">
+      工作区: {{ workspaceLabel }} <span class="caret">▾</span>
     </button>
     <button class="chip" type="button" aria-label="切换环境">
       环境: dev <span class="caret">▾</span>
@@ -175,5 +180,5 @@ onBeforeUnmount(() => stopWatching?.())
   color: var(--a-danger);
 }
 /* 按钮贴着窗口边缘，焦点环画在外侧会被窗口裁掉，所以收到内侧。 */
-.wc:focus-visible { outline-offset: -2px; }
+.wc:focus-visible { outline-offset: -1px; }
 </style>

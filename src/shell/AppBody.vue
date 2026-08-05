@@ -28,7 +28,7 @@ import { ipc } from '@/ipc'
 
 const Sidebar = defineAsyncComponent(() => import('@/components/sidebar/Sidebar.vue'))
 const SettingsModal = defineAsyncComponent(() => import('@/views/SettingsModal.vue'))
-const NewModal = defineAsyncComponent(() => import('@/views/NewModal.vue'))
+const NewPanel = defineAsyncComponent(() => import('@/views/NewPanel.vue'))
 const S2Panel = defineAsyncComponent(() => import('@/spike/S2Panel.vue'))
 const S3Panel = defineAsyncComponent(() => import('@/spike/S3Panel.vue'))
 
@@ -145,12 +145,14 @@ const reqSize = computed(() =>
   ui.layout === 'focus' ? '0 0 0' : `${ui.requestRatio} 1 0`,
 )
 
+const activeNewPanel = computed(() => tabs.active?.newPanel === true)
+
 function onKeydown(e: KeyboardEvent) {
   const mod = e.ctrlKey || e.metaKey
   if (!mod) return
   const k = e.key.toLowerCase()
   if (k === 'b') { e.preventDefault(); ui.sidebarVisible = !ui.sidebarVisible }
-  // Ctrl+T 是 1 步操作（02 文档 §1 第 3 条），故意**不**经过新建面板。
+  // Ctrl+T 是 1 步操作（02 文档 §1 第 3 条），直接创建并激活“新建请求”标签。
   else if (k === 't') { e.preventDefault(); tabs.openQuick() }
   else if (k === 'k') { e.preventDefault(); ui.paletteOpen = true }
   else if (k === ',') { e.preventDefault(); ui.settingsOpen = true }
@@ -192,7 +194,8 @@ function onKeydown(e: KeyboardEvent) {
         -->
         <div class="a-block head">
           <TabBar />
-          <UrlBar v-if="!ui.spikeOpen" />
+          <!-- URL 栏始终对应当前激活的请求标签。 -->
+          <UrlBar v-if="!ui.spikeOpen && !activeNewPanel" />
         </div>
 
         <div v-if="ui.spikeOpen" class="a-block spike">
@@ -203,6 +206,9 @@ function onKeydown(e: KeyboardEvent) {
           </div>
           <S3Panel v-if="ui.spikePanel === 's3'" />
           <S2Panel v-else />
+        </div>
+        <div v-else-if="activeNewPanel" class="split new-content" :style="splitStyle">
+          <NewPanel id="new-request-panel" class="pane a-block" />
         </div>
         <div v-else class="split" :style="splitStyle">
           <RequestPanel
@@ -216,7 +222,6 @@ function onKeydown(e: KeyboardEvent) {
     </div>
     <StatusBar />
     <SettingsModal v-if="ui.settingsOpen" />
-    <NewModal v-if="ui.newOpen" />
   </div>
 </template>
 

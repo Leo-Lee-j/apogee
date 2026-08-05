@@ -1,10 +1,8 @@
 <script setup lang="ts">
 import { useTabsStore } from '@/stores/tabs'
-import { useUiStore } from '@/stores/ui'
 
 /** 标签栏，34px。`•` 表示有未保存改动（02 文档 §3.2 / §4.5）。 */
 const tabs = useTabsStore()
-const ui = useUiStore()
 
 const methodColor: Record<string, string> = {
   GET: 'var(--a-get)',
@@ -32,23 +30,17 @@ const methodColor: Record<string, string> = {
       <span v-if="t.dirty" class="dot" aria-label="未保存">•</span>
       <span class="x" role="button" aria-label="关闭标签" @click.stop="tabs.close(t.id)">×</span>
     </button>
-    <!--
-      `+` 打开新建面板，而不是直接开一个空标签。
-
-      带一个 `▾`：这是在告诉用户「按下去会展开选择」。没有它，点 `+` 弹出面板
-      会像误触 —— 用户的预期是「立刻多一个标签」。想要立刻多一个标签的人走
-      `Ctrl+T`（02 文档 §6.2），那条路没有面板。
-    -->
+    <!-- 点击“+”创建独立的“新建请求”标签，选项面板只属于这个标签。 -->
     <button
       class="add"
       type="button"
-      aria-label="新建"
-      aria-haspopup="dialog"
-      :aria-expanded="ui.newOpen"
-      title="新建（Ctrl+T 直接新建快捷请求）"
-      @click="ui.newOpen = true"
+      aria-label="新建请求"
+      aria-controls="new-request-panel"
+      :aria-expanded="tabs.active?.newPanel === true"
+      title="新建请求"
+      @click="tabs.openNewPanel()"
     >
-      +<span class="caret">▾</span>
+      +
     </button>
   </div>
 </template>
@@ -91,10 +83,9 @@ const methodColor: Record<string, string> = {
 .x:hover { background: var(--a-hover); opacity: 1; }
 .add {
   flex: 0 0 auto;
-  display: inline-flex; align-items: center; justify-content: center; gap: 1px;
+  display: inline-flex; align-items: center; justify-content: center;
   width: 38px; background: transparent; border: none; color: var(--a-text-dim);
   font-size: 16px; cursor: pointer;
 }
 .add:hover { background: var(--a-hover); color: var(--a-text); }
-.add .caret { font-size: 9px; opacity: 0.7; }
 </style>

@@ -58,13 +58,11 @@ export const useUiStore = defineStore('ui', () => {
   }
 
   const layout = ref<LayoutMode>('stacked')
-  const themeMode = ref<ThemeMode>('dark')
+  const themeMode = ref<ThemeMode>('light')
   /** 请求区占比，可拖拽。默认 45%（02 文档 §3.2）。 */
   const requestRatio = ref(0.45)
 
   const settingsOpen = ref(false)
-  /** 「新建」面板（标签栏 `+` 的落点，见 views/NewModal.vue）。 */
-  const newOpen = ref(false)
 
   /**
    * 「把焦点交给 URL 栏」的信号计数器。
@@ -73,9 +71,9 @@ export const useUiStore = defineStore('ui', () => {
    * 而且连续两次「新建请求」都要各自聚焦一次，布尔的 false→true→true 只会
    * 触发一次 watch。计数器天然幂等且可重复触发。
    *
-   * 为什么不让 AppBody 持 UrlBar 的 ref 直接调 focus()：发起方可能是新建面板、
-   * 命令面板、快捷键，全都不在 UrlBar 的父子链上（02 文档 §5.1「选完立刻进
-   * 主界面并聚焦 URL 栏」）。信号量比到处传 ref 干净。
+   * 为什么不让 AppBody 持 UrlBar 的 ref 直接调 focus()：发起方可能是标签栏、命令面板、快捷键，
+   * 全都不在 UrlBar 的父子链上（02 文档 §5.1「选完立刻进主界面并聚焦 URL 栏」）。信号量比到处传
+   * ref 干净。
    */
   const urlFocusSeq = ref(0)
   function focusUrl() {
@@ -105,7 +103,7 @@ export const useUiStore = defineStore('ui', () => {
 
   return {
     sidebarVisible, sidebarWidth, sidebarMaxW, layout, themeMode, requestRatio,
-    settingsOpen, newOpen, paletteOpen, spikeOpen, spikePanel,
+    settingsOpen, paletteOpen, spikeOpen, spikePanel,
     urlFocusSeq, focusUrl,
     systemDark, isDark, applyTheme, cycleLayout,
     setSidebarWidth, resetSidebarWidth, syncViewport,

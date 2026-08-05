@@ -284,11 +284,11 @@ body {
 input, textarea, [contenteditable], .a-selectable { user-select: text; }
 
 /* 焦点可见（PRD §10.4 无障碍要求）。
-   实色 outline，实测 4.65～5.39:1。Apogee 规范里的 7% alpha 光晕已被否决，
-   理由见文件头。 */
+   用实色 1px 内侧线保留键盘可见性，避免 2px 外扩边框压住密集控件。
+   Apogee 规范里的 7% alpha 光晕已被否决，理由见文件头。 */
 :focus-visible {
-  outline: 2px solid var(--a-focus);
-  outline-offset: 1px;
+  outline: 1px solid var(--a-focus);
+  outline-offset: -1px;
 }
 
 /* 方法标签 / 状态徽章的共用形态（02 文档 §7.2 双通道要求）。
