@@ -126,6 +126,23 @@ export interface WorkspaceRequest {
   spec: RequestSpec
 }
 
+export interface HistoryEntry {
+  id: string
+  createdAtMs: number
+  method: string
+  url: string
+  status?: number
+  sizeBytes: number
+  durationMs: number
+}
+
+export interface HistoryRecord {
+  id: string
+  createdAtMs: number
+  spec: RequestSpec
+  response: ResponseSummary
+}
+
 export type NodeKind = 'object' | 'array' | 'string' | 'number' | 'bool' | 'null'
 
 /** 扁平树节点。**没有 children 字段** —— 前端不做递归构造（03 文档 §4.4）。 */
@@ -281,6 +298,26 @@ export const ipc = {
   /** 取消一个正在执行的请求。返回 false 表示请求已结束或不存在。 */
   cancelRequest(handleId: string): Promise<boolean> {
     return call('cancel_request', { handleId })
+  },
+
+  historyRecord(createdAtMs: number, spec: RequestSpec, response: ResponseSummary): Promise<void> {
+    return call('history_record', { createdAtMs, spec, response })
+  },
+
+  historyList(): Promise<HistoryEntry[]> {
+    return call('history_list')
+  },
+
+  historyRead(historyId: string): Promise<HistoryRecord> {
+    return call('history_read', { historyId })
+  },
+
+  historyClear(): Promise<void> {
+    return call('history_clear')
+  },
+
+  curlImport(command: string): Promise<{ spec: RequestSpec; warnings: string[] }> {
+    return call('curl_import', { command })
   },
 }
 

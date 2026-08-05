@@ -54,6 +54,7 @@ onBeforeUnmount(() => stopWatching?.())
     <div class="spacer" />
 
     <button class="icon" type="button" title="Spike 面板" @click="ui.spikeOpen = true">S</button>
+    <button class="icon" type="button" title="请求历史" aria-label="请求历史" @click="ui.historyOpen = true">↶</button>
     <button class="icon" type="button" title="设置" @click="ui.settingsOpen = true">⚙</button>
     <button
       class="icon"

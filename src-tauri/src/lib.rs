@@ -71,6 +71,11 @@ pub fn run() {
             commands::workspace_delete_node,
             commands::workspace_create_environment,
             commands::workspace_save_environment,
+            commands::history_record,
+            commands::history_list,
+            commands::history_read,
+            commands::history_clear,
+            commands::curl_import,
         ])
         .setup(move |app| {
             let data_dir = app
@@ -118,9 +123,11 @@ fn install_panic_hook() {
 
 mod commands {
     use super::state::AppState;
+    use crate::workspace::{HistoryEntry, HistoryRecord};
+    use apogee_core::error::AppError;
     use apogee_core::request::RequestSpec;
-    use apogee_core::vars::Environment;
     use apogee_core::response::{ResponseSummary, TreeNode};
+    use apogee_core::vars::Environment;
     use apogee_core::workspace::{WorkspaceRequest, WorkspaceSnapshot};
     use serde::{Deserialize, Serialize};
     use std::path::PathBuf;
@@ -279,13 +286,10 @@ mod commands {
         spec: apogee_core::request::RequestSpec,
         ctx: Option<apogee_core::request::ExecContext>,
     ) -> Result<apogee_core::request::ExecHandle, String> {
-        let environment = match ctx
-            .as_ref()
-            .and_then(|item| item.environment_id.as_deref())
-        {
+        let environment = match ctx.as_ref().and_then(|item| item.environment_id.as_deref()) {
             Some(raw_id) => {
-                let environment_id = Uuid::parse_str(raw_id)
-                    .map_err(|_| format!("非法的环境 id：{raw_id}"))?;
+                let environment_id =
+                    Uuid::parse_str(raw_id).map_err(|_| format!("非法的环境 id：{raw_id}"))?;
                 Some(
                     state
                         .with_workspace(|repository| repository.read_environment(environment_id))
@@ -473,6 +477,55 @@ mod commands {
     ) -> Result<bool, String> {
         let id = parse_id(&handle_id)?;
         Ok(state.cancel_inflight(id))
+    }
+
+    #[tauri::command]
+    pub fn history_record(
+        state: State<'_, Arc<AppState>>,
+        created_at_ms: u64,
+        spec: apogee_core::request::RequestSpec,
+        response: ResponseSummary,
+    ) -> Result<(), String> {
+        let body = state.spool.path_for(response.id);
+        state
+            .with_workspace(|repository| {
+                repository.record_history(created_at_ms, spec, response, &body)
+            })
+            .map_err(|error| error.to_string())
+    }
+
+    #[tauri::command]
+    pub fn history_list(state: State<'_, Arc<AppState>>) -> Result<Vec<HistoryEntry>, String> {
+        state
+            .with_workspace(|repository| repository.list_history())
+            .map_err(|error| error.to_string())
+    }
+
+    #[tauri::command]
+    pub fn history_read(
+        state: State<'_, Arc<AppState>>,
+        history_id: String,
+    ) -> Result<HistoryRecord, String> {
+        let id = parse_id(&history_id)?;
+        let (mut record, body) = state
+            .with_workspace(|repository| repository.read_history(id))
+            .map_err(|error| error.to_string())?;
+        record.response = state
+            .restore_history_response(record.response, &body)
+            .map_err(|error| error.to_string())?;
+        Ok(record)
+    }
+
+    #[tauri::command]
+    pub fn history_clear(state: State<'_, Arc<AppState>>) -> Result<(), String> {
+        state
+            .with_workspace(|repository| repository.clear_history())
+            .map_err(|error| error.to_string())
+    }
+
+    #[tauri::command]
+    pub fn curl_import(command: String) -> Result<apogee_core::curl::CurlImportResult, AppError> {
+        apogee_core::curl::import(&command)
     }
 
     /// 读取当前工作区的扁平树。

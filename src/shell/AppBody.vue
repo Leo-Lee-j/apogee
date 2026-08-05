@@ -28,6 +28,8 @@ import { ipc } from '@/ipc'
 
 const Sidebar = defineAsyncComponent(() => import('@/components/sidebar/Sidebar.vue'))
 const SettingsModal = defineAsyncComponent(() => import('@/views/SettingsModal.vue'))
+const HistoryPanel = defineAsyncComponent(() => import('@/views/HistoryPanel.vue'))
+const CommandPalette = defineAsyncComponent(() => import('@/views/CommandPalette.vue'))
 const NewPanel = defineAsyncComponent(() => import('@/views/NewPanel.vue'))
 const S2Panel = defineAsyncComponent(() => import('@/spike/S2Panel.vue'))
 const S3Panel = defineAsyncComponent(() => import('@/spike/S3Panel.vue'))
@@ -222,6 +224,8 @@ function onKeydown(e: KeyboardEvent) {
     </div>
     <StatusBar />
     <SettingsModal v-if="ui.settingsOpen" />
+    <HistoryPanel v-if="ui.historyOpen" />
+    <CommandPalette v-if="ui.paletteOpen" />
   </div>
 </template>
 

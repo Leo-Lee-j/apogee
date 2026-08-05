@@ -63,6 +63,7 @@ export const useUiStore = defineStore('ui', () => {
   const requestRatio = ref(0.45)
 
   const settingsOpen = ref(false)
+  const historyOpen = ref(false)
 
   /**
    * 「把焦点交给 URL 栏」的信号计数器。
@@ -103,7 +104,7 @@ export const useUiStore = defineStore('ui', () => {
 
   return {
     sidebarVisible, sidebarWidth, sidebarMaxW, layout, themeMode, requestRatio,
-    settingsOpen, paletteOpen, spikeOpen, spikePanel,
+    settingsOpen, historyOpen, paletteOpen, spikeOpen, spikePanel,
     urlFocusSeq, focusUrl,
     systemDark, isDark, applyTheme, cycleLayout,
     setSidebarWidth, resetSidebarWidth, syncViewport,

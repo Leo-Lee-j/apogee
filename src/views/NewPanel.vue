@@ -4,6 +4,7 @@ import { AppAlert, AppButton, AppTag } from '@/components/ui'
 import NaiveThemeScope from '@/components/NaiveThemeScope.vue'
 import { useTabsStore } from '@/stores/tabs'
 import { useWorkspaceStore } from '@/stores/workspace'
+import { importCurl } from '@/features/curl'
 
 /**
  * 新建请求标签里的选项面板。
@@ -18,6 +19,9 @@ const workspace = useWorkspaceStore()
 const panel = ref<HTMLElement | null>(null)
 const actionError = ref('')
 const actionBusy = ref(false)
+const curlMode = ref(false)
+const curlCommand = ref('')
+const importWarnings = ref<string[]>([])
 
 const targetNode = computed(() => {
   const parentId = tabs.active?.newRequestParentId
@@ -67,6 +71,45 @@ async function savedRequest() {
   tabs.close(panelId)
 }
 
+function openCurlImport() {
+  curlMode.value = true
+  actionError.value = ''
+  void nextTick(() => panel.value?.querySelector<HTMLTextAreaElement>('.curl-input')?.focus())
+}
+
+async function applyCurlImport() {
+  const current = tabs.active
+  if (!current?.newPanel) return
+  actionError.value = ''
+  actionBusy.value = true
+  try {
+    const result = await importCurl(curlCommand.value)
+    const spec = result.spec
+    importWarnings.value = result.warnings
+    let title = '导入的请求'
+    try { title = new URL(spec.url).pathname.split('/').filter(Boolean).pop() || new URL(spec.url).hostname }
+    catch { /* 保留默认标题，URL 编辑器会继续允许用户修正。 */ }
+    tabs.patch(current.id, {
+      title,
+      method: spec.method,
+      url: spec.url,
+      params: spec.params ?? [],
+      pathParams: spec.pathParams ?? [],
+      headers: spec.headers ?? [],
+      body: spec.body ?? { type: 'none' },
+      auth: spec.auth ?? { type: 'none' },
+      settings: spec.settings ?? {},
+      newPanel: false,
+      newRequestParentId: undefined,
+      dirty: true,
+    })
+  } catch (error) {
+    actionError.value = error instanceof Error ? error.message : '无法解析这条 cURL 命令。'
+  } finally {
+    actionBusy.value = false
+  }
+}
+
 const GROUPS: { title: string; items: NewOption[] }[] = [
   {
     title: '请求',
@@ -96,8 +139,7 @@ const GROUPS: { title: string; items: NewOption[] }[] = [
         title: '粘贴 cURL',
         desc: '把一条 curl 命令还原成请求',
         icon: 'clipboard',
-        badge: '待请求模型',
-        reason: '请求模型尚未覆盖 Headers / Body / Auth 的完整导入，暂不提供半成品导入。',
+        run: openCurlImport,
       },
       {
         id: 'file',
@@ -220,7 +262,19 @@ onMounted(async () => {
         {{ actionError }}
       </AppAlert>
 
-      <div class="groups">
+      <div v-if="curlMode" class="curl-form">
+        <label for="curl-command">cURL 命令</label>
+        <textarea id="curl-command" v-model="curlCommand" class="curl-input" spellcheck="false" placeholder="curl 'https://api.example.com/users' --header 'Accept: application/json'" />
+        <AppAlert v-if="importWarnings.length" type="warning" :show-icon="false">
+          {{ importWarnings.join('；') }}
+        </AppAlert>
+        <div class="curl-actions">
+          <AppButton secondary :disabled="actionBusy" @click="curlMode = false">返回</AppButton>
+          <AppButton type="primary" :loading="actionBusy" @click="applyCurlImport">导入请求</AppButton>
+        </div>
+      </div>
+
+      <div v-else class="groups">
         <section v-for="group in GROUPS" :key="group.title">
           <h3 class="gt">{{ group.title }}</h3>
           <div class="grid">
@@ -329,6 +383,11 @@ onMounted(async () => {
   min-height: 0;
   padding: 0 16px 4px;
 }
+.curl-form { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 8px; padding: 8px 16px 16px; }
+.curl-form > label { color: var(--a-text-dim); font: var(--a-fw-medium) var(--a-fs-sm) var(--a-font-ui); }
+.curl-input { flex: 1 1 auto; min-height: 180px; resize: none; box-sizing: border-box; background: var(--a-bg-3); border: 1px solid var(--a-border); border-radius: var(--a-radius-md); color: var(--a-text); padding: 10px; font: var(--a-fs-sm)/1.6 var(--a-font-mono); }
+.curl-input:focus { outline: 2px solid var(--a-focus); outline-offset: -2px; }
+.curl-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .gt {
   margin: 8px 0 6px;
   font: var(--a-fw-medium) var(--a-fs-xs) / 1 var(--a-font-ui);

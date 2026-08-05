@@ -20,6 +20,9 @@ thiserror = "2.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_yaml_ng = "0.10"
+base64 = "0.22"
+curl-parser = { version = "0.6", default-features = false, features = ["uri"] }
+url = "2.5"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util", "time", "sync"] }
 # 仅用于 `FutureExt::catch_unwind`,把 spawned task 的 panic 转成 `request:error`
 # 事件而非 abort 整进程(`panic = "abort"` 下)。Release 不引入异步运行时,体积增量可忽略。
@@ -38,7 +41,7 @@ uuid = { version = "1", features = ["v4", "serde"] }
 # Windows 上编译，而开发机与 CI 都不装。改用 rustls 的 ring 后端（见下条），
 # ring 0.17 在 windows-msvc 上自带预生成汇编，只要 MSVC 工具链即可。
 #
-# 不开 `multipart`：FormData body 本切片不支持，开了只是白增体积（PRD §5 包体预算）。
+# `multipart` + `stream` 用于 FormData/Binary 大文件流式上传；新增依赖体积需纳入 S5 门禁。
 reqwest = { version = "0.13", default-features = false, features = [
     "rustls-no-provider",
     "rustls-native-certs",   # 用系统根证书，企业内网自签 CA 才能开箱可用
@@ -46,11 +49,14 @@ reqwest = { version = "0.13", default-features = false, features = [
     "gzip",
     "brotli",
     "deflate",
+    "multipart",
+    "stream",
 ] }
 # rustls 的加密后端。显式选 ring 而不是默认的 aws-lc-rs，理由见上。
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tokio-util = { version = "0.7", features = ["io"] }
 
 # ── 性能预算相关（PRD §5 / 03 文档 §4.7）─────────────────────────────
 # opt-level = "z" + lto = "fat" + codegen-units = 1 + panic = "abort" + strip

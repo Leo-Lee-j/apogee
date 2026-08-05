@@ -1,5 +1,6 @@
 import {
   ipc,
+  inTauri,
   normalizeError,
   onRequestEvents,
   type RequestSpec,
@@ -55,7 +56,7 @@ export function useRequest() {
   const workspace = useWorkspaceStore()
   const sending = ref(false)
   /** 当前在飞的请求：句柄 id → 它属于哪个标签。 */
-  const active = ref<{ handle: string; tabId: string } | null>(null)
+  const active = ref<{ handle: string; tabId: string; spec: RequestSpec; startedAt: number } | null>(null)
   /** 还没找到主人的终结事件，按句柄 id 存。见文件头注释的竞态 2。 */
   const orphans = new Map<string, Settlement>()
 
@@ -84,13 +85,17 @@ export function useRequest() {
   }
 
   /** 把一个终结状态落到 UI 上，并复位发送状态。 */
-  function apply(tabId: string, settlement: Settlement) {
+  function apply(tabId: string, settlement: Settlement, spec?: RequestSpec, startedAt?: number) {
     if (settlement.kind === 'done') {
       tabs.patch(tabId, {
         response: settlement.event.response,
         error: null,
         dirty: false,
       })
+      if (inTauri && spec) {
+        void ipc.historyRecord(startedAt ?? Date.now(), spec, settlement.event.response)
+          .catch((error) => console.error('[history] 保存请求历史失败', error))
+      }
     } else if (settlement.kind === 'error') {
       // 错误进入 Tab 状态，由 ResponsePanel 渲染三段式错误，而不是只留在控制台。
       tabs.patch(tabId, { response: null, error: settlement.event.error })
@@ -109,7 +114,7 @@ export function useRequest() {
   function settle(id: string, settlement: Settlement) {
     const current = active.value
     if (current && current.handle === id) {
-      apply(current.tabId, settlement)
+      apply(current.tabId, settlement, current.spec, current.startedAt)
       return
     }
     if (orphans.size >= MAX_ORPHANS) {
@@ -163,6 +168,7 @@ export function useRequest() {
       auth: tab.auth,
       settings: tab.settings,
     }
+    const startedAt = Date.now()
 
     // 新请求开始后清除上一次错误；旧响应先保留，直到新请求成功或失败。
     tabs.patch(tab.id, { error: null })
@@ -194,9 +200,9 @@ export function useRequest() {
       if (early) {
         // 事件跑在句柄前面了，在这里补做。
         orphans.delete(handle.id)
-        apply(tab.id, early)
+        apply(tab.id, early, spec, startedAt)
       } else {
-        active.value = { handle: handle.id, tabId: tab.id }
+        active.value = { handle: handle.id, tabId: tab.id, spec, startedAt }
       }
     } catch (error) {
       // invoke 本身失败（命令注册问题等）也进入同一套错误展示。

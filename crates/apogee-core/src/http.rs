@@ -15,14 +15,14 @@
 
 use crate::error::{AppError, ErrorKind, Hint};
 use crate::model::{ResponseMeta, Timing};
-use crate::request::{
-    ApiKeyIn, AuthConfig, Body, HttpVersion, RequestSpec, ResolvedSettings,
-};
+use crate::request::{ApiKeyIn, AuthConfig, Body, HttpVersion, RequestSpec, ResolvedSettings};
 use crate::response::Spool;
 use crate::vars::{resolve_request, Environment};
 use std::collections::{HashMap, HashSet};
+use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
+use tokio_util::io::ReaderStream;
 use uuid::Uuid;
 
 /// 单次请求允许落盘的最大 body。超过则截断并置 `truncated`。
@@ -41,8 +41,9 @@ pub const MAX_BODY_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 pub fn build_url(spec: &RequestSpec) -> Result<String, AppError> {
     let mut url = spec.url.trim().to_string();
     if url.is_empty() {
-        return Err(AppError::new(ErrorKind::Parse, "URL 为空")
-            .hint(Hint::new("在地址栏输入完整 URL，例如 https://api.example.com/users")));
+        return Err(AppError::new(ErrorKind::Parse, "URL 为空").hint(Hint::new(
+            "在地址栏输入完整 URL，例如 https://api.example.com/users",
+        )));
     }
 
     // 没写协议时补 https。用户在地址栏打 `api.example.com/users` 是极常见的输入，
@@ -157,14 +158,8 @@ pub struct EncodedBody {
 ///
 /// 注意这里**不流式**：请求体来自用户在编辑器里敲的内容，量级是 KB。
 /// 需要流式的是 `Body::Binary`（上传大文件）和 `FormData` 的文件项，
-/// 两者本切片都不支持，返回明确错误而不是静默发空 body。
+/// 文件 body 由 `apply_body` 走流式路径，不会调用本函数。
 pub fn encode_body(body: &Body) -> Result<EncodedBody, AppError> {
-    let unsupported = |what: &str, why: &str| {
-        AppError::new(ErrorKind::Parse, format!("{what}暂不支持"))
-            .detail(why.to_string())
-            .hint(Hint::new("先用 JSON、Text 或 UrlEncoded body"))
-    };
-
     Ok(match body {
         Body::None => EncodedBody {
             bytes: Vec::new(),
@@ -230,15 +225,15 @@ pub fn encode_body(body: &Body) -> Result<EncodedBody, AppError> {
             }
         }
         Body::FormData { .. } => {
-            return Err(unsupported(
-                "FormData body",
-                "multipart 需要流式上传文件项，reqwest 的 multipart feature 未启用（PRD §5 包体预算）",
+            return Err(AppError::new(
+                ErrorKind::Parse,
+                "FormData 必须通过流式请求构造",
             ))
         }
         Body::Binary { .. } => {
-            return Err(unsupported(
-                "Binary body",
-                "二进制上传需要流式读取本地文件，将与 FormData 一并实现",
+            return Err(AppError::new(
+                ErrorKind::Parse,
+                "Binary 必须通过流式请求构造",
             ))
         }
     })
@@ -332,13 +327,19 @@ mod tests {
         let mut s = spec("https://a.test/users/:id/repos/:name");
         s.path_params = vec![kv("id", "42", true), kv("name", "org/repo", true)];
         // path 分量保留 `/`，否则 `org/repo` 会变成 org%2Frepo 而打断路径结构
-        assert_eq!(build_url(&s).unwrap(), "https://a.test/users/42/repos/org/repo");
+        assert_eq!(
+            build_url(&s).unwrap(),
+            "https://a.test/users/42/repos/org/repo"
+        );
     }
 
     #[test]
     fn json_body_sets_content_type_and_passes_raw() {
         // 刻意不校验 JSON：调试时经常要故意发不合法的 JSON 看服务端反应。
-        let got = encode_body(&Body::Json { content: "{not valid".into() }).unwrap();
+        let got = encode_body(&Body::Json {
+            content: "{not valid".into(),
+        })
+        .unwrap();
         assert_eq!(got.bytes, b"{not valid");
         assert_eq!(got.content_type.as_deref(), Some("application/json"));
     }
@@ -365,7 +366,11 @@ mod tests {
     #[test]
     fn urlencoded_skips_disabled_and_encodes() {
         let got = encode_body(&Body::UrlEncoded {
-            rows: vec![kv("a", "1 2", true), kv("skip", "x", false), kv("", "y", true)],
+            rows: vec![
+                kv("a", "1 2", true),
+                kv("skip", "x", false),
+                kv("", "y", true),
+            ],
         })
         .unwrap();
         assert_eq!(String::from_utf8(got.bytes).unwrap(), "a=1%202");
@@ -402,14 +407,35 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_bodies_fail_loudly_rather_than_sending_empty() {
-        for body in [
-            Body::FormData { rows: Vec::new() },
-            Body::Binary { path: "/tmp/x".into() },
-        ] {
-            let error = encode_body(&body).unwrap_err();
-            assert!(!error.hints.is_empty(), "{error:?} 缺少可操作建议");
-        }
+    fn file_bodies_build_streaming_requests() {
+        let path = std::env::temp_dir().join(format!("apogee-upload-{}", Uuid::new_v4()));
+        std::fs::write(&path, b"stream me").unwrap();
+
+        let mut binary = spec("https://a.test/upload");
+        binary.method = "POST".into();
+        binary.body = Body::Binary { path: path.clone() };
+        let request = built(&binary);
+        assert_eq!(header_values(&request, "content-length"), vec!["9"]);
+        assert!(request.body().is_some());
+        drop(request);
+
+        let mut multipart = spec("https://a.test/upload");
+        multipart.method = "POST".into();
+        multipart.body = Body::FormData {
+            rows: vec![KeyValue {
+                enabled: true,
+                key: "attachment".into(),
+                value: path.to_string_lossy().into_owned(),
+                description: None,
+                kind: ValueKind::File,
+            }],
+        };
+        let request = built(&multipart);
+        assert!(header_values(&request, "content-type")[0]
+            .starts_with("multipart/form-data; boundary="));
+        assert!(request.body().is_some());
+        drop(request);
+        std::fs::remove_file(path).unwrap();
     }
 
     // ── 请求组装 ─────────────────────────────────────────────────────
@@ -510,9 +536,7 @@ mod tests {
     #[test]
     fn auth_panel_still_applies_when_user_wrote_no_header() {
         let mut s = spec("https://a.test/x");
-        s.auth = AuthConfig::Bearer {
-            token: "t".into(),
-        };
+        s.auth = AuthConfig::Bearer { token: "t".into() };
         assert_eq!(header_values(&built(&s), "authorization"), vec!["Bearer t"]);
     }
 
@@ -535,9 +559,7 @@ mod tests {
     fn disabled_user_header_does_not_suppress_auth() {
         // 勾掉的头等于不存在，此时鉴权面板应该照常生效。
         let mut s = spec("https://a.test/x");
-        s.auth = AuthConfig::Bearer {
-            token: "t".into(),
-        };
+        s.auth = AuthConfig::Bearer { token: "t".into() };
         s.headers = vec![kv("Authorization", "Bearer disabled", false)];
         assert_eq!(header_values(&built(&s), "authorization"), vec!["Bearer t"]);
     }
@@ -753,10 +775,7 @@ async fn execute_inner(
     Ok(Some(ResponseMeta {
         id,
         status: status.as_u16(),
-        status_text: status
-            .canonical_reason()
-            .unwrap_or("")
-            .to_string(),
+        status_text: status.canonical_reason().unwrap_or("").to_string(),
         http_version,
         headers,
         size_bytes,
@@ -791,8 +810,11 @@ fn build_request(
 ) -> Result<(reqwest::RequestBuilder, String), AppError> {
     let url = build_url(spec)?;
     let method = reqwest::Method::from_bytes(spec.method.trim().as_bytes()).map_err(|_| {
-        AppError::new(ErrorKind::Parse, format!("非法的 HTTP 方法：{}", spec.method))
-            .hint(Hint::new("方法名只能含 token 字符，如 GET / POST / PATCH"))
+        AppError::new(
+            ErrorKind::Parse,
+            format!("非法的 HTTP 方法：{}", spec.method),
+        )
+        .hint(Hint::new("方法名只能含 token 字符，如 GET / POST / PATCH"))
     })?;
 
     let mut builder = client.request(method, &url);
@@ -808,14 +830,7 @@ fn build_request(
 
     builder = apply_auth(builder, &spec.auth, &user_headers);
 
-    let encoded = encode_body(&spec.body)?;
-    if let Some(content_type) = encoded.content_type.as_deref() {
-        // 用户手写了 Content-Type 就不再补 body 推导出来的那个。两个
-        // `Content-Type` 一起发出去是明确非法的请求，不少服务端直接 400。
-        if !user_headers.contains("content-type") {
-            builder = builder.header(reqwest::header::CONTENT_TYPE, content_type);
-        }
-    }
+    builder = apply_body(builder, &spec.body, &user_headers)?;
     for header in spec
         .headers
         .iter()
@@ -823,11 +838,90 @@ fn build_request(
     {
         builder = builder.header(header.key.trim(), &header.value);
     }
-    if !encoded.bytes.is_empty() {
-        builder = builder.body(encoded.bytes);
-    }
-
     Ok((builder, url))
+}
+
+fn open_stream(path: &Path) -> Result<(reqwest::Body, u64), AppError> {
+    let file = std::fs::File::open(path).map_err(|error| {
+        AppError::new(
+            ErrorKind::Io,
+            format!("无法打开上传文件：{}", path.display()),
+        )
+        .detail(error.to_string())
+        .hint(Hint::new("检查文件路径、权限以及文件是否仍然存在"))
+    })?;
+    let length = file
+        .metadata()
+        .map_err(|error| {
+            AppError::new(
+                ErrorKind::Io,
+                format!("无法读取上传文件信息：{}", path.display()),
+            )
+            .detail(error.to_string())
+        })?
+        .len();
+    let stream = ReaderStream::new(tokio::fs::File::from_std(file));
+    Ok((reqwest::Body::wrap_stream(stream), length))
+}
+
+fn apply_body(
+    mut builder: reqwest::RequestBuilder,
+    body: &Body,
+    user_headers: &HashSet<String>,
+) -> Result<reqwest::RequestBuilder, AppError> {
+    match body {
+        Body::Binary { path } => {
+            if path.as_os_str().is_empty() {
+                return Err(AppError::new(ErrorKind::Parse, "Binary body 尚未选择文件")
+                    .hint(Hint::new("在 Body 面板填写要上传的本地文件路径")));
+            }
+            let (stream, length) = open_stream(path)?;
+            Ok(builder
+                .body(stream)
+                .header(reqwest::header::CONTENT_LENGTH, length))
+        }
+        Body::FormData { rows } => {
+            if user_headers.contains("content-type") {
+                return Err(AppError::new(ErrorKind::Parse, "form-data 不能手动设置 Content-Type")
+                    .detail("multipart boundary 必须由客户端生成，手写 Content-Type 会导致服务端无法拆分字段。")
+                    .hint(Hint::new("禁用 Header 面板中的 Content-Type 后重试")));
+            }
+            let mut form = reqwest::multipart::Form::new();
+            for row in rows
+                .iter()
+                .filter(|row| row.enabled && !row.key.trim().is_empty())
+            {
+                match row.kind {
+                    crate::model::ValueKind::File => {
+                        let path = Path::new(&row.value);
+                        let (stream, length) = open_stream(path)?;
+                        let file_name = path
+                            .file_name()
+                            .and_then(|name| name.to_str())
+                            .unwrap_or("upload.bin")
+                            .to_string();
+                        let part = reqwest::multipart::Part::stream_with_length(stream, length)
+                            .file_name(file_name);
+                        form = form.part(row.key.clone(), part);
+                    }
+                    _ => form = form.text(row.key.clone(), row.value.clone()),
+                }
+            }
+            Ok(builder.multipart(form))
+        }
+        _ => {
+            let encoded = encode_body(body)?;
+            if let Some(content_type) = encoded.content_type.as_deref() {
+                if !user_headers.contains("content-type") {
+                    builder = builder.header(reqwest::header::CONTENT_TYPE, content_type);
+                }
+            }
+            if !encoded.bytes.is_empty() {
+                builder = builder.body(encoded.bytes);
+            }
+            Ok(builder)
+        }
+    }
 }
 
 /// 把响应体边收边写盘。返回 `None` 表示被取消。
@@ -959,9 +1053,7 @@ fn collect_headers(map: &reqwest::header::HeaderMap) -> Vec<(String, String)> {
 ///
 /// 分开是因为用途不同：MIME 决定用哪个查看器（JSON 树 / 图片 / 下载），
 /// charset 决定怎么解码字节。前端的 `TextDecoder` 需要后者。
-fn parse_content_type(
-    map: &reqwest::header::HeaderMap,
-) -> (Option<String>, Option<String>) {
+fn parse_content_type(map: &reqwest::header::HeaderMap) -> (Option<String>, Option<String>) {
     let Some(raw) = map
         .get(reqwest::header::CONTENT_TYPE)
         .and_then(|value| value.to_str().ok())
@@ -1009,7 +1101,10 @@ fn map_reqwest_error(error: &reqwest::Error, context: &str) -> AppError {
         return AppError::new(ErrorKind::Http, "重定向循环或过多")
             .detail(format!("{context}：{}", error))
             .hint(Hint::new("检查重定向链是否形成了环"))
-            .hint(Hint::with_action("关闭跟随重定向", "request.settings.redirect"));
+            .hint(Hint::with_action(
+                "关闭跟随重定向",
+                "request.settings.redirect",
+            ));
     }
 
     // 其余统一落进 Http —— dnstype / tls / io / body 的细分等 Tauri 环境

@@ -32,6 +32,7 @@ pub struct AppState {
     pub store: ResponseStore,
     /// 只存元信息（体积、耗时），**不存 body**。
     pub(crate) meta: RwLock<Vec<(Uuid, u64, Timing, Option<String>)>>,
+    semantic_meta: RwLock<HashMap<Uuid, ResponseSummary>>,
     /// 工作区文件仓库。启动时由 Tauri setup 根据 app data 目录初始化。
     pub workspace: RwLock<Option<WorkspaceRepository>>,
     /// 请求中注册表。key 是 ExecHandle.id（= 响应 id）。
@@ -45,6 +46,7 @@ impl AppState {
             spool: Spool::new(root)?,
             store: ResponseStore::new(),
             meta: RwLock::new(Vec::new()),
+            semantic_meta: RwLock::new(HashMap::new()),
             workspace: RwLock::new(None),
             in_flight: RwLock::new(HashMap::new()),
         })
@@ -175,6 +177,19 @@ impl AppState {
     }
 
     pub fn summary(&self, id: Uuid) -> Result<ResponseSummary> {
+        if let Some(mut summary) = self
+            .semantic_meta
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(&id)
+            .cloned()
+        {
+            let index = self.store.index(id);
+            summary.indexed = index.is_some();
+            summary.total_nodes = index.as_ref().map(|item| item.total_nodes());
+            summary.index_bytes = index.as_ref().map(|item| item.estimated_bytes());
+            return Ok(summary);
+        }
         let m = self
             .meta
             .read()
@@ -217,6 +232,39 @@ impl AppState {
         summary.indexed = index.is_some();
         summary.total_nodes = index.as_ref().map(|item| item.total_nodes());
         summary.index_bytes = index.as_ref().map(|item| item.estimated_bytes());
+        self.semantic_meta
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(meta.id, summary.clone());
+        Ok(summary)
+    }
+
+    pub fn restore_history_response(
+        &self,
+        mut summary: ResponseSummary,
+        body: &std::path::Path,
+    ) -> Result<ResponseSummary> {
+        let target = self.spool.path_for(summary.id);
+        if !target.exists() {
+            std::fs::copy(body, &target)
+                .with_context(|| format!("恢复历史响应体失败：{}", body.display()))?;
+        }
+        summary.indexed = false;
+        summary.total_nodes = None;
+        summary.index_bytes = None;
+        self.meta
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .push((
+                summary.id,
+                summary.size_bytes,
+                summary.timing,
+                summary.content_type.clone(),
+            ));
+        self.semantic_meta
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(summary.id, summary.clone());
         Ok(summary)
     }
 

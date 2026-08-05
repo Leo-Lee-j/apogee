@@ -17,13 +17,15 @@
 
 use anyhow::{bail, Context, Result};
 use apogee_core::request::{AuthConfig, Body, RequestSettings, RequestSpec};
+use apogee_core::response::ResponseSummary;
 use apogee_core::vars::Environment;
 use apogee_core::workspace::{
     CollectionEntry, ContainerDocument, EnvironmentEntry, PersistedRequest, WorkspaceManifest,
-    WorkspaceNode, WorkspaceNodeKind, WorkspaceRequest, WorkspaceSnapshot, WORKSPACE_FORMAT_VERSION,
+    WorkspaceNode, WorkspaceNodeKind, WorkspaceRequest, WorkspaceSnapshot,
+    WORKSPACE_FORMAT_VERSION,
 };
 use serde::de::DeserializeOwned;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use uuid::Uuid;
@@ -31,6 +33,29 @@ use uuid::Uuid;
 const COLLECTION_MARKER: &str = "_collection.yaml";
 const FOLDER_MARKER: &str = "_folder.yaml";
 const ENVIRONMENT_DIR: &str = "environments";
+const HISTORY_DIR: &str = "history";
+const HISTORY_LIMIT: usize = 200;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryEntry {
+    pub id: Uuid,
+    pub created_at_ms: u64,
+    pub method: String,
+    pub url: String,
+    pub status: Option<u16>,
+    pub size_bytes: u64,
+    pub duration_ms: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryRecord {
+    pub id: Uuid,
+    pub created_at_ms: u64,
+    pub spec: RequestSpec,
+    pub response: ResponseSummary,
+}
 
 pub struct WorkspaceRepository {
     root: PathBuf,
@@ -46,6 +71,7 @@ impl WorkspaceRepository {
         let root = root.into();
         fs::create_dir_all(root.join("collections"))?;
         fs::create_dir_all(root.join(ENVIRONMENT_DIR))?;
+        fs::create_dir_all(root.join(HISTORY_DIR))?;
         let repository = Self { root };
         if repository.manifest_path().exists() {
             repository.read_manifest()?;
@@ -92,6 +118,104 @@ impl WorkspaceRepository {
         })
     }
 
+    pub fn record_history(
+        &self,
+        created_at_ms: u64,
+        spec: RequestSpec,
+        response: ResponseSummary,
+        body_source: &Path,
+    ) -> Result<()> {
+        let id = response.id;
+        let directory = self.root.join(HISTORY_DIR);
+        fs::create_dir_all(&directory)?;
+        let body_target = directory.join(format!("{id}.body"));
+        let body_temp = directory.join(format!(".{id}.body.tmp"));
+        fs::copy(body_source, &body_temp).with_context(|| "复制历史响应体失败")?;
+        if body_target.exists() {
+            fs::remove_file(&body_target)?;
+        }
+        fs::rename(body_temp, &body_target)?;
+        write_yaml(
+            &directory.join(format!("{id}.yaml")),
+            &HistoryRecord {
+                id,
+                created_at_ms,
+                spec,
+                response,
+            },
+        )?;
+        self.trim_history()
+    }
+
+    pub fn list_history(&self) -> Result<Vec<HistoryEntry>> {
+        let mut records = self.read_history_records()?;
+        records.sort_by_key(|record| std::cmp::Reverse(record.created_at_ms));
+        Ok(records
+            .into_iter()
+            .map(|record| HistoryEntry {
+                id: record.id,
+                created_at_ms: record.created_at_ms,
+                method: record.spec.method,
+                url: record.spec.url,
+                status: record.response.status,
+                size_bytes: record.response.size_bytes,
+                duration_ms: record.response.timing.total_ms,
+            })
+            .collect())
+    }
+
+    pub fn read_history(&self, id: Uuid) -> Result<(HistoryRecord, PathBuf)> {
+        let directory = self.root.join(HISTORY_DIR);
+        let record: HistoryRecord = read_yaml(&directory.join(format!("{id}.yaml")))?;
+        if record.id != id {
+            bail!("历史记录 id 不一致：{id}");
+        }
+        let body = directory.join(format!("{id}.body"));
+        if !body.exists() {
+            bail!("历史响应体不存在：{id}");
+        }
+        Ok((record, body))
+    }
+
+    pub fn clear_history(&self) -> Result<()> {
+        let directory = self.root.join(HISTORY_DIR);
+        if directory.exists() {
+            fs::remove_dir_all(&directory)?;
+        }
+        fs::create_dir_all(directory)?;
+        Ok(())
+    }
+
+    fn read_history_records(&self) -> Result<Vec<HistoryRecord>> {
+        let directory = self.root.join(HISTORY_DIR);
+        let mut records = Vec::new();
+        for entry in fs::read_dir(directory)? {
+            let path = entry?.path();
+            if path
+                .extension()
+                .is_some_and(|extension| extension == "yaml")
+            {
+                records.push(read_yaml(&path)?);
+            }
+        }
+        Ok(records)
+    }
+
+    fn trim_history(&self) -> Result<()> {
+        let mut records = self.read_history_records()?;
+        records.sort_by_key(|record| std::cmp::Reverse(record.created_at_ms));
+        for record in records.into_iter().skip(HISTORY_LIMIT) {
+            let directory = self.root.join(HISTORY_DIR);
+            for extension in ["yaml", "body"] {
+                let path = directory.join(format!("{}.{}", record.id, extension));
+                if path.exists() {
+                    fs::remove_file(path)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub fn read_request(&self, id: Uuid) -> Result<WorkspaceRequest> {
         let location = self.locate(id)?;
         if !matches!(location.node.kind, WorkspaceNodeKind::Request) {
@@ -110,10 +234,15 @@ impl WorkspaceRepository {
         if !manifest.environments.iter().any(|entry| entry.id == id) {
             bail!("未知的环境：{id}");
         }
-        let environment: Environment = read_yaml(&self.environment_path(id))
-            .with_context(|| format!("读取环境文件失败：{}", self.environment_path(id).display()))?;
+        let environment: Environment =
+            read_yaml(&self.environment_path(id)).with_context(|| {
+                format!("读取环境文件失败：{}", self.environment_path(id).display())
+            })?;
         if environment.id != id {
-            bail!("环境文件 {} 的 id 不一致", self.environment_path(id).display());
+            bail!(
+                "环境文件 {} 的 id 不一致",
+                self.environment_path(id).display()
+            );
         }
         Ok(environment)
     }
@@ -455,9 +584,17 @@ impl WorkspaceRepository {
             .iter()
             .map(|entry| {
                 let environment: Environment = read_yaml(&self.environment_path(entry.id))
-                    .with_context(|| format!("读取环境文件失败：{}", self.environment_path(entry.id).display()))?;
+                    .with_context(|| {
+                        format!(
+                            "读取环境文件失败：{}",
+                            self.environment_path(entry.id).display()
+                        )
+                    })?;
                 if environment.id != entry.id {
-                    bail!("环境文件 {} 的 id 与工作区清单不一致", self.environment_path(entry.id).display());
+                    bail!(
+                        "环境文件 {} 的 id 与工作区清单不一致",
+                        self.environment_path(entry.id).display()
+                    );
                 }
                 Ok(environment)
             })
@@ -465,9 +602,7 @@ impl WorkspaceRepository {
     }
 
     fn environment_path(&self, id: Uuid) -> PathBuf {
-        self.root
-            .join(ENVIRONMENT_DIR)
-            .join(format!("{id}.yaml"))
+        self.root.join(ENVIRONMENT_DIR).join(format!("{id}.yaml"))
     }
 
     fn manifest_path(&self) -> PathBuf {
@@ -545,5 +680,44 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
             Ok(())
         }
         Err(rename_error) => Err(rename_error.into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use apogee_core::model::Timing;
+
+    #[test]
+    fn history_round_trip_preserves_request_response_and_body() {
+        let root = std::env::temp_dir().join(format!("apogee-history-test-{}", Uuid::new_v4()));
+        let repository = WorkspaceRepository::open(&root).unwrap();
+        let response_id = Uuid::new_v4();
+        let source = root.join("source.body");
+        fs::write(&source, br#"{"ok":true}"#).unwrap();
+        let mut response = ResponseSummary::without_http(
+            response_id,
+            11,
+            Timing {
+                total_ms: 12.5,
+                ..Default::default()
+            },
+        );
+        response.status = Some(200);
+        let spec = default_request_spec();
+
+        repository
+            .record_history(1234, spec, response, &source)
+            .unwrap();
+        let listed = repository.list_history().unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].status, Some(200));
+        let (record, body) = repository.read_history(response_id).unwrap();
+        assert_eq!(record.created_at_ms, 1234);
+        assert_eq!(fs::read(body).unwrap(), br#"{"ok":true}"#);
+
+        repository.clear_history().unwrap();
+        assert!(repository.list_history().unwrap().is_empty());
+        fs::remove_dir_all(root).unwrap();
     }
 }

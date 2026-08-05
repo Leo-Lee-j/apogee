@@ -16,6 +16,9 @@ anyhow.workspace = true
 thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+base64.workspace = true
+curl-parser.workspace = true
+url.workspace = true
 uuid.workspace = true
 tracing.workspace = true
 # HTTP 执行放在本 crate 而不是 src-tauri，正是上面那条约束的用途：
@@ -25,3 +28,4 @@ rustls.workspace = true
 # 只用到 sync（取消信号）与 time（超时）。这是本 crate 第一次直接依赖 tokio；
 # 在此之前 tokio 只是 tauri 的传递依赖。
 tokio = { workspace = true }
+tokio-util.workspace = true

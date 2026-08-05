@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import type { Body, KeyValue } from '@/ipc'
+import type { AuthConfig, Body, KeyValue } from '@/ipc'
 import { useTabsStore, type Tab } from '@/stores/tabs'
+import { exportCurl } from '@/features/curl'
 
 /**
  * 请求编辑区 —— v0.1 先落地 Params、Headers、Body 三条发送主链。
@@ -12,13 +13,26 @@ import { useTabsStore, type Tab } from '@/stores/tabs'
 const TABS = ['Params', 'Headers', 'Body', 'Auth', 'Scripts', 'Settings'] as const
 type PanelTab = (typeof TABS)[number]
 type RowField = 'params' | 'pathParams' | 'headers'
-type BodyType = 'none' | 'json' | 'text'
+type BodyType = Body['type']
 
 type BodyOption = { type: BodyType; label: string }
 const BODY_TYPES: BodyOption[] = [
   { type: 'none', label: 'none' },
   { type: 'json', label: 'JSON' },
   { type: 'text', label: 'raw' },
+  { type: 'formData', label: 'form-data' },
+  { type: 'urlEncoded', label: 'x-www-form-urlencoded' },
+  { type: 'binary', label: 'binary' },
+  { type: 'graphQl', label: 'GraphQL' },
+]
+
+type AuthType = AuthConfig['type']
+const AUTH_TYPES: { type: AuthType; label: string }[] = [
+  { type: 'inherit', label: '继承' },
+  { type: 'none', label: '无鉴权' },
+  { type: 'basic', label: 'Basic Auth' },
+  { type: 'bearer', label: 'Bearer Token' },
+  { type: 'apiKey', label: 'API Key' },
 ]
 
 interface EditorSection {
@@ -31,6 +45,7 @@ interface EditorSection {
 const tabs = useTabsStore()
 const tab = computed(() => tabs.active)
 const current = ref<PanelTab>('Params')
+const exportState = ref('')
 
 const activeParamCount = computed(() => {
   const currentTab = tab.value
@@ -88,6 +103,7 @@ const textContentType = computed(() =>
 const bodyPlaceholder = computed(() =>
   bodyType.value === 'json' ? '{\n  "key": "value"\n}' : '输入原始请求体',
 )
+const auth = computed<AuthConfig>(() => tab.value?.auth ?? { type: 'none' })
 
 function patchTab(delta: Partial<Tab>) {
   const currentTab = tab.value
@@ -150,12 +166,22 @@ function setBodyType(nextType: BodyType) {
     nextBody = { type: 'none' }
   } else if (nextType === 'json') {
     nextBody = { type: 'json', content }
-  } else {
+  } else if (nextType === 'text') {
     nextBody = {
       type: 'text',
       content,
       contentType: currentBody.type === 'text' ? currentBody.contentType : 'text/plain',
     }
+  } else if (nextType === 'formData') {
+    nextBody = { type: 'formData', rows: currentBody.type === 'formData' ? currentBody.rows : [] }
+  } else if (nextType === 'urlEncoded') {
+    nextBody = { type: 'urlEncoded', rows: currentBody.type === 'urlEncoded' ? currentBody.rows : [] }
+  } else if (nextType === 'binary') {
+    nextBody = { type: 'binary', path: currentBody.type === 'binary' ? currentBody.path : '' }
+  } else {
+    nextBody = currentBody.type === 'graphQl'
+      ? currentBody
+      : { type: 'graphQl', query: '', variables: '{}', operationName: undefined }
   }
 
   patchTab({ body: nextBody })
@@ -179,6 +205,64 @@ function updateTextContentType(event: Event) {
     },
   })
 }
+
+function bodyRows(): KeyValue[] {
+  return body.value.type === 'formData' || body.value.type === 'urlEncoded' ? body.value.rows : []
+}
+
+function patchBodyRows(rows: KeyValue[]) {
+  if (body.value.type === 'formData') patchTab({ body: { type: 'formData', rows } })
+  else if (body.value.type === 'urlEncoded') patchTab({ body: { type: 'urlEncoded', rows } })
+}
+
+function updateBodyRow(index: number, delta: Partial<KeyValue>) {
+  patchBodyRows(bodyRows().map((row, rowIndex) => rowIndex === index ? { ...row, ...delta } : row))
+}
+
+function addBodyRow() {
+  patchBodyRows([...bodyRows(), { enabled: true, key: '', value: '', description: '', kind: 'text' }])
+}
+
+function removeBodyRow(index: number) {
+  patchBodyRows(bodyRows().filter((_, rowIndex) => rowIndex !== index))
+}
+
+function patchBodyField(field: string, value: string) {
+  const currentBody = body.value
+  if (currentBody.type === 'binary' && field === 'path') {
+    patchTab({ body: { ...currentBody, path: value } })
+  } else if (currentBody.type === 'graphQl') {
+    patchTab({ body: { ...currentBody, [field]: value || (field === 'operationName' ? undefined : '') } })
+  }
+}
+
+function setAuthType(type: AuthType) {
+  const currentAuth = auth.value
+  let next: AuthConfig
+  if (type === 'inherit' || type === 'none') next = { type }
+  else if (type === 'basic') next = currentAuth.type === 'basic' ? currentAuth : { type, username: '', password: '' }
+  else if (type === 'bearer') next = currentAuth.type === 'bearer' ? currentAuth : { type, token: '' }
+  else next = currentAuth.type === 'apiKey'
+    ? currentAuth
+    : { type, key: '', value: '', location: 'header' }
+  patchTab({ auth: next })
+}
+
+function patchAuth(delta: Record<string, string>) {
+  patchTab({ auth: { ...auth.value, ...delta } as AuthConfig })
+}
+
+async function copyCurl() {
+  const currentTab = tab.value
+  if (!currentTab) return
+  try {
+    await navigator.clipboard.writeText(exportCurl(currentTab))
+    exportState.value = '已复制'
+  } catch (error) {
+    exportState.value = error instanceof Error ? error.message : '复制失败'
+  }
+  window.setTimeout(() => { exportState.value = '' }, 1800)
+}
 </script>
 
 <template>
@@ -198,6 +282,8 @@ function updateTextContentType(event: Event) {
         <span v-if="t === 'Headers'" class="badge">{{ activeHeaderCount }}</span>
       </button>
       <span class="spacer" />
+      <span v-if="exportState" class="export-state" role="status">{{ exportState }}</span>
+      <button class="link" type="button" title="复制为 cURL" @click="copyCurl">导出 cURL</button>
       <button class="link" type="button" title="批量编辑将在请求模型稳定后接入">批量编辑</button>
     </nav>
 
@@ -256,7 +342,7 @@ function updateTextContentType(event: Event) {
 
         <div v-if="bodyType === 'none'" class="editor-empty">此请求不发送请求体。</div>
         <textarea
-          v-else
+          v-else-if="bodyType === 'json' || bodyType === 'text'"
           class="payload"
           :value="bodyContent"
           :placeholder="bodyPlaceholder"
@@ -268,11 +354,58 @@ function updateTextContentType(event: Event) {
           Content-Type
           <input :value="textContentType" spellcheck="false" @input="updateTextContentType" />
         </label>
-        <p class="body-hint">JSON 内容按原文发送；格式校验和格式化将在编辑器增强阶段加入。</p>
+        <table v-else-if="bodyType === 'formData' || bodyType === 'urlEncoded'" class="kv body-table">
+          <thead><tr><th class="c" /><th>Key</th><th>Value</th><th v-if="bodyType === 'formData'">类型</th><th class="c" /></tr></thead>
+          <tbody>
+            <tr v-for="(row, index) in bodyRows()" :key="index" :class="{ off: !row.enabled }">
+              <td class="c"><input :checked="row.enabled" type="checkbox" @change="updateBodyRow(index, { enabled: ($event.target as HTMLInputElement).checked })" /></td>
+              <td><input :value="row.key" class="cell" spellcheck="false" @input="updateBodyRow(index, { key: ($event.target as HTMLInputElement).value })" /></td>
+              <td><input :value="row.value" class="cell" spellcheck="false" :placeholder="row.kind === 'file' ? '本地文件路径' : ''" @input="updateBodyRow(index, { value: ($event.target as HTMLInputElement).value })" /></td>
+              <td v-if="bodyType === 'formData'">
+                <select class="cell select-cell" :value="row.kind ?? 'text'" @change="updateBodyRow(index, { kind: ($event.target as HTMLSelectElement).value as 'text' | 'file' })">
+                  <option value="text">文本</option><option value="file">文件</option>
+                </select>
+              </td>
+              <td class="c"><button class="del" type="button" aria-label="删除" @click="removeBodyRow(index)">×</button></td>
+            </tr>
+            <tr><td class="c" /><td colspan="4"><button class="link" type="button" @click="addBodyRow">+ 新增</button></td></tr>
+          </tbody>
+        </table>
+        <label v-else-if="bodyType === 'binary'" class="field-stack">
+          <span>本地文件路径</span>
+          <input :value="body.type === 'binary' ? body.path : ''" spellcheck="false" placeholder="C:\path\to\payload.bin" @input="patchBodyField('path', ($event.target as HTMLInputElement).value)" />
+        </label>
+        <div v-else-if="body.type === 'graphQl'" class="graphql-grid">
+          <label class="field-stack"><span>Query</span><textarea :value="body.query" spellcheck="false" @input="patchBodyField('query', ($event.target as HTMLTextAreaElement).value)" /></label>
+          <label class="field-stack"><span>Variables (JSON)</span><textarea :value="body.variables" spellcheck="false" @input="patchBodyField('variables', ($event.target as HTMLTextAreaElement).value)" /></label>
+          <label class="field-stack"><span>Operation Name（可选）</span><input :value="body.operationName ?? ''" @input="patchBodyField('operationName', ($event.target as HTMLInputElement).value)" /></label>
+        </div>
+        <p class="body-hint">文本内容按原文发送；文件项与 binary 使用流式上传。</p>
+      </section>
+
+      <section v-else-if="current === 'Auth'" class="auth-editor">
+        <label class="field-stack auth-kind">
+          <span>鉴权类型</span>
+          <select :value="auth.type" @change="setAuthType(($event.target as HTMLSelectElement).value as AuthType)">
+            <option v-for="option in AUTH_TYPES" :key="option.type" :value="option.type">{{ option.label }}</option>
+          </select>
+        </label>
+        <p v-if="auth.type === 'inherit'" class="editor-empty">继承集合或文件夹的鉴权配置；当前未配置上级时等同无鉴权。</p>
+        <p v-else-if="auth.type === 'none'" class="editor-empty">此请求不附加鉴权信息。</p>
+        <template v-else-if="auth.type === 'basic'">
+          <label class="field-stack"><span>用户名</span><input :value="auth.username" autocomplete="username" @input="patchAuth({ username: ($event.target as HTMLInputElement).value })" /></label>
+          <label class="field-stack"><span>密码</span><input :value="auth.password" type="password" autocomplete="current-password" @input="patchAuth({ password: ($event.target as HTMLInputElement).value })" /></label>
+        </template>
+        <label v-else-if="auth.type === 'bearer'" class="field-stack"><span>Token</span><input :value="auth.token" type="password" autocomplete="off" @input="patchAuth({ token: ($event.target as HTMLInputElement).value })" /></label>
+        <template v-else-if="auth.type === 'apiKey'">
+          <label class="field-stack"><span>Key</span><input :value="auth.key" @input="patchAuth({ key: ($event.target as HTMLInputElement).value })" /></label>
+          <label class="field-stack"><span>Value</span><input :value="auth.value" type="password" autocomplete="off" @input="patchAuth({ value: ($event.target as HTMLInputElement).value })" /></label>
+          <label class="field-stack"><span>添加到</span><select :value="auth.location" @change="patchAuth({ location: ($event.target as HTMLSelectElement).value })"><option value="header">Header</option><option value="query">Query</option><option value="cookie">Cookie</option></select></label>
+        </template>
       </section>
 
       <p v-else class="todo">
-        {{ current }} —— 当前切片暂未接入。先完成 Params、Headers、Body 后再实现鉴权、脚本和请求设置。
+        {{ current }} —— 当前切片暂未接入。
       </p>
     </div>
   </section>
@@ -296,6 +429,7 @@ function updateTextContentType(event: Event) {
   background: var(--a-bg-3); border-radius: var(--a-radius-pill); padding: 0 5px; margin-left: 2px;
 }
 .spacer { flex: 1 1 auto; }
+.export-state { color: var(--a-success); font-size: 11px; }
 .link { color: var(--a-primary) !important; }
 .body { flex: 1 1 auto; overflow: auto; min-height: 0; }
 .empty, .editor-empty { padding: 16px; color: var(--a-text-dim); font-size: 12px; }
@@ -337,5 +471,22 @@ function updateTextContentType(event: Event) {
   padding: 0 7px; font: 12px var(--a-font-mono);
 }
 .body-hint { margin: 0; color: var(--a-text-faint); font-size: 11px; }
+.body-table { border: 1px solid var(--a-border); }
+.select-cell { appearance: auto; }
+.field-stack { display: flex; flex-direction: column; gap: 5px; color: var(--a-text-dim); font-size: 12px; }
+.field-stack > input, .field-stack > select, .auth-editor select {
+  min-height: 30px; box-sizing: border-box; background: var(--a-bg-3); border: 1px solid var(--a-border);
+  border-radius: var(--a-radius-md); color: var(--a-text); padding: 4px 8px; font: 12px var(--a-font-mono);
+}
+.graphql-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 8px; min-height: 220px; }
+.graphql-grid textarea { min-height: 180px; resize: vertical; background: var(--a-bg-3); border: 1px solid var(--a-border); border-radius: var(--a-radius-md); color: var(--a-text); padding: 8px; font: 12px/1.5 var(--a-font-mono); }
+.graphql-grid label:last-child { grid-column: 1 / -1; }
+.auth-editor { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(240px, 2fr); align-content: start; gap: 12px; padding: 12px; }
+.auth-kind { grid-column: 1 / -1; max-width: 280px; }
+.auth-editor .editor-empty { padding: 0; grid-column: 1 / -1; }
 .todo { padding: 12px; color: var(--a-text-dim); font-size: 12px; }
+@media (max-width: 720px) {
+  .graphql-grid, .auth-editor { grid-template-columns: 1fr; }
+  .graphql-grid label:last-child, .auth-kind { grid-column: 1; }
+}
 </style>

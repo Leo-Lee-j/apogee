@@ -29,7 +29,7 @@ pub enum Body {
         content: String,
         content_type: String,
     },
-    /// `kind == File` 时 `value` 是文件路径。本切片不支持，见 `encode_body`。
+    /// `kind == File` 时 `value` 是文件路径，由 HTTP 层流式读取。
     FormData { rows: Vec<KeyValue> },
     UrlEncoded { rows: Vec<KeyValue> },
     Binary { path: PathBuf },
