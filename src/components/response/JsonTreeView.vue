@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { ipc, type TreeNode } from '@/ipc'
+import { ipc, normalizeError, type TreeNode } from '@/ipc'
 
 /**
  * JSON 树视图。
@@ -60,7 +60,10 @@ onMounted(async () => {
   try {
     await loadChildren('')
   } catch (e) {
-    err.value = e instanceof Error ? e.message : String(e)
+    // ipc facade 抛的是 AppError（普通对象，不是 Error），
+    // `String(e)` 会得到 "[object Object]"。非 JSON 响应走这条路很常见
+    // （HTML/纯文本没建索引），错误文案必须能读。
+    err.value = normalizeError(e).message
   } finally {
     loading.value = false
   }

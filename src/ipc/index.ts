@@ -240,6 +240,12 @@ export function onRequestEvents(handlers: {
   if (!inTauri) return () => {}
 
   const unlistens: (() => void)[] = []
+  // `listen` 是异步的。如果清理函数在这四个 Promise resolve 之前就被调用
+  // （组件立刻卸载、HMR、Spike 面板反复挂载），unlistens 还是空数组 ——
+  // 那些监听就再也没人取消了，事件回调会打到已销毁的组件上。
+  // 所以要记住「已经清理过」，让后到的 UnlistenFn 自己就地退订。
+  let disposed = false
+
   const subs: [string, (payload: unknown) => void][] = [
     ['request:progress', (p) => handlers.onProgress?.(p as ProgressEvent)],
     ['request:done', (p) => handlers.onDone?.(p as DoneEvent)],
@@ -248,10 +254,16 @@ export function onRequestEvents(handlers: {
   ]
 
   for (const [event, cb] of subs) {
-    tauriListen<unknown>(event, (e) => cb(e.payload)).then((ul) => unlistens.push(ul))
+    tauriListen<unknown>(event, (e) => cb(e.payload)).then((ul) => {
+      if (disposed) ul()
+      else unlistens.push(ul)
+    })
   }
 
-  return () => unlistens.forEach((ul) => ul())
+  return () => {
+    disposed = true
+    while (unlistens.length) unlistens.pop()?.()
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────

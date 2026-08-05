@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, shallowRef, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, shallowRef, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useTabsStore } from '@/stores/tabs'
 import {
   ROW_H,
@@ -7,7 +7,11 @@ import {
   methodColor,
   synthTree,
   visibleNodes,
+  sortVisible,
+  indexOfNode,
+  ancestorIndexes,
   type FlatNode,
+  type SortMode,
 } from './tree'
 
 /**
@@ -50,8 +54,77 @@ const viewportH = ref(400)
 const scroller = ref<HTMLElement | null>(null)
 const tabs = useTabsStore()
 
+/**
+ * 当前打开的那个接口对应的节点 id（02 文档 §4.5 里标着「← 当前打开（高亮）」）。
+ *
+ * 认 `tab.nodeId` 而不是拿 URL 反推：URL 用户随时能改，改完就对不上了。
+ * 草稿标签没有 nodeId，此时「定位」按钮置灰 —— 它确实没有可定位的位置。
+ */
+const activeNodeId = computed(() => tabs.active?.nodeId ?? null)
+
+// ── 排序 ──────────────────────────────────────────────────────────────
+
+const SORT_OPTIONS: { mode: SortMode; label: string; hint: string }[] = [
+  { mode: null, label: '默认顺序', hint: '集合里的原始顺序' },
+  { mode: 'name-asc', label: '名称正序', hint: 'A → Z' },
+  { mode: 'name-desc', label: '名称倒序', hint: 'Z → A' },
+]
+
+const sortMode = ref<SortMode>(null)
+const sortOpen = ref(false)
+const sortBtn = ref<HTMLButtonElement | null>(null)
+
+const sortLabel = computed(
+  () => SORT_OPTIONS.find((o) => o.mode === sortMode.value)?.label ?? '默认顺序',
+)
+
+/**
+ * 图标本身就区分三种状态，不靠颜色。
+ *
+ * 只用颜色表达「已排序」等于把状态压到单通道，色觉障碍用户读不到
+ * （PRD §10.4 的双通道要求）。所以三个模式给三个形状：等长横线 = 原顺序、
+ * 由短到长 = 正序、由长到短 = 倒序。
+ */
+const sortGlyph = computed(() => {
+  if (sortMode.value === 'name-asc') return 'M2.5 4h3.5M2.5 8h6.5M2.5 12h9.5'
+  if (sortMode.value === 'name-desc') return 'M2.5 4h9.5M2.5 8h6.5M2.5 12h3.5'
+  return 'M2.5 4h9.5M2.5 8h9.5M2.5 12h9.5'
+})
+
+function pickSort(m: SortMode) {
+  sortMode.value = m
+  sortOpen.value = false
+  sortBtn.value?.focus()
+}
+
+/**
+ * 鼠标移出即收起（需求：鼠标放上弹出）。但键盘焦点还在菜单里时不收 ——
+ * 用键盘打开菜单、鼠标恰好扫过再离开，菜单在焦点下消失会让键盘用户丢失落点。
+ *
+ * `mouseleave` 不会因为指针进入子元素而触发（含绝对定位的菜单，它仍是 DOM
+ * 后代），所以「按钮 → 菜单」这段移动是安全的 —— 前提是两者之间**没有缝**，
+ * 见 .menu 的 top: 100%。
+ */
+function onSortLeave(e: MouseEvent) {
+  const wrap = e.currentTarget as HTMLElement
+  if (wrap.contains(document.activeElement)) return
+  sortOpen.value = false
+}
+
+function onSortFocusOut(e: FocusEvent) {
+  const wrap = e.currentTarget as HTMLElement
+  const next = e.relatedTarget as Node | null
+  if (next && wrap.contains(next)) return
+  sortOpen.value = false
+}
+
+function closeSort() {
+  sortOpen.value = false
+  sortBtn.value?.focus()
+}
+
 /** 可见节点：折叠的文件夹下的子节点不参与渲染。只改这个计算，不重建原数组。 */
-const visible = computed(() => visibleNodes(all.value, filter.value))
+const visible = computed(() => sortVisible(visibleNodes(all.value, filter.value), sortMode.value))
 
 const startIdx = computed(() => Math.max(0, Math.floor(scrollTop.value / ROW_H) - OVERSCAN))
 const endIdx = computed(() =>
@@ -92,8 +165,15 @@ onBeforeUnmount(() => {
 
 function toggle(n: FlatNode) {
   if (!n.isFolder) {
-    // 单击预览（02 文档 §4.5）：复用临时标签，避免浏览集合时开出一堆标签
-    tabs.open({ title: n.name, method: n.method ?? 'GET', url: `{{baseUrl}}/${n.id}`, preview: true })
+    // 单击预览（02 文档 §4.5）：复用临时标签，避免浏览集合时开出一堆标签。
+    // 必须带上 nodeId，否则标签认不回它来自树的哪一行，「定位」和高亮都失效。
+    tabs.open({
+      title: n.name,
+      method: n.method ?? 'GET',
+      url: `{{baseUrl}}/${n.id}`,
+      nodeId: n.id,
+      preview: true,
+    })
     return
   }
   n.expanded = !n.expanded
@@ -101,6 +181,64 @@ function toggle(n: FlatNode) {
   // 数组本身不重建（slice 是浅拷贝），只是换个引用 —— 03 文档 §4.4 的
   // 「展开/折叠只改 visible 计算，不重建数组」指的正是这个。
   all.value = [...all.value]
+}
+
+// ── 定位当前接口 ──────────────────────────────────────────────────────
+
+/**
+ * 把第 `row` 行滚进视口。
+ *
+ * 已经完整在视口内就**不动** —— 定位的目的是「让我看到它」，行本来就在眼前时
+ * 再跳一次只会让人丢失上下文。需要滚动时居中，这样目标行上下都有参照。
+ *
+ * 直接算 px 而不是用 `scrollIntoView`：行是绝对定位在一个撑高的 spacer 里的，
+ * 目标行在滚动前可能还没有对应的 DOM 节点（虚拟滚动只渲染可视区那几十行）。
+ */
+function revealRow(row: number) {
+  const el = scroller.value
+  const vh = el?.clientHeight ?? viewportH.value
+  const top = row * ROW_H
+  if (top >= scrollTop.value && top + ROW_H <= scrollTop.value + vh) return
+  const max = Math.max(0, totalH.value - vh)
+  const next = Math.min(max, Math.max(0, top - Math.round((vh - ROW_H) / 2)))
+  scrollTop.value = next
+  if (el) el.scrollTop = next
+}
+
+/**
+ * 定位到当前活跃接口：逐级展开祖先 → 必要时清掉过滤 → 滚到该行。
+ *
+ * 三步都不能省。目标行可能因为三种原因不在屏上：祖先文件夹折叠着（它压根不在
+ * `visible` 里）、过滤条件把它筛掉了、或者只是滚出了视口。只做最后一步的
+ * 「定位」在前两种情况下会安静地什么都不发生，那是最难排查的一类交互 bug。
+ */
+async function locateActive() {
+  const id = activeNodeId.value
+  if (!id) return
+
+  const idx = indexOfNode(all.value, id)
+  if (idx < 0) return
+
+  let expandedAny = false
+  for (const ai of ancestorIndexes(all.value, idx)) {
+    const ancestor = all.value[ai]!
+    if (!ancestor.expanded) {
+      ancestor.expanded = true
+      expandedAny = true
+    }
+  }
+  if (expandedAny) all.value = [...all.value]
+
+  // 过滤模式下目标行可能被筛掉。清掉过滤是有损操作（用户的输入没了），
+  // 所以只在确实筛掉了的时候做。
+  if (filter.value.trim() && !visible.value.some((n) => n.id === id)) filter.value = ''
+
+  // 等 DOM 把 spacer 高度更新上去：新展开的行还没进 DOM 时，
+  // 浏览器会把超出当前 scrollHeight 的 scrollTop 直接夹掉。
+  await nextTick()
+
+  const row = visible.value.findIndex((n) => n.id === id)
+  if (row >= 0) revealRow(row)
 }
 
 /**
@@ -137,6 +275,11 @@ defineExpose({
     const node = all.value[index]
     if (node?.isFolder) toggle(node)
   },
+  /**
+   * 产品入口，不是量测用的：命令面板的「在集合中显示当前请求」和快捷键都会调它。
+   * 放在这里而不是只挂在按钮上，是因为定位这件事有多个触发点。
+   */
+  locateActive,
 })
 </script>
 
@@ -144,6 +287,67 @@ defineExpose({
   <aside class="sidebar">
     <div class="head">
       <input v-model="filter" class="filter" placeholder="过滤请求…" aria-label="过滤请求" spellcheck="false" />
+
+      <!-- 定位当前接口。置灰时也保留 title，说明为什么不能点。 -->
+      <button
+        class="tool"
+        type="button"
+        :disabled="!activeNodeId"
+        :title="activeNodeId ? '定位当前接口' : '当前标签不是集合里的接口'"
+        aria-label="定位当前接口"
+        @click="locateActive"
+      >
+        <svg class="ico" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+          <circle cx="8" cy="8" r="3.1" />
+          <path d="M8 1v2.2M8 12.8V15M1 8h2.2M12.8 8H15" />
+        </svg>
+      </button>
+
+      <!--
+        排序。悬停即开（需求指定的交互），点击/回车同样能开合 ——
+        只认 hover 的菜单在键盘和触摸下等于不存在。
+
+        刻意**不**在 focusin 上开：选完一项后 pickSort 要把焦点还给按钮，
+        那次 focus 会冒泡出 focusin，菜单当场又被开回来。开合只由
+        click（回车/空格也会触发它）和 hover 驱动。
+      -->
+      <div
+        class="sort"
+        @mouseenter="sortOpen = true"
+        @mouseleave="onSortLeave"
+        @focusout="onSortFocusOut"
+        @keydown.esc.stop="closeSort"
+      >
+        <button
+          ref="sortBtn"
+          class="tool"
+          :class="{ on: sortMode !== null }"
+          type="button"
+          aria-haspopup="menu"
+          :aria-expanded="sortOpen"
+          :title="`排序：${sortLabel}`"
+          aria-label="排序方式"
+          @click="sortOpen = !sortOpen"
+        >
+          <svg class="ico" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+            <path :d="sortGlyph" />
+          </svg>
+        </button>
+        <ul v-if="sortOpen" class="menu" role="menu">
+          <li v-for="o in SORT_OPTIONS" :key="o.label" role="none">
+            <button
+              type="button"
+              role="menuitemradio"
+              :aria-checked="sortMode === o.mode"
+              @click="pickSort(o.mode)"
+            >
+              <span class="mark" aria-hidden="true">{{ sortMode === o.mode ? '✓' : '' }}</span>
+              <span class="txt">{{ o.label }}</span>
+              <span class="hint">{{ o.hint }}</span>
+            </button>
+          </li>
+        </ul>
+      </div>
     </div>
     <div ref="scroller" class="scroller" @scroll.passive="onScroll">
       <div class="spacer" :style="{ height: `${totalH}px` }">
@@ -151,7 +355,8 @@ defineExpose({
           v-for="(n, i) in slice"
           :key="n.id"
           class="row"
-          :class="{ folder: n.isFolder }"
+          :class="{ folder: n.isFolder, active: n.id === activeNodeId }"
+          :aria-current="n.id === activeNodeId ? 'true' : undefined"
           :style="{
             transform: `translateY(${(startIdx + i) * ROW_H}px)`,
             paddingLeft: `${6 + n.depth * 12}px`,
@@ -178,9 +383,13 @@ defineExpose({
      背景由 .a-block 提供，这里保留一份是为了组件单独使用时也有底色。 */
   background: var(--a-bg-2);
 }
-.head { padding: 6px; flex: 0 0 auto; }
+/* 过滤框与右侧工具按钮同一行、同 24px 高，基线对齐。
+   工具按钮不占固定槽位（flex: 0 0 auto），宽度全给过滤框 —— 侧边栏可以窄到
+   180px，那时每一像素都该留给接口名。 */
+.head { padding: 6px; flex: 0 0 auto; display: flex; align-items: center; gap: 2px; }
 .filter {
-  width: 100%; height: 24px; background: var(--a-bg-3);
+  flex: 1 1 auto; min-width: 0;
+  height: 24px; background: var(--a-bg-3);
   border: 1px solid var(--a-border); border-radius: 4px;
   color: var(--a-text); font: 12px/1 var(--a-font-ui); padding: 0 6px;
 }
@@ -192,6 +401,60 @@ defineExpose({
   outline: 2px solid var(--a-focus);
   outline-offset: -2px;
 }
+
+/* ── 头部工具按钮 ──
+   24×24 命中区（图标只有 14px）。方形而不是圆形：它们和过滤框同属一行控件，
+   圆角对齐 --a-radius-sm 就够，胶囊只留给徽章。 */
+.tool {
+  flex: 0 0 auto;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; padding: 0;
+  background: transparent;
+  border: 1px solid transparent; border-radius: var(--a-radius-sm);
+  color: var(--a-text-dim); cursor: pointer;
+}
+.tool:hover:not(:disabled) { background: var(--a-hover); color: var(--a-text); }
+/* 置灰用 ghost 档。它对比度不达 4.5:1，但 WCAG 对禁用控件豁免，
+   而且「不可点」本身要看得出来 —— 这里的低对比是信息，不是缺陷。 */
+.tool:disabled { color: var(--a-text-ghost); cursor: default; }
+/* 已启用排序时的强调态。形状已经区分了三种模式（见 sortGlyph），
+   颜色只是加速识别，不是唯一通道。 */
+.tool.on { color: var(--a-primary); background: var(--a-selected); }
+.ico {
+  width: 14px; height: 14px;
+  fill: none; stroke: currentcolor; stroke-width: 1.5;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+
+/* ── 排序下拉 ──
+   自研而不是 n-dropdown：侧边栏头部在首屏路径上，02 文档 §7.5 把 naive-ui
+   限定在低频非热路径。菜单紧贴按钮底边（top: 100%），中间不留缝 ——
+   留缝会让指针在移向菜单的途中离开 .sort，菜单当场收起。 */
+.sort { position: relative; flex: 0 0 auto; display: flex; }
+.menu {
+  position: absolute; top: 100%; right: 0; z-index: 20;
+  margin: 0; padding: 4px; list-style: none;
+  min-width: 148px;
+  background: var(--a-bg-3);
+  border: 1px solid var(--a-border-strong);
+  border-radius: var(--a-radius-md);
+  box-shadow: var(--a-shadow-md);
+}
+.menu button {
+  display: flex; align-items: center; gap: 6px;
+  width: 100%; text-align: left;
+  background: transparent; border: none; border-radius: var(--a-radius-sm);
+  padding: 3px 6px; color: var(--a-text-soft);
+  font: var(--a-fs-sm) / 1.6 var(--a-font-ui); cursor: pointer;
+  white-space: nowrap;
+}
+.menu button:hover { background: var(--a-hover); color: var(--a-text); }
+.menu button[aria-checked='true'] { color: var(--a-text); }
+/* 勾选标记占固定宽度，三项文字才能左对齐成一列 */
+.menu .mark { flex: 0 0 auto; width: 10px; color: var(--a-primary); }
+.menu .txt { flex: 1 1 auto; }
+.menu .hint { flex: 0 0 auto; font: var(--a-fs-xs) / 1 var(--a-font-mono); color: var(--a-text-faint); }
+
 .scroller { flex: 1 1 auto; overflow-y: auto; min-height: 0; }
 .spacer { position: relative; }
 .row {
@@ -202,6 +465,20 @@ defineExpose({
 }
 .row:hover { background: var(--a-hover); color: var(--a-text); }
 .row.folder { color: var(--a-text); }
+/*
+ * 当前打开的接口（02 文档 §4.5 的「← 当前打开（高亮）」）。
+ *
+ * 底色 + 左侧 2px 主色条两个通道。只用底色不够：--a-selected 是 16% alpha 的
+ * 叠加层，在 hover 态（7% 白）旁边份量差不明显，滚动时不容易一眼扫到 ——
+ * 而「定位」按钮的全部意义就是让人一眼扫到它。
+ * 用 box-shadow 画色条而不是 border-left，免得改变 padding 算出来的缩进。
+ */
+.row.active {
+  background: var(--a-selected);
+  color: var(--a-text);
+  box-shadow: inset 2px 0 0 var(--a-primary);
+}
+.row.active:hover { background: var(--a-selected); }
 .caret { width: 10px; color: var(--a-text-faint); }
 .m { font: 600 10px/1 var(--a-font-mono); width: 42px; }
 .name { overflow: hidden; text-overflow: ellipsis; }

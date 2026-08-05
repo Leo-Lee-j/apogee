@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, shallowRef, computed, markRaw } from 'vue'
 import type { ResponseSummary } from '@/ipc'
+import { useUiStore } from '@/stores/ui'
 
 /**
  * 标签状态。
@@ -23,6 +24,13 @@ export interface Tab {
   title: string
   method: string
   url: string
+  /**
+   * 这个标签对应的集合树节点 id。从侧边栏打开时带上，草稿标签（新建请求）没有。
+   *
+   * 存 id 而不是从 `url` 反推：URL 是用户可编辑的，改一个字符就找不回节点了。
+   * 侧边栏的「定位当前接口」和「高亮当前打开的行」都只认这个字段。
+   */
+  nodeId?: string
   /** 有未保存改动，标签上显示 `•` */
   dirty: boolean
   /** 临时标签（单击预览）：标题斜体，被下一次单击复用（02 文档 §4.5） */
@@ -75,7 +83,9 @@ export const useTabsStore = defineStore('tabs', () => {
     if (init?.preview) {
       const existing = tabs.value.find((t) => t.preview)
       if (existing) {
-        Object.assign(existing, init, { id: existing.id })
+        // `nodeId` 先清掉再合并：`init` 没带节点 id 时不能留着上一次预览的那个，
+        // 否则侧边栏会继续高亮一个与当前内容无关的行。
+        Object.assign(existing, { nodeId: undefined }, init, { id: existing.id })
         tabs.value = [...tabs.value]
         activate(existing.id)
         return existing
@@ -93,6 +103,21 @@ export const useTabsStore = defineStore('tabs', () => {
     })
     tabs.value = [...tabs.value, tab]
     activate(tab.id)
+    return tab
+  }
+
+  /**
+   * 新建一个「快捷请求」：不属于任何集合的临时请求，发完即走。
+   *
+   * `Ctrl+T` 和新建面板里的第一张卡片都走这里，所以「什么算快捷请求」
+   * （标题、不落盘、开完就聚焦 URL 栏）只有一处定义。两边各写一遍的话，
+   * 迟早有一边忘了聚焦。
+   *
+   * 这里用 useUiStore 是单向依赖（ui 不认识 tabs），不构成环。
+   */
+  function openQuick(): Tab {
+    const tab = open({ title: '快捷请求' })
+    useUiStore().focusUrl()
     return tab
   }
 
@@ -121,5 +146,5 @@ export const useTabsStore = defineStore('tabs', () => {
     tabs.value = [...tabs.value]
   }
 
-  return { tabs, activeId, active, mru, mountedIds, stateOf, open, activate, close, patch }
+  return { tabs, activeId, active, mru, mountedIds, stateOf, open, openQuick, activate, close, patch }
 })

@@ -109,6 +109,94 @@ export function visibleNodes(all: FlatNode[], filter = ''): FlatNode[] {
   return out
 }
 
+/**
+ * 排序方式。`null` 表示保持集合原顺序（用户自己排的顺序，不该被默默改掉）。
+ */
+export type SortMode = null | 'name-asc' | 'name-desc'
+
+/**
+ * 比较器只建一次。
+ *
+ * `localeCompare` 每次调用都可能重建一个内部 collator，20000 节点排一次要调
+ * 约 N·logN 次 —— 这是 `Intl.Collator` 文档里点名的场景。
+ *
+ * `numeric: true` 不是可选项：接口名普遍带序号，不开的话「接口 2-10」会排在
+ * 「接口 2-9」前面（按字符逐位比，'1' < '9'），用户会当成排序坏了。
+ */
+const nameCollator = new Intl.Collator('zh-Hans-CN', { numeric: true, sensitivity: 'base' })
+
+/**
+ * 把 `visibleNodes` 的结果按名称重排。**不改动传入数组**。
+ *
+ * 排序对每个文件夹是**局部**的：文件夹自身的位置不动，只重排「同一父级下连续的
+ * 请求」。跨过文件夹边界混排会把 depth 序列打乱，而虚拟滚动的缩进和折叠语义
+ * 全靠 depth 表达 —— 那等于把树排成一锅面条。
+ *
+ * 实现是「同深度的连续请求分桶 → 桶内排序 → 按原位置拼回」。过滤模式下
+ * `visibleNodes` 只吐请求、不吐文件夹，于是整份结果就是一个桶，正好是想要的
+ * 「搜索结果整体排序」。
+ */
+export function sortVisible(nodes: FlatNode[], mode: SortMode): FlatNode[] {
+  if (!mode) return nodes
+  const dir = mode === 'name-asc' ? 1 : -1
+  const cmp = (a: FlatNode, b: FlatNode) => dir * nameCollator.compare(a.name, b.name)
+
+  const out: FlatNode[] = []
+  let bucket: FlatNode[] = []
+  let bucketDepth = -1
+  const flush = () => {
+    if (bucket.length === 0) return
+    bucket.sort(cmp)
+    out.push(...bucket)
+    bucket = []
+    bucketDepth = -1
+  }
+  for (const n of nodes) {
+    if (n.isFolder) {
+      // 文件夹是桶的边界，位置保持不动
+      flush()
+      out.push(n)
+      continue
+    }
+    if (bucket.length > 0 && n.depth !== bucketDepth) flush()
+    bucketDepth = n.depth
+    bucket.push(n)
+  }
+  flush()
+  return out
+}
+
+/** 按 id 找节点下标。找不到返回 -1。 */
+export function indexOfNode(all: FlatNode[], id: string): number {
+  return all.findIndex((n) => n.id === id)
+}
+
+/**
+ * 某个节点的祖先下标（由近及远）。
+ *
+ * 扁平数组里没有 `children`，也不依赖 `parent_id`：层级只由 `depth` 表达，
+ * 而数组是前序的，所以从该节点往前扫，第一个 depth 更小的节点就是它的父级，
+ * 继续往前找更小的即得整条链。
+ *
+ * 「定位当前接口」要用它把折叠着的祖先逐级展开 —— 目标行藏在折叠的文件夹里时，
+ * 光滚动是滚不出来的，它根本不在 `visibleNodes` 的结果里。
+ */
+export function ancestorIndexes(all: FlatNode[], index: number): number[] {
+  const start = all[index]
+  if (!start) return []
+  const out: number[] = []
+  let need = start.depth - 1
+  for (let i = index - 1; i >= 0 && need >= 0; i--) {
+    const d = all[i]!.depth
+    // 用 <= 而不是 ===：真实数据里 depth 有跳级的可能，用 === 会一路扫到头
+    if (d <= need) {
+      out.push(i)
+      need = d - 1
+    }
+  }
+  return out
+}
+
 /** 方法名 → 颜色 token。 */
 export const methodColor: Record<string, string> = {
   GET: 'var(--a-get)',

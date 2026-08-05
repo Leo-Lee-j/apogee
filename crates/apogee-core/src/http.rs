@@ -19,7 +19,7 @@ use crate::request::{
     ApiKeyIn, AuthConfig, Body, HttpVersion, RequestSpec, ResolvedSettings,
 };
 use crate::response::Spool;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
 use uuid::Uuid;
@@ -61,7 +61,7 @@ pub fn build_url(spec: &RequestSpec) -> Result<String, AppError> {
     }
 
     // query 参数
-    let pairs: Vec<String> = spec
+    let mut pairs: Vec<String> = spec
         .params
         .iter()
         .filter(|item| item.enabled && !item.key.is_empty())
@@ -73,6 +73,24 @@ pub fn build_url(spec: &RequestSpec) -> Result<String, AppError> {
             )
         })
         .collect();
+
+    // `location: query` 的 API Key 也是一个 query 参数，必须在这里拼进 URL。
+    // 放在这里而不是 `apply_auth` 里：query 段的拼装规则（`?` 还是 `&`、
+    // 怎么编码）只应该有一处实现，否则两边迟早漂移。
+    if let AuthConfig::ApiKey {
+        key,
+        value,
+        location: ApiKeyIn::Query,
+    } = &spec.auth
+    {
+        if !key.trim().is_empty() {
+            pairs.push(format!(
+                "{}={}",
+                urlencoding_query(key),
+                urlencoding_query(value)
+            ));
+        }
+    }
 
     if !pairs.is_empty() {
         // URL 里可能已经带了 query（用户粘贴过来的常常带），那时要用 `&` 接。
@@ -392,6 +410,136 @@ mod tests {
             assert!(!error.hints.is_empty(), "{error:?} 缺少可操作建议");
         }
     }
+
+    // ── 请求组装 ─────────────────────────────────────────────────────
+    //
+    // 这几条测的是「密钥/头最终去了哪里」。这类错误联网测不出来：请求发得出去、
+    // 服务端返回 401 或 400，看起来像对方的问题。
+
+    fn built(spec: &RequestSpec) -> reqwest::Request {
+        let client = client_for(&spec.settings.resolve()).expect("建 client");
+        build_request(&client, spec)
+            .expect("组装请求")
+            .0
+            .build()
+            .expect("落成 Request")
+    }
+
+    fn header_values(request: &reqwest::Request, name: &str) -> Vec<String> {
+        request
+            .headers()
+            .get_all(name)
+            .iter()
+            .map(|value| String::from_utf8_lossy(value.as_bytes()).into_owned())
+            .collect()
+    }
+
+    #[test]
+    fn api_key_in_query_lands_in_url_not_in_a_header() {
+        let mut s = spec("https://a.test/x");
+        s.auth = AuthConfig::ApiKey {
+            key: "api_key".into(),
+            value: "s3cr3t/=".into(),
+            location: ApiKeyIn::Query,
+        };
+        let request = built(&s);
+        assert_eq!(request.url().query(), Some("api_key=s3cr3t%2F%3D"));
+        // 密钥绝不能同时以同名 header 的形式漏出去
+        assert!(header_values(&request, "api_key").is_empty());
+    }
+
+    #[test]
+    fn api_key_in_query_appends_after_existing_params() {
+        let mut s = spec("https://a.test/x?already=1");
+        s.params = vec![kv("p", "2", true)];
+        s.auth = AuthConfig::ApiKey {
+            key: "k".into(),
+            value: "v".into(),
+            location: ApiKeyIn::Query,
+        };
+        assert_eq!(
+            built(&s).url().as_str(),
+            "https://a.test/x?already=1&p=2&k=v"
+        );
+    }
+
+    #[test]
+    fn api_key_in_header_and_cookie_go_where_asked() {
+        let mut s = spec("https://a.test/x");
+        s.auth = AuthConfig::ApiKey {
+            key: "X-Api-Key".into(),
+            value: "v".into(),
+            location: ApiKeyIn::Header,
+        };
+        assert_eq!(header_values(&built(&s), "x-api-key"), vec!["v"]);
+        assert_eq!(built(&s).url().query(), None);
+
+        s.auth = AuthConfig::ApiKey {
+            key: "sid".into(),
+            value: "v".into(),
+            location: ApiKeyIn::Cookie,
+        };
+        assert_eq!(header_values(&built(&s), "cookie"), vec!["sid=v"]);
+    }
+
+    #[test]
+    fn user_authorization_header_replaces_auth_panel_one() {
+        // `RequestBuilder::header` 是 append 不是 insert：两次设 Authorization
+        // 会把两个头一起发出去，多数服务端只取第一个 —— 症状是「手写了 token
+        // 还是 401」。所以鉴权面板必须给手写的头让位。
+        for auth in [
+            AuthConfig::Bearer {
+                token: "from-panel".into(),
+            },
+            AuthConfig::Basic {
+                username: "u".into(),
+                password: "p".into(),
+            },
+        ] {
+            let mut s = spec("https://a.test/x");
+            s.auth = auth;
+            s.headers = vec![kv("Authorization", "Bearer from-user", true)];
+            assert_eq!(
+                header_values(&built(&s), "authorization"),
+                vec!["Bearer from-user"]
+            );
+        }
+    }
+
+    #[test]
+    fn auth_panel_still_applies_when_user_wrote_no_header() {
+        let mut s = spec("https://a.test/x");
+        s.auth = AuthConfig::Bearer {
+            token: "t".into(),
+        };
+        assert_eq!(header_values(&built(&s), "authorization"), vec!["Bearer t"]);
+    }
+
+    #[test]
+    fn user_content_type_replaces_body_derived_one() {
+        // 两个 Content-Type 是明确非法的请求，不少服务端直接 400。
+        let mut s = spec("https://a.test/x");
+        s.method = "POST".into();
+        s.body = Body::Json {
+            content: "{}".into(),
+        };
+        s.headers = vec![kv("content-type", "application/vnd.api+json", true)];
+        assert_eq!(
+            header_values(&built(&s), "content-type"),
+            vec!["application/vnd.api+json"]
+        );
+    }
+
+    #[test]
+    fn disabled_user_header_does_not_suppress_auth() {
+        // 勾掉的头等于不存在，此时鉴权面板应该照常生效。
+        let mut s = spec("https://a.test/x");
+        s.auth = AuthConfig::Bearer {
+            token: "t".into(),
+        };
+        s.headers = vec![kv("Authorization", "Bearer disabled", false)];
+        assert_eq!(header_values(&built(&s), "authorization"), vec!["Bearer t"]);
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -413,11 +561,41 @@ struct PoolKey {
 
 static POOL: OnceLock<Mutex<HashMap<PoolKey, reqwest::Client>>> = OnceLock::new();
 
+/// 安装 rustls 的进程级加密后端。**在建任何 `Client` 之前必须调用。**
+///
+/// reqwest 的 `rustls-no-provider` feature 的含义是「provider 由调用方给」：
+/// 它在 `ClientBuilder::build()` 里先看 `CryptoProvider::get_default()`，
+/// 取不到就直接 `panic!("No provider set")`
+/// （reqwest 0.13 `src/async_impl/client.rs::default_rustls_crypto_provider`，
+/// 那条 fallback 只认 `aws-lc-rs`）。
+///
+/// 关键陷阱：**rustls 自身的 `ring` feature 不足以让 reqwest 找到 provider。**
+/// `ring` 只让 `rustls::ClientConfig::builder()` 这条路能用
+/// `get_default_or_install_from_crate_features()` 自举；reqwest 走的是
+/// `builder_with_provider()`，它不会去碰 crate feature 自举那条逻辑。
+/// 漏了这一步的症状是：编译通过、命令注册正常、按钮点下去变「等待中」，
+/// 然后进程在 `panic = "abort"` 下直接消失 —— 也就是「闪退」。
+///
+/// 装不上（别处已经装过）不算错误：进程级默认只需要一个，谁先装谁生效。
+fn ensure_crypto_provider() {
+    static ONCE: OnceLock<()> = OnceLock::new();
+    ONCE.get_or_init(|| {
+        if rustls::crypto::ring::default_provider()
+            .install_default()
+            .is_err()
+        {
+            tracing::debug!("rustls provider 已由别处安装，跳过");
+        }
+    });
+}
+
 /// 取（或建）一个匹配该配置的 `Client`。
 ///
 /// §4.5 要求连接池复用与 DNS 缓存。每次请求新建 `Client` 会把两者都丢掉，
 /// 「请求发送开销 < 5ms」直接打穿。
 fn client_for(settings: &ResolvedSettings) -> Result<reqwest::Client, AppError> {
+    ensure_crypto_provider();
+
     let key = PoolKey {
         verify_tls: settings.verify_tls,
         http_version: settings.http_version,
@@ -519,30 +697,9 @@ async fn execute_inner(
 ) -> Result<Option<ResponseMeta>, AppError> {
     let settings = spec.settings.resolve();
     let client = client_for(&settings)?;
-    let url = build_url(spec)?;
-
-    let method = reqwest::Method::from_bytes(spec.method.trim().as_bytes()).map_err(|_| {
-        AppError::new(ErrorKind::Parse, format!("非法的 HTTP 方法：{}", spec.method))
-            .hint(Hint::new("方法名只能含 token 字符，如 GET / POST / PATCH"))
-    })?;
+    let (builder, url) = build_request(&client, spec)?;
 
     let t0 = Instant::now();
-    let mut builder = client.request(method, &url);
-
-    // 顺序有讲究：先鉴权、再用户头。用户显式写的 Authorization 应当覆盖
-    // 鉴权面板生成的那个 —— 手写的头是更强的意图表达。
-    builder = apply_auth(builder, &spec.auth);
-
-    let encoded = encode_body(&spec.body)?;
-    if let Some(content_type) = encoded.content_type.as_deref() {
-        builder = builder.header(reqwest::header::CONTENT_TYPE, content_type);
-    }
-    for header in spec.headers.iter().filter(|h| h.enabled && !h.key.is_empty()) {
-        builder = builder.header(&header.key, &header.value);
-    }
-    if !encoded.bytes.is_empty() {
-        builder = builder.body(encoded.bytes);
-    }
 
     // 超时只覆盖「发出 → 拿到响应头」。理由见 client_for 里那段注释：
     // 把 body 下载算进超时会让正常的大文件下载被误杀。
@@ -617,6 +774,56 @@ async fn execute_inner(
     }))
 }
 
+/// 组装一个 reqwest 请求：URL、方法、鉴权、头、body。
+///
+/// 独立出来是为了能不联网单测 —— 「密钥去了哪个位置」「头有没有重复」这类问题
+/// 靠联网测是测不出来的，而它们恰恰是最容易静默出错的部分。同时返回最终 URL，
+/// 调用方的超时/连接错误信息要用它。
+fn build_request(
+    client: &reqwest::Client,
+    spec: &RequestSpec,
+) -> Result<(reqwest::RequestBuilder, String), AppError> {
+    let url = build_url(spec)?;
+    let method = reqwest::Method::from_bytes(spec.method.trim().as_bytes()).map_err(|_| {
+        AppError::new(ErrorKind::Parse, format!("非法的 HTTP 方法：{}", spec.method))
+            .hint(Hint::new("方法名只能含 token 字符，如 GET / POST / PATCH"))
+    })?;
+
+    let mut builder = client.request(method, &url);
+
+    // 用户在 Header 面板里显式写的头名。先收集，因为鉴权和 body 的
+    // `Content-Type` 都要给它让位 —— 见 `apply_auth` 里关于 append 语义的说明。
+    let user_headers: HashSet<String> = spec
+        .headers
+        .iter()
+        .filter(|h| h.enabled && !h.key.trim().is_empty())
+        .map(|h| h.key.trim().to_ascii_lowercase())
+        .collect();
+
+    builder = apply_auth(builder, &spec.auth, &user_headers);
+
+    let encoded = encode_body(&spec.body)?;
+    if let Some(content_type) = encoded.content_type.as_deref() {
+        // 用户手写了 Content-Type 就不再补 body 推导出来的那个。两个
+        // `Content-Type` 一起发出去是明确非法的请求，不少服务端直接 400。
+        if !user_headers.contains("content-type") {
+            builder = builder.header(reqwest::header::CONTENT_TYPE, content_type);
+        }
+    }
+    for header in spec
+        .headers
+        .iter()
+        .filter(|h| h.enabled && !h.key.trim().is_empty())
+    {
+        builder = builder.header(header.key.trim(), &header.value);
+    }
+    if !encoded.bytes.is_empty() {
+        builder = builder.body(encoded.bytes);
+    }
+
+    Ok((builder, url))
+}
+
 /// 把响应体边收边写盘。返回 `None` 表示被取消。
 ///
 /// 用 `chunk().await` 循环而不是 `response.bytes().await`：后者会把整个 body
@@ -679,16 +886,27 @@ async fn stream_to_spool(
 /// `Inherit` 在这里等于 `None`：继承链要在执行**之前**解析掉（同 `ResolvedSettings`
 /// 的思路）。执行层收到 `Inherit` 说明上游没解析，那就不加头 —— 静默猜一个
 /// 上级配置会更糟。
+///
+/// `user_headers` 是用户在 Header 面板里显式写的头名（小写）。命中的头一律跳过：
+/// 手写的头是更强的意图表达。
+///
+/// **为什么必须显式跳过而不能靠「后写覆盖」**：`RequestBuilder::header` 内部是
+/// `HeaderMap::append` 而不是 `insert`。两次设 `Authorization` 的结果是**两个**
+/// `Authorization` 头一起发出去，不是后者覆盖前者。多数服务端只取第一个（也就是
+/// 鉴权面板那个），少数直接 400 —— 症状是「我明明手写了 token，怎么还是 401」。
 fn apply_auth(
     mut builder: reqwest::RequestBuilder,
     auth: &AuthConfig,
+    user_headers: &HashSet<String>,
 ) -> reqwest::RequestBuilder {
+    let taken = |name: &str| user_headers.contains(name);
+
     match auth {
         AuthConfig::Inherit | AuthConfig::None => {}
-        AuthConfig::Basic { username, password } => {
+        AuthConfig::Basic { username, password } if !taken("authorization") => {
             builder = builder.basic_auth(username, Some(password));
         }
-        AuthConfig::Bearer { token } => {
+        AuthConfig::Bearer { token } if !taken("authorization") => {
             builder = builder.bearer_auth(token);
         }
         AuthConfig::ApiKey {
@@ -696,19 +914,21 @@ fn apply_auth(
             value,
             location,
         } => {
-            // reqwest 0.13 的 builder 不再暴露 query 参数的追加方法。
-            // 这里 header + cookie 直接设头；query 走同类 header 策略
-            // （把 `key=value` 作为 header 发出，而不是拼到 URL）。
-            // 完整实现将在 Auth 面板落地时统一处理三种 location 的差异。
             builder = match location {
-                ApiKeyIn::Header | ApiKeyIn::Query => {
-                    builder.header(key.as_str(), value.as_str())
+                ApiKeyIn::Header if !taken(&key.trim().to_ascii_lowercase()) => {
+                    builder.header(key.trim(), value.as_str())
                 }
-                ApiKeyIn::Cookie => {
+                ApiKeyIn::Cookie if !taken("cookie") => {
                     builder.header(reqwest::header::COOKIE, format!("{key}={value}"))
                 }
+                // `location: query` 在 `build_url` 里就拼进 URL 了 —— 那里是 query
+                // 段唯一的组装点。这里必须是 no-op，否则密钥会同时出现在 URL 和
+                // 一个同名 header 上。
+                _ => builder,
             };
         }
+        // 用户已手写同名头，鉴权面板让位。
+        _ => {}
     }
     builder
 }

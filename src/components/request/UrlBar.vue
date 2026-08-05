@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useTabsStore } from '@/stores/tabs'
+import { useUiStore } from '@/stores/ui'
 import { useRequest } from '@/stores/request'
 
 /**
@@ -18,6 +19,7 @@ import { useRequest } from '@/stores/request'
 const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'] as const
 
 const tabs = useTabsStore()
+const ui = useUiStore()
 const { sending, send } = useRequest()
 const inputEl = ref<HTMLInputElement | null>(null)
 const methodOpen = ref(false)
@@ -55,6 +57,20 @@ function onKeydown(e: KeyboardEvent) {
 
 /** 分阶段启动的收尾动作：首屏就绪后聚焦 URL 栏，让用户能立刻打字（03 文档 §4.1）。 */
 onMounted(() => inputEl.value?.focus())
+
+/**
+ * 别处新建了请求 → 焦点交到这里（02 文档 §5.1「选完立刻进主界面并聚焦 URL 栏」）。
+ *
+ * 只 `select()` 不够：`select()` 只管选中文本，聚焦与否各引擎行为不一致。
+ * 新建出来的 URL 是空的，选中什么都没有，真正需要的是 focus。
+ */
+watch(
+  () => ui.urlFocusSeq,
+  () => {
+    inputEl.value?.focus()
+    inputEl.value?.select()
+  },
+)
 
 defineExpose({ focus: () => inputEl.value?.select() })
 </script>

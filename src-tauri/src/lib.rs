@@ -285,21 +285,32 @@ mod commands {
                 let _ = app_for_cleanup.emit(event, payload);
             };
 
+            // 进度事件必须节流。`execute` 每收到一个 chunk 就回调一次，而 hyper
+            // 的 chunk 是 KB 级 —— 一个 100MB 响应会产生上万次回调。每次 emit 都是
+            // 一次 JSON 序列化 + 一次跨进程投递,不节流等于用进度条把 IPC 通道堵死,
+            // 正好打在 §4.3「大响应体不卡界面」这条要求上。
+            //
+            // 50ms 一次 = 最多 20 帧/秒的进度更新,人眼看不出与逐块更新的差别。
+            // 不需要补发最后一次:终结值由 `request:done` 的 summary 带过去。
+            const PROGRESS_MIN_INTERVAL: std::time::Duration =
+                std::time::Duration::from_millis(50);
+            let mut last_progress: Option<std::time::Instant> = None;
+            let on_progress = move |progress: apogee_core::http::Progress| {
+                let now = std::time::Instant::now();
+                if last_progress.is_some_and(|at| now.duration_since(at) < PROGRESS_MIN_INTERVAL) {
+                    return;
+                }
+                last_progress = Some(now);
+                let _ = app2.emit("request:progress", serde_json::json!({
+                    "id": id,
+                    "received": progress.received,
+                    "total": progress.total,
+                }));
+            };
+
             let body = AssertUnwindSafe(async {
-                let outcome = apogee_core::http::execute(
-                    id,
-                    &spec,
-                    &spool,
-                    cancel_rx,
-                    |progress| {
-                        let _ = app2.emit("request:progress", serde_json::json!({
-                            "id": id,
-                            "received": progress.received,
-                            "total": progress.total,
-                        }));
-                    },
-                )
-                .await;
+                let outcome =
+                    apogee_core::http::execute(id, &spec, &spool, cancel_rx, on_progress).await;
 
                 match outcome {
                     apogee_core::http::Outcome::Done(meta) => {
@@ -317,9 +328,21 @@ mod commands {
                             return;
                         }
 
+                        // 2MB 以下顺手建 JSON 索引，让树视图不必再等一次往返
+                        // （2MB 以上按 02 文档 §4.4 必须用户显式点「解析」）。
+                        //
+                        // 尝试是**尽力而为**的：非 JSON 响应（HTML、图片、纯文本）
+                        // 必然解析失败,那不是故障。所以走 debug 而不是 error ——
+                        // 每发一个网页请求就刷一条 ERROR 会让真正的错误被淹掉。
+                        // 也不按 Content-Type 预先筛:相当多的 API 返回 JSON 却标着
+                        // text/plain,按头筛会让这些响应白丢树视图。
                         if meta.size_bytes < apogee_core::model::TIER_HIGHLIGHT_MAX {
                             if let Err(error) = state2.index_response(id) {
-                                tracing::error!(?error, "索引响应失败");
+                                tracing::debug!(
+                                    %error,
+                                    content_type = ?meta.content_type,
+                                    "响应体不是可索引的 JSON，跳过树索引"
+                                );
                             }
                         }
 
