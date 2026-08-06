@@ -1064,6 +1064,8 @@ pub struct ResponseSummary {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub index_bytes: Option<usize>,
     pub timing: Timing,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub actual_request: Option<crate::model::ActualRequest>,
 
     // ── HTTP 语义 ───────────────────────────────────────────────────
     //
@@ -1109,6 +1111,7 @@ impl ResponseSummary {
             total_nodes: None,
             index_bytes: None,
             timing,
+            actual_request: None,
             status: None,
             status_text: None,
             http_version: None,
@@ -1131,6 +1134,7 @@ impl ResponseSummary {
             total_nodes: None,
             index_bytes: None,
             timing: meta.timing,
+            actual_request: Some(meta.actual_request.clone()),
             status: Some(meta.status),
             status_text: Some(meta.status_text.clone()),
             http_version: Some(meta.http_version.clone()),

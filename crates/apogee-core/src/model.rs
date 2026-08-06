@@ -55,6 +55,12 @@ fn default_value_kind() -> ValueKind {
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Timing {
+    /// 变量解析、URL/Header/Body 组装等本地准备时间，不包含网络 I/O。
+    #[serde(default)]
+    pub prepare_ms: f64,
+    /// 当前 HTTP 引擎是否提供 DNS/TCP/TLS/发送四段的独立观测值。
+    #[serde(default)]
+    pub network_phases_available: bool,
     pub dns_ms: f64,
     pub tcp_ms: f64,
     pub tls_ms: f64,
@@ -62,6 +68,19 @@ pub struct Timing {
     pub ttfb_ms: f64,
     pub download_ms: f64,
     pub total_ms: f64,
+}
+
+/// 已经完成变量替换、URL 编码和请求组装的实际请求快照。
+///
+/// 只保存轻量元数据和可直接读取的小型 body；文件/流式 body 不会被读入内存。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActualRequest {
+    pub method: String,
+    pub url: String,
+    pub headers: Vec<(String, String)>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub body: Option<String>,
 }
 
 /// 响应元信息。
@@ -84,6 +103,7 @@ pub struct ResponseMeta {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub charset: Option<String>,
     pub timing: Timing,
+    pub actual_request: ActualRequest,
     pub from_cache: bool,
     /// 超过上限被截断
     pub truncated: bool,

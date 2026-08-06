@@ -14,7 +14,7 @@
 //!    把取消信号和网络 future 一起等。
 
 use crate::error::{AppError, ErrorKind, Hint};
-use crate::model::{ResponseMeta, Timing};
+use crate::model::{ActualRequest, ResponseMeta, Timing};
 use crate::request::{ApiKeyIn, AuthConfig, Body, HttpVersion, RequestSpec, ResolvedSettings};
 use crate::response::Spool;
 use crate::vars::{resolve_request, Environment};
@@ -563,6 +563,28 @@ mod tests {
         s.headers = vec![kv("Authorization", "Bearer disabled", false)];
         assert_eq!(header_values(&built(&s), "authorization"), vec!["Bearer t"]);
     }
+
+    #[test]
+    fn common_headers_are_part_of_the_actual_request() {
+        let request = built(&spec("https://a.test/x"));
+        assert_eq!(header_values(&request, "accept"), vec!["*/*"]);
+        assert_eq!(
+            header_values(&request, "user-agent"),
+            vec![concat!("Apogee/", env!("CARGO_PKG_VERSION"))]
+        );
+    }
+
+    #[test]
+    fn user_common_headers_replace_defaults() {
+        let mut s = spec("https://a.test/x");
+        s.headers = vec![
+            kv("Accept", "application/json", true),
+            kv("User-Agent", "Custom/1.0", true),
+        ];
+        let request = built(&s);
+        assert_eq!(header_values(&request, "accept"), vec!["application/json"]);
+        assert_eq!(header_values(&request, "user-agent"), vec!["Custom/1.0"]);
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -720,12 +742,20 @@ async fn execute_inner(
     mut cancel: tokio::sync::oneshot::Receiver<()>,
     on_progress: impl FnMut(Progress),
 ) -> Result<Option<ResponseMeta>, AppError> {
+    let prepare_start = Instant::now();
     // 解析在执行层入口完成，保证 URL、参数、Header、Body 和鉴权共享同一份
     // 环境快照。原始 spec 仍保留模板，不会被解析结果覆盖。
     let resolved = resolve_request(spec, environment)?;
     let settings = resolved.settings.resolve();
     let client = client_for(&settings)?;
     let (builder, url) = build_request(&client, &resolved)?;
+    let request = builder.build().map_err(|error| {
+        AppError::new(ErrorKind::Parse, "无法组装 HTTP 请求")
+            .detail(error.to_string())
+            .hint(Hint::new("检查请求方法、Header 和 Body 配置"))
+    })?;
+    let actual_request = snapshot_request(&request);
+    let prepare_ms = prepare_start.elapsed().as_secs_f64() * 1000.0;
 
     let t0 = Instant::now();
 
@@ -733,7 +763,7 @@ async fn execute_inner(
     // 把 body 下载算进超时会让正常的大文件下载被误杀。
     let head = tokio::time::timeout(
         std::time::Duration::from_millis(settings.timeout_ms),
-        builder.send(),
+        client.execute(request),
     );
 
     // 取消必须能中断**等待中**的连接。请求最常卡在 connect / TTFB 阶段，
@@ -783,9 +813,11 @@ async fn execute_inner(
         content_type,
         charset,
         timing: Timing {
-            // DNS / TCP / TLS 分解需要 reqwest 的连接级 hook，它没暴露。
-            // 这里诚实地留 0，而不是把 ttfb 硬拆成几段假数字 —— 02 文档 §4.4
-            // 的时序瀑布图会照这些值画，编出来的分解比空着更有害。
+            prepare_ms,
+            // reqwest 不公开 DNS / TCP / TLS / 请求发送的独立计时，且连接池复用时
+            // 这些阶段可能根本不发生。数值保留给未来的自定义连接器；UI 依据标志位
+            // 显示“计入 TTFB”，不能把下面的占位 0 冒充真实耗时。
+            network_phases_available: false,
             dns_ms: 0.0,
             tcp_ms: 0.0,
             tls_ms: 0.0,
@@ -794,9 +826,63 @@ async fn execute_inner(
             download_ms: (total_ms - ttfb_ms).max(0.0),
             total_ms,
         },
+        actual_request,
         from_cache: false,
         truncated,
     }))
+}
+
+fn snapshot_request(request: &reqwest::Request) -> ActualRequest {
+    const MAX_SNAPSHOT_BODY: usize = 64 * 1024;
+
+    let mut headers = request
+        .headers()
+        .iter()
+        .map(|(name, value)| {
+            (
+                name.as_str().to_string(),
+                String::from_utf8_lossy(value.as_bytes()).into_owned(),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    fn has_header(headers: &[(String, String)], needle: &str) -> bool {
+        headers
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case(needle))
+    }
+    if !has_header(&headers, "host") {
+        if let Some(host) = request.url().host_str() {
+            let value = request
+                .url()
+                .port()
+                .map(|port| format!("{host}:{port}"))
+                .unwrap_or_else(|| host.to_string());
+            headers.push(("host".into(), value));
+        }
+    }
+    if !has_header(&headers, "accept") {
+        headers.push(("accept".into(), "*/*".into()));
+    }
+
+    let body_bytes = request.body().and_then(reqwest::Body::as_bytes);
+    if !has_header(&headers, "content-length") {
+        if let Some(bytes) = body_bytes {
+            headers.push(("content-length".into(), bytes.len().to_string()));
+        }
+    }
+    headers.sort_by(|left, right| left.0.cmp(&right.0));
+
+    let body = body_bytes
+        .filter(|bytes| bytes.len() <= MAX_SNAPSHOT_BODY)
+        .map(|bytes| String::from_utf8_lossy(bytes).into_owned());
+
+    ActualRequest {
+        method: request.method().as_str().to_string(),
+        url: request.url().as_str().to_string(),
+        headers,
+        body,
+    }
 }
 
 /// 组装一个 reqwest 请求：URL、方法、鉴权、头、body。
@@ -827,6 +913,16 @@ fn build_request(
         .filter(|h| h.enabled && !h.key.trim().is_empty())
         .map(|h| h.key.trim().to_ascii_lowercase())
         .collect();
+
+    if !user_headers.contains("accept") {
+        builder = builder.header(reqwest::header::ACCEPT, "*/*");
+    }
+    if !user_headers.contains("user-agent") {
+        builder = builder.header(
+            reqwest::header::USER_AGENT,
+            concat!("Apogee/", env!("CARGO_PKG_VERSION")),
+        );
+    }
 
     builder = apply_auth(builder, &spec.auth, &user_headers);
 

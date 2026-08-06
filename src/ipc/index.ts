@@ -40,6 +40,8 @@ export interface AppError {
 export type RenderTier = 'full' | 'virtualized' | 'noHighlight' | 'summaryOnly'
 
 export interface Timing {
+  prepareMs: number
+  networkPhasesAvailable: boolean
   dnsMs: number
   tcpMs: number
   tlsMs: number
@@ -47,6 +49,14 @@ export interface Timing {
   ttfbMs: number
   downloadMs: number
   totalMs: number
+}
+
+export interface ActualRequest {
+  method: string
+  url: string
+  headers: [string, string][]
+  /** 仅小型内存请求体可用；文件和流式上传不会进入快照。 */
+  body?: string
 }
 
 /**
@@ -64,6 +74,7 @@ export interface ResponseSummary {
   /** SpanIndex 的近似常驻堆内存，不包含响应体文件或 mmap。 */
   indexBytes?: number
   timing: Timing
+  actualRequest?: ActualRequest
   // ── HTTP 语义（03 文档 §3.2）──
   // 全部可选：Spike 合成响应没有 HTTP 语义，UI 据此显示「不可用」而非编造 200。
   status?: number
