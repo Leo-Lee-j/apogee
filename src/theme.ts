@@ -115,6 +115,11 @@ const components = {
     paddingMedium: '0 12px',
     fontSizeMedium: '13px',
     borderRadiusMedium: '6px',
+    textColorPrimary: '#0c0e12',
+    textColorHoverPrimary: '#0c0e12',
+    textColorPressedPrimary: '#0c0e12',
+    textColorFocusPrimary: '#0c0e12',
+    textColorDisabledPrimary: '#0c0e12',
   },
   Card: {
     borderRadius: '6px',
@@ -162,4 +167,12 @@ export const darkThemeOverrides: GlobalThemeOverrides = {
 export const lightThemeOverrides: GlobalThemeOverrides = {
   common: commonLight,
   ...components,
+  Button: {
+    ...components.Button,
+    textColorPrimary: '#ffffff',
+    textColorHoverPrimary: '#ffffff',
+    textColorPressedPrimary: '#ffffff',
+    textColorFocusPrimary: '#ffffff',
+    textColorDisabledPrimary: '#ffffff',
+  },
 }

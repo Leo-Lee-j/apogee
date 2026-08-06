@@ -18,7 +18,7 @@ const CodeMirrorView = defineAsyncComponent(() => import('./CodeMirrorView.vue')
 const JsonTreeView = defineAsyncComponent(() => import('./JsonTreeView.vue'))
 
 type Section = 'body' | 'headers' | 'cookies' | 'timing' | 'actual'
-type BodyView = 'pretty' | 'raw' | 'preview'
+type BodyView = 'pretty' | 'raw' | 'tree' | 'preview'
 type CodeTarget = 'windows' | 'powershell' | 'posix'
 const section = ref<Section>('body')
 const bodyView = ref<BodyView>('pretty')
@@ -121,7 +121,7 @@ const timingRows = computed(() => {
 
 watch(() => resp.value?.id, () => {
   section.value = 'body'
-  bodyView.value = isJson.value ? 'pretty' : 'raw'
+  bodyView.value = isJson.value && resp.value?.syntaxHighlight ? 'pretty' : 'raw'
   copyState.value = ''
 }, { immediate: true })
 
@@ -218,8 +218,9 @@ async function copyText(text: string, success = '已复制') {
 
     <div v-if="resp && !requestError" class="subbar">
       <div v-if="section === 'body'" class="body-views" role="tablist" aria-label="响应体视图">
-        <button type="button" role="tab" :aria-selected="bodyView === 'pretty'" :disabled="!isJson" :class="{ on: bodyView === 'pretty' }" @click="bodyView = 'pretty'"><AppIcon :component="IconList" :size="14" />美化</button>
+        <button type="button" role="tab" :aria-selected="bodyView === 'pretty'" :disabled="!isJson || !resp.syntaxHighlight" :class="{ on: bodyView === 'pretty' }" @click="bodyView = 'pretty'"><AppIcon :component="IconCode" :size="14" />Body</button>
         <button type="button" role="tab" :aria-selected="bodyView === 'raw'" :class="{ on: bodyView === 'raw' }" @click="bodyView = 'raw'"><AppIcon :component="IconCode" :size="14" />原文</button>
+        <button type="button" role="tab" :aria-selected="bodyView === 'tree'" :disabled="!isJson || !resp.indexed" :class="{ on: bodyView === 'tree' }" @click="bodyView = 'tree'"><AppIcon :component="IconList" :size="14" />树形</button>
         <button type="button" role="tab" :aria-selected="bodyView === 'preview'" :disabled="!canPreview" :class="{ on: bodyView === 'preview' }" @click="bodyView = 'preview'"><AppIcon :component="IconPreview" :size="14" />预览</button>
         <span class="format-label">{{ resp.contentType ?? '未知类型' }}<template v-if="resp.charset"> · {{ resp.charset }}</template></span>
       </div>
@@ -258,13 +259,14 @@ async function copyText(text: string, success = '已复制') {
             <button type="button" @click="bodyView = 'raw'">流式预览头部</button>
           </div>
         </div>
-        <JsonTreeView v-else-if="section === 'body' && bodyView === 'pretty'" :response-id="resp.id" />
         <CodeMirrorView
-          v-else-if="section === 'body' && bodyView === 'raw'"
+          v-else-if="section === 'body' && (bodyView === 'pretty' || bodyView === 'raw')"
           :response-id="resp.id"
           :total-bytes="resp.sizeBytes"
-          :highlight="resp.syntaxHighlight"
+          :highlight="bodyView === 'pretty' && resp.syntaxHighlight"
+          :format-json="bodyView === 'pretty'"
         />
+        <JsonTreeView v-else-if="section === 'body' && bodyView === 'tree'" :response-id="resp.id" />
         <iframe v-else-if="section === 'body' && bodyView === 'preview'" class="preview" :src="previewSrc" title="响应预览" sandbox="" />
         <div v-else-if="section === 'headers'" class="data-table" role="table" aria-label="响应 Headers">
           <div class="data-row data-head" role="row"><span>名称</span><span>值</span></div>

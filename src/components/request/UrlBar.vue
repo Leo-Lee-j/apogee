@@ -129,12 +129,14 @@ defineExpose({ focus: () => inputEl.value?.select() })
 
     <AppButton
       class="send"
+      type="primary"
+      size="medium"
       :disabled="sending"
       @click="send"
     >
       {{ sending ? '等待中…' : '发送' }}
     </AppButton>
-    <AppButton class="save" @click="save">保存</AppButton>
+    <AppButton class="save" secondary size="medium" @click="save">保存</AppButton>
   </NaiveThemeScope>
   </div>
 </template>
@@ -160,21 +162,6 @@ defineExpose({ focus: () => inputEl.value?.select() })
   font-family: var(--a-font-mono);
   font-size: var(--a-fs-base);
 }
-.send, .save {
-  height: 28px; padding: 0 14px; border-radius: var(--a-radius-md); cursor: pointer;
-  font: inherit;
-}
-/* 唯一使用渐变的元素（Apogee 规范里的「Launch 按钮」）。
-   前景用 --a-on-primary：暗主题下是深色，因为白字压在 #4F80FF 上只有 3.58:1、
-   压在渐变末端 #38BDF8 上只有 2.14:1 —— 那会让按钮右半边的字不可读。 */
-.send {
-  background: var(--a-primary-gradient);
-  border: 1px solid transparent;
-  color: var(--a-on-primary);
-  font-weight: var(--a-fw-semibold);
-}
-.send:hover { background: var(--a-primary-hover); }
-.send:active { background: var(--a-primary-pressed); }
-.save { background: var(--a-bg-3); border: 1px solid var(--a-border); color: var(--a-text); }
-.save:hover { background: var(--a-hover); }
+.send, .save { min-width: 54px; }
+.send { font-weight: var(--a-fw-semibold); }
 </style>
