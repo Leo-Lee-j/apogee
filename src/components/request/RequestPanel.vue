@@ -14,8 +14,9 @@ import {
   AppSelect,
   AppTooltip,
 } from '@/components/ui'
-import { IconClose, IconCloseCircle, IconDrag, IconInfo, IconRemoveCircle } from '@/components/ui/icons'
+import { IconClose, IconInfo } from '@/components/ui/icons'
 import NaiveThemeScope from '@/components/NaiveThemeScope.vue'
+import ParameterEditor from './ParameterEditor.vue'
 
 /**
  * 请求编辑区 —— v0.1 先落地 Params、Headers、Body 三条发送主链。
@@ -29,7 +30,6 @@ const TAB_HINTS: Partial<Record<PanelTab, string>> = {
   Params: 'Path 参数由 URL 中的 :id 或 {id} 自动识别；禁用的 Query 参数会保留在草稿中，但不会发送。',
   Headers: '请求头名称不区分大小写；重复名称由后端按最终请求规则处理。',
 }
-const SHOW_PARAMETER_TYPE = false
 type RowField = 'params' | 'pathParams' | 'headers'
 type BodyType = Body['type']
 
@@ -64,8 +64,6 @@ const tabs = useTabsStore()
 const tab = computed(() => tabs.active)
 const current = ref<PanelTab>('Params')
 const exportState = ref('')
-const pendingDelete = ref<string | null>(null)
-const draggedRow = ref<{ kind: RowField; index: number } | null>(null)
 
 /** 当前 tab 下需要显示的参数/请求头表格。 */
 const editorSections = computed<EditorSection[]>(() => {
@@ -152,117 +150,22 @@ function updateRow(kind: RowField, index: number, delta: Partial<KeyValue>) {
 
 function removeRow(kind: RowField, index: number) {
   patchRows(kind, rowsFor(kind).filter((_, rowIndex) => rowIndex !== index))
-  pendingDelete.value = null
-}
-
-function deleteKey(kind: RowField, index: number) {
-  return `${kind}:${index}`
-}
-
-function confirmRemoveRow(kind: RowField, index: number) {
-  const key = deleteKey(kind, index)
-  if (pendingDelete.value === key) removeRow(kind, index)
-  else pendingDelete.value = key
-}
-
-function startRowPointerDrag(kind: RowField, index: number, event: PointerEvent) {
-  if (event.button !== 0) return
-  const handle = event.currentTarget as HTMLElement
-  draggedRow.value = { kind, index }
-  handle.setPointerCapture(event.pointerId)
-
-  const onMove = (moveEvent: PointerEvent) => moveEvent.preventDefault()
-  const onEnd = (endEvent: PointerEvent) => {
-    handle.releasePointerCapture(event.pointerId)
-    handle.removeEventListener('pointermove', onMove)
-    handle.removeEventListener('pointerup', onEnd)
-    handle.removeEventListener('pointercancel', onCancel)
-
-    const source = draggedRow.value
-    draggedRow.value = null
-    if (!source) return
-    const target = document
-      .elementFromPoint(endEvent.clientX, endEvent.clientY)
-      ?.closest<HTMLElement>('[data-parameter-row]')
-    if (!target || target.dataset.parameterKind !== source.kind) return
-    const targetIndex = Number(target.dataset.parameterIndex)
-    if (!Number.isInteger(targetIndex)) return
-
-    const rows = [...rowsFor(source.kind)]
-    const [moved] = rows.splice(source.index, 1)
-    if (!moved) return
-    const belowMiddle = endEvent.clientY > target.getBoundingClientRect().top + target.offsetHeight / 2
-    let insertAt = targetIndex + (belowMiddle ? 1 : 0)
-    if (source.index < insertAt) insertAt--
-    insertAt = Math.max(0, Math.min(rows.length, insertAt))
-    if (insertAt === source.index) return
-    rows.splice(insertAt, 0, moved)
-    patchRows(source.kind, rows)
-    pendingDelete.value = null
-  }
-  const onCancel = () => {
-    draggedRow.value = null
-    handle.removeEventListener('pointermove', onMove)
-    handle.removeEventListener('pointerup', onEnd)
-    handle.removeEventListener('pointercancel', onCancel)
-  }
-  handle.addEventListener('pointermove', onMove)
-  handle.addEventListener('pointerup', onEnd)
-  handle.addEventListener('pointercancel', onCancel)
-  event.preventDefault()
-}
-
-function editorRowProps(kind: RowField, row: EditableRow) {
-  return row.draft ? {} : {
-    'data-parameter-row': '',
-    'data-parameter-kind': kind,
-    'data-parameter-index': String(row.rowIndex),
-  }
 }
 
 function setAllRowsEnabled(kind: RowField, enabled: boolean) {
   patchRows(kind, rowsFor(kind).map((row) => ({ ...row, enabled })))
 }
 
-function enabledHeader(kind: RowField) {
-  const rows = rowsFor(kind)
-  if (rows.length === 0) return null
-  const enabledCount = rows.filter((row) => row.enabled).length
-  return h(AppCheckbox, {
-    checked: enabledCount === rows.length,
-    indeterminate: enabledCount > 0 && enabledCount < rows.length,
-    'aria-label': enabledCount === rows.length ? '禁用全部参数' : '启用全部参数',
-    'onUpdate:checked': (checked: boolean) => setAllRowsEnabled(kind, checked),
-  })
-}
+type EditableRow = KeyValue & { rowIndex: number }
 
-type EditableRow = KeyValue & { rowIndex: number; draft?: boolean }
-
-function editorRows(section: EditorSection): EditableRow[] {
-  const rows = section.rows.map((row, rowIndex) => ({ ...row, rowIndex }))
-  if (section.kind === 'pathParams') return rows
-  return [
-    ...rows,
-    {
-      enabled: false,
-      key: '',
-      value: '',
-      description: '',
-      kind: 'text' as const,
-      rowIndex: section.rows.length,
-      draft: true,
-    },
-  ]
-}
-
-function updateEditableRow(
+function updateParameterField(
   kind: RowField,
-  row: EditableRow,
+  index: number,
   field: 'key' | 'value' | 'description',
   value: string,
 ) {
-  if (!row.draft) {
-    updateRow(kind, row.rowIndex, { [field]: value })
+  if (index < rowsFor(kind).length) {
+    updateRow(kind, index, { [field]: value })
     return
   }
   if (!value) return
@@ -272,75 +175,12 @@ function updateEditableRow(
   ])
 }
 
-function textCell(kind: RowField, row: EditableRow, field: 'key' | 'value' | 'description') {
-  return h(AppInput, {
-    value: row[field] ?? '',
-    size: 'small',
-    bordered: false,
-    inputProps: { spellcheck: false },
-    placeholder: row.draft && field === 'key' ? '输入参数名' : undefined,
-    'onUpdate:value': (value: string) => updateEditableRow(kind, row, field, value),
-  })
-}
-
-function descriptionCell(kind: RowField, row: EditableRow) {
-  const children = [h('div', {
-    class: 'description-input',
-    style: { flex: '1 1 0', width: '0', minWidth: '0' },
-  }, [textCell(kind, row, 'description')])]
-  if (!row.draft) {
-    const confirming = pendingDelete.value === deleteKey(kind, row.rowIndex)
-    children.push(h(AppButton, {
-      class: 'row-delete',
-      type: confirming ? 'error' : 'default',
-      quaternary: true,
-      circle: true,
-      size: 'tiny',
-      title: confirming ? '再次点击确认删除' : '删除参数',
-      'aria-label': confirming ? '确认删除参数' : '删除参数',
-      onClick: () => confirmRemoveRow(kind, row.rowIndex),
-    }, { icon: () => h(AppIcon, { component: confirming ? IconCloseCircle : IconRemoveCircle, size: 17 }) }))
-  }
-  return h('div', {
-    class: 'description-cell',
-    style: {
-      display: 'flex',
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: '5px',
-      width: '100%',
-      minWidth: '0',
-      flexWrap: 'nowrap',
-    },
-  }, children)
-}
-
-function editorColumns(kind: RowField): DataTableColumns<EditableRow> {
-  const columns: DataTableColumns<EditableRow> = [
-    {
-      title: () => enabledHeader(kind), key: 'enabled', width: 52, align: 'center',
-      render: (row) => row.draft ? null : h('div', { class: 'enabled-cell' }, [
-        h('span', {
-          class: 'row-drag-handle',
-          title: '拖动调整参数顺序',
-          'aria-label': '拖动调整参数顺序',
-          onPointerdown: (event: PointerEvent) => startRowPointerDrag(kind, row.rowIndex, event),
-        }, [h(AppIcon, { component: IconDrag, size: 15 })]),
-        h(AppCheckbox, {
-          checked: row.enabled,
-          'aria-label': `启用 ${row.key || '空行'}`,
-          'onUpdate:checked': (checked: boolean) => updateRow(kind, row.rowIndex, { enabled: checked }),
-        }),
-      ]),
-    },
-    { title: '参数名', key: 'key', minWidth: 150, render: (row) => textCell(kind, row, 'key') },
-    { title: '参数值', key: 'value', minWidth: 180, render: (row) => textCell(kind, row, 'value') },
-  ]
-  if (SHOW_PARAMETER_TYPE) {
-    columns.push({ title: '类型', key: 'kind', width: 100, render: (row) => row.kind ?? 'text' })
-  }
-  columns.push({ title: '说明', key: 'description', minWidth: 180, render: (row) => descriptionCell(kind, row) })
-  return columns
+function reorderRows(kind: RowField, from: number, to: number) {
+  const rows = [...rowsFor(kind)]
+  const [moved] = rows.splice(from, 1)
+  if (!moved) return
+  rows.splice(to, 0, moved)
+  patchRows(kind, rows)
 }
 
 function setBodyType(nextType: BodyType) {
@@ -512,15 +352,14 @@ async function copyCurl() {
     <div v-else class="body">
       <template v-if="current === 'Params' || current === 'Headers'">
         <section v-for="section in editorSections" :key="section.kind" class="parameter-table">
-          <AppDataTable
-            :columns="editorColumns(section.kind)"
-            :data="editorRows(section)"
-            :row-key="(row: EditableRow) => `${section.kind}-${row.rowIndex}`"
-            :row-props="(row: EditableRow) => editorRowProps(section.kind, row)"
-            :row-class-name="(row: EditableRow) => row.draft ? 'draft' : row.enabled ? '' : 'off'"
-            :single-line="false"
-            :bordered="false"
-            size="small"
+          <ParameterEditor
+            :rows="section.rows"
+            :allow-create="section.kind !== 'pathParams'"
+            @update-field="(index, field, value) => updateParameterField(section.kind, index, field, value)"
+            @update-enabled="(index, enabled) => updateRow(section.kind, index, { enabled })"
+            @set-all-enabled="setAllRowsEnabled(section.kind, $event)"
+            @remove="removeRow(section.kind, $event)"
+            @reorder="(from, to) => reorderRows(section.kind, from, to)"
           />
         </section>
       </template>
@@ -636,6 +475,7 @@ async function copyCurl() {
   background: var(--a-bg-2);
 }
 .config-block + .config-block { margin-top: 8px; }
+.parameter-table { min-width: 0; overflow-x: auto; padding: 8px; }
 .parameter-table + .parameter-table { margin-top: 8px; }
 .config-head, .section-head {
   display: flex; align-items: center; gap: 8px;
@@ -653,41 +493,13 @@ async function copyCurl() {
 .hint-title { cursor: help; border-bottom: 1px dotted var(--a-text-faint); }
 .app-data-table :deep(.n-data-table-th) { font-size: 11px; color: var(--a-text-faint); }
 .app-data-table :deep(.n-data-table-td) { height: 38px; padding: 0 6px; }
-.app-data-table :deep(.off) { opacity: 0.45; }
-.app-data-table :deep(.draft) { opacity: 0.72; }
 .app-data-table :deep(.n-data-table-th),
 .app-data-table :deep(.n-data-table-td) {
   border-right: 0 !important;
   border-bottom: 0 !important;
 }
-.row-drag-handle {
-  position: absolute; top: 50%; left: -24px;
-  transform: translateY(-50%);
-  width: 24px; height: 30px;
-  display: inline-flex; align-items: center; justify-content: center;
-  color: var(--a-text-faint); cursor: grab; opacity: 0;
-  touch-action: none; user-select: none;
-}
-.app-data-table :deep(.n-data-table-tr:hover) .row-drag-handle,
-.row-drag-handle:focus-visible { opacity: 1; }
-.row-drag-handle:hover { cursor: grab; color: var(--a-text); }
-.row-drag-handle:active { cursor: grabbing; color: var(--a-text); }
-.enabled-cell {
-  position: relative;
-  width: 100%; height: 38px;
-  display: flex; align-items: center; justify-content: center;
-}
-.parameter-table { padding-left: 24px; }
 .app-data-table :deep(.n-input),
 .app-data-table :deep(.n-input__input-el) { height: 32px; min-height: 32px; }
-.description-cell {
-  width: 100%; min-width: 0;
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 5px;
-}
-.description-cell .app-input { flex: 1 1 0; width: 0; min-width: 0; }
 .description-input { flex: 1 1 0; width: 0; min-width: 0; }
 .description-input .app-input { width: 100%; }
 .row-delete { flex: 0 0 28px; align-self: center; color: var(--a-text-faint); }
