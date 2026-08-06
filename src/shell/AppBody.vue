@@ -195,9 +195,9 @@ function readSplitMetrics() {
   const el = splitEl.value
   if (!el) return
   const vertical = ui.layout === 'side-by-side'
-  const styles = window.getComputedStyle(el)
-  const gutter = Number.parseFloat(vertical ? styles.columnGap : styles.rowGap)
-  splitGutter.value = Number.isFinite(gutter) ? gutter : 3
+  // The splitter is the only fixed-width flex child. Keep this independent of
+  // the parent gap so the two panes never acquire an extra visual column.
+  splitGutter.value = 3
   const rect = el.getBoundingClientRect()
   splitSize.value = vertical ? rect.width : rect.height
 }
@@ -478,7 +478,7 @@ function onKeydown(e: KeyboardEvent) {
 /* 焦点环画在分隔条内侧：3px 宽的元素套 2px outline + 1px offset 会糊成一团。 */
 .resizer:focus-visible { outline-offset: -1px; }
 
-.split { flex: 1 1 auto; display: flex; min-height: 0; gap: var(--a-gutter); }
+.split { flex: 1 1 auto; display: flex; min-height: 0; gap: 0; }
 .split-resizer {
   flex: 0 0 auto;
   position: relative;
@@ -487,12 +487,10 @@ function onKeydown(e: KeyboardEvent) {
 }
 .split-resizer.vertical {
   width: var(--a-gutter);
-  margin: 0 calc(-1 * var(--a-gutter));
   cursor: col-resize;
 }
 .split-resizer.horizontal {
   height: var(--a-gutter);
-  margin: calc(-1 * var(--a-gutter)) 0;
   cursor: row-resize;
 }
 .split-resizer::before,

@@ -118,15 +118,22 @@ export const useUiStore = defineStore('ui', () => {
   }
 
   function cycleLayout() {
-    const order: LayoutMode[] = ['stacked', 'side-by-side', 'focus']
-    layout.value = order[(order.indexOf(layout.value) + 1) % order.length]!
+    const order: LayoutMode[] = ['side-by-side', 'stacked', 'focus']
+    const index = order.indexOf(layout.value)
+    setLayout(order[(index < 0 ? 0 : index + 1) % order.length]!)
+  }
+
+  function setLayout(next: LayoutMode) {
+    if (layout.value === next) return
+    layout.value = next
+    resetRequestRatio()
   }
 
   return {
     sidebarVisible, sidebarWidth, sidebarMaxW, layout, themeMode, requestRatio,
     historyOpen, paletteOpen, spikeOpen, spikePanel,
     urlFocusSeq, focusUrl,
-    systemDark, isDark, applyTheme, cycleLayout,
+    systemDark, isDark, applyTheme, cycleLayout, setLayout,
     setSidebarWidth, resetSidebarWidth, syncViewport,
     setRequestRatio, resetRequestRatio,
   }

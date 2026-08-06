@@ -1,8 +1,13 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
+import { h } from 'vue'
+import type { SelectOption } from 'naive-ui'
 import { useTabsStore } from '@/stores/tabs'
 import { useUiStore } from '@/stores/ui'
 import { useRequest } from '@/stores/request'
+import { AppSelect } from '@/components/ui'
+import { AppButton } from '@/components/ui'
+import NaiveThemeScope from '@/components/NaiveThemeScope.vue'
 
 /**
  * URL 栏，40px —— 全产品最重要的一行（02 文档 §4.1）。
@@ -22,24 +27,32 @@ const tabs = useTabsStore()
 const ui = useUiStore()
 const { sending, send } = useRequest()
 const inputEl = ref<HTMLInputElement | null>(null)
-const methodOpen = ref(false)
 
 const tab = computed(() => tabs.active)
 
-/** 方法选择器的前景色与 pill 底色。两个都取自令牌，OPTIONS 回落到 HEAD 档。 */
-const methodVar = computed(() => methodFg(tab.value?.method ?? 'GET'))
-const methodBgVar = computed(() => methodBg(tab.value?.method ?? 'GET'))
+function setMethod(m: string) {
+  if (tab.value) tabs.patch(tab.value.id, { method: m, dirty: true })
+}
 
 function methodFg(m: string) {
   return `var(--a-${m.toLowerCase()}, var(--a-head))`
 }
-function methodBg(m: string) {
-  return `var(--a-${m.toLowerCase()}-bg, var(--a-head-bg))`
-}
 
-function setMethod(m: string) {
-  if (tab.value) tabs.patch(tab.value.id, { method: m, dirty: true })
-  methodOpen.value = false
+function renderMethodLabel(option: SelectOption, selected: boolean) {
+  return h(
+    'span',
+    {
+      style: {
+        display: 'block',
+        width: '100%',
+        color: methodFg(String(option.value)),
+        fontFamily: 'var(--a-font-mono)',
+        fontWeight: 'var(--a-fw-semibold)',
+        textAlign: selected ? 'center' : 'left',
+      },
+    },
+    String(option.label),
+  )
 }
 
 function onUrl(e: Event) {
@@ -91,33 +104,15 @@ defineExpose({ focus: () => inputEl.value?.select() })
 
 <template>
   <div class="urlbar">
-    <div class="method-wrap">
-      <button
-        class="method"
-        type="button"
-        :style="{ color: methodVar, background: methodBgVar, borderColor: methodVar }"
-        aria-haspopup="listbox"
-        :aria-expanded="methodOpen"
-        @click="methodOpen = !methodOpen"
-      >
-        {{ tab?.method ?? 'GET' }} <span class="caret">▾</span>
-      </button>
-      <!--
-        自研下拉而不是 n-select：这是首屏热路径。
-        02 文档 §7.5 第 5 条把 naive-ui 限定在低频、非热路径场景。
-      -->
-      <ul v-if="methodOpen" class="menu" role="listbox">
-        <li v-for="m in METHODS" :key="m" role="option" :aria-selected="m === tab?.method">
-          <button
-            type="button"
-            :style="{ color: methodFg(m) }"
-            @click="setMethod(m)"
-          >
-            {{ m }}
-          </button>
-        </li>
-      </ul>
-    </div>
+  <NaiveThemeScope>
+    <AppSelect
+      class="method-select"
+      :value="tab?.method ?? 'GET'"
+      :options="METHODS.map((value) => ({ label: value, value }))"
+      :render-label="renderMethodLabel"
+      size="small"
+      @update:value="setMethod(String($event))"
+    />
 
     <input
       ref="inputEl"
@@ -132,15 +127,15 @@ defineExpose({ focus: () => inputEl.value?.select() })
       @keydown="onKeydown"
     />
 
-    <button
+    <AppButton
       class="send"
-      type="button"
       :disabled="sending"
       @click="send"
     >
       {{ sending ? '等待中…' : '发送' }}
-    </button>
-    <button class="save" type="button" @click="save">保存</button>
+    </AppButton>
+    <AppButton class="save" @click="save">保存</AppButton>
+  </NaiveThemeScope>
   </div>
 </template>
 
@@ -157,6 +152,9 @@ defineExpose({ focus: () => inputEl.value?.select() })
      下边界由块自己的边框画（见 AppBody.vue 的 .head） */
 }
 .method-wrap { position: relative; }
+.method-select { width: 116px; flex: 0 0 116px; }
+.method-select :deep(.n-base-selection) { font-family: var(--a-font-mono); font-weight: var(--a-fw-semibold); }
+.method-select :deep(.n-base-selection-label) { justify-content: center; }
 /* 方法选择器是全产品最显眼的语义控件，用 Apogee 的「半透明底 + 高亮前景」处理。
    底色与描边由 :style 按当前方法绑定，见 methodBg()。颜色 + 文字双通道，
    两种形态（pill 与裸文字）的对比度都由 scripts/check-contrast.mjs 守着。 */

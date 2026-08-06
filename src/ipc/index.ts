@@ -159,8 +159,17 @@ export interface TreeNode {
 // 底座
 // ─────────────────────────────────────────────────────────────────────
 
-/** 是否跑在 Tauri 宿主里。浏览器里跑 `vite dev` 时为 false，用于 Spike 对照。 */
-export const inTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
+/**
+ * 是否跑在具备完整 IPC 能力的 Tauri 宿主里。
+ *
+ * 仅检查 `__TAURI_INTERNALS__` 这个属性不够：某些 WebView/浏览器调试环境
+ * 会暴露一个空的内部对象，随后调用 `invoke` 只会得到难以定位的
+ * `Cannot read properties of undefined (reading 'invoke')`。
+ */
+export const inTauri =
+  typeof window !== 'undefined' &&
+  typeof (window as Window & { __TAURI_INTERNALS__?: { invoke?: unknown } })
+    .__TAURI_INTERNALS__?.invoke === 'function'
 
 function isAppError(e: unknown): e is AppError {
   return typeof e === 'object' && e !== null && 'kind' in e && 'message' in e
@@ -177,6 +186,14 @@ export function normalizeError(e: unknown): AppError {
 }
 
 async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+  if (!inTauri) {
+    throw {
+      kind: 'io',
+      message: '当前页面未连接到 Apogee 桌面宿主，无法执行请求',
+      detail: `IPC 命令：${cmd}`,
+      hints: [{ label: '请从 Apogee 桌面应用启动，而不是直接打开 Vite 预览页' }],
+    } satisfies AppError
+  }
   try {
     return await tauriInvoke<T>(cmd, args)
   } catch (e) {

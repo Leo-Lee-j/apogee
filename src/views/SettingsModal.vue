@@ -84,7 +84,7 @@ const layoutOptions = [
                     class="control"
                     :value="ui.layout"
                     :options="layoutOptions"
-                    @update:value="(value: any) => { ui.layout = value }"
+                    @update:value="(value: any) => { ui.setLayout(value) }"
                   />
                 </AppFormItem>
               </AppForm>

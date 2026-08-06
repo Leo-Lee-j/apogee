@@ -14,7 +14,7 @@ import {
   AppPopconfirm,
   AppSpace,
 } from '@/components/ui'
-import { IconAdd, IconDelete, IconEdit, IconLocate, IconSort } from '@/components/ui/icons'
+import { IconAdd, IconDelete, IconEdit, IconLocate, IconSort, IconFolder, IconFolderOpen, IconRequest } from '@/components/ui/icons'
 import NaiveThemeScope from '@/components/NaiveThemeScope.vue'
 import {
   ROW_H,
@@ -570,12 +570,14 @@ defineExpose({
           :aria-current="n.id === activeNodeId ? 'true' : undefined"
           :style="{
             transform: `translateY(${(startIdx + i) * ROW_H}px)`,
-            paddingLeft: `${6 + n.depth * 12}px`,
+            paddingLeft: `${8 + n.depth * 14}px`,
           }"
           @click="toggle(n)"
         >
-          <span v-if="n.isFolder" class="caret">{{ n.expanded ? '▾' : '▸' }}</span>
-          <span v-else class="m" :style="{ color: methodColor[n.method!] ?? 'var(--a-head)' }">{{ n.method }}</span>
+          <span class="node-icon" :class="{ folder: n.isFolder }">
+            <AppIcon :component="n.isFolder ? (n.expanded ? IconFolderOpen : IconFolder) : IconRequest" :size="15" />
+          </span>
+          <span v-if="!n.isFolder" class="m" :style="{ color: methodColor[n.method!] ?? 'var(--a-head)' }">{{ n.method }}</span>
           <span class="name">{{ n.name }}</span>
         </div>
       </div>
@@ -683,13 +685,15 @@ defineExpose({
   box-shadow: inset 2px 0 0 var(--a-primary);
 }
 .row.active:hover { background: var(--a-selected); }
-.caret {
+.node-icon {
   display: flex;
   align-items: center;
-  width: 10px;
+  justify-content: center;
+  flex: 0 0 16px;
   height: 100%;
   color: var(--a-text-faint);
 }
+.node-icon.folder { color: var(--a-text-dim); }
 .m,
 .name {
   display: block;
