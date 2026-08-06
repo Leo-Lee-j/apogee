@@ -37,6 +37,12 @@ const S3Panel = defineAsyncComponent(() => import('@/spike/S3Panel.vue'))
 const ui = useUiStore()
 const tabs = useTabsStore()
 const workspace = useWorkspaceStore()
+const historyMounted = ref(false)
+const paletteMounted = ref(false)
+
+// 首次打开时才下载弹窗；之后保持挂载，仅切换 NModal 的 show，保证进出场动画完整。
+watch(() => ui.historyOpen, (open) => { if (open) historyMounted.value = true }, { immediate: true })
+watch(() => ui.paletteOpen, (open) => { if (open) paletteMounted.value = true }, { immediate: true })
 
 /** 侧边栏延后到首帧之后再挂，避免和首屏抢主线程（03 文档 §4.1 分阶段启动）。 */
 const sidebarReady = ref(false)
@@ -393,8 +399,8 @@ function onKeydown(e: KeyboardEvent) {
       </WorkspaceArea>
     </div>
     <StatusBar />
-    <HistoryPanel v-if="ui.historyOpen" />
-    <CommandPalette v-if="ui.paletteOpen" />
+    <HistoryPanel v-if="historyMounted" />
+    <CommandPalette v-if="paletteMounted" />
   </div>
 </template>
 

@@ -1,0 +1,20 @@
+/** Product-level icon aliases. Keep icon-set imports in this file for one-point replacement. */
+export {
+  AddOutline as IconAdd,
+  ClipboardOutline as IconClipboard,
+  CloseOutline as IconClose,
+  CloudUploadOutline as IconCloudUpload,
+  ContractOutline as IconRestore,
+  CreateOutline as IconEdit,
+  DocumentTextOutline as IconDocument,
+  DownloadOutline as IconDownload,
+  ExpandOutline as IconMaximize,
+  FlashOutline as IconFlash,
+  LocateOutline as IconLocate,
+  MoonOutline as IconMoon,
+  RemoveOutline as IconMinimize,
+  SettingsOutline as IconSettings,
+  SwapVerticalOutline as IconSort,
+  TimeOutline as IconHistory,
+  TrashOutline as IconDelete,
+} from '@vicons/ionicons5'

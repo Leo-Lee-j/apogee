@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref } from 'vue'
 import { AppAlert, AppButton, AppTag } from '@/components/ui'
+import { AppIcon } from '@/components/ui'
+import { IconClipboard, IconClose, IconCloudUpload, IconDocument, IconFlash } from '@/components/ui/icons'
 import NaiveThemeScope from '@/components/NaiveThemeScope.vue'
 import { useTabsStore } from '@/stores/tabs'
 import { useWorkspaceStore } from '@/stores/workspace'
@@ -37,19 +39,12 @@ interface NewOption {
   id: string
   title: string
   desc: string
-  icon: keyof typeof ICONS
+  icon: 'bolt' | 'file' | 'clipboard' | 'import'
   kbd?: string
   badge?: string
   reason?: string
   run?: () => void | Promise<void>
 }
-
-const ICONS = {
-  bolt: ['M9 1.5 3.5 9.5H7.5L7 14.5 12.5 6.5H8.5L9 1.5Z'],
-  file: ['M4 1.5h5l3.5 3.5v9.5H4z', 'M9 1.5V5h3.5'],
-  clipboard: ['M6 2.5h4v2H6z', 'M6 3.5H4v11h8v-11h-2'],
-  import: ['M8 2v7.5', 'M5 6.5 8 9.5l3-3', 'M2.5 11.5v2h11v-2'],
-} satisfies Record<string, string[]>
 
 /** 选择快捷请求：把当前独立面板标签转换为空白请求编辑标签。 */
 function quickRequest() {
@@ -242,9 +237,7 @@ onMounted(async () => {
           @click="closePanel"
         >
           <template #icon>
-            <svg class="ico" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-              <path d="M4 4l8 8M12 4l-8 8" />
-            </svg>
+            <AppIcon :component="IconClose" :size="16" />
           </template>
         </AppButton>
       </header>
@@ -289,9 +282,10 @@ onMounted(async () => {
               @click="pick(option)"
             >
               <span class="ic">
-                <svg class="ico" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-                  <path v-for="(d, i) in ICONS[option.icon]" :key="i" :d="d" />
-                </svg>
+                <AppIcon
+                  :component="option.icon === 'bolt' ? IconFlash : option.icon === 'file' ? IconDocument : option.icon === 'clipboard' ? IconClipboard : IconCloudUpload"
+                  :size="18"
+                />
               </span>
               <span class="tx">
                 <span class="top">

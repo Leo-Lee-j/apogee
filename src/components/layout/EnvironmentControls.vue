@@ -1,40 +1,38 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import type { EnvironmentVariable } from '@/ipc'
 import { useWorkspaceStore } from '@/stores/workspace'
+import { AppButton, AppCheckbox, AppIcon, AppInput, AppPopover, AppSelect } from '@/components/ui'
+import { IconAdd, IconDelete } from '@/components/ui/icons'
 
 const workspace = useWorkspaceStore()
 const open = ref(false)
+const environmentOptions = computed(() => [
+  { label: '无环境', value: '' },
+  ...workspace.environments.map((item) => ({ label: item.name, value: item.id })),
+])
 
-function selectEnvironment(event: Event) {
-  const id = (event.target as HTMLSelectElement).value
+function selectEnvironment(id: string | null) {
   workspace.selectEnvironment(id || null)
-  open.value = false
 }
 
-function updateEnvironmentName(event: Event) {
+function updateEnvironmentName(value: string) {
   const environment = workspace.activeEnvironment
   if (!environment) return
-  workspace.updateEnvironment(environment.id, {
-    name: (event.target as HTMLInputElement).value,
-  })
+  workspace.updateEnvironment(environment.id, { name: value })
 }
 
-function updateVariable(index: number, field: 'key' | 'value', event: Event) {
+function updateVariable(index: number, field: 'key' | 'value', value: string) {
   const environment = workspace.activeEnvironment
   if (!environment) return
-  const delta: Partial<EnvironmentVariable> = {
-    [field]: (event.target as HTMLInputElement).value,
-  }
+  const delta: Partial<EnvironmentVariable> = { [field]: value }
   workspace.updateEnvironmentVariable(environment.id, index, delta)
 }
 
-function updateEnabled(index: number, event: Event) {
+function updateEnabled(index: number, enabled: boolean) {
   const environment = workspace.activeEnvironment
   if (!environment) return
-  workspace.updateEnvironmentVariable(environment.id, index, {
-    enabled: (event.target as HTMLInputElement).checked,
-  })
+  workspace.updateEnvironmentVariable(environment.id, index, { enabled })
 }
 
 async function createEnvironment() {
@@ -47,38 +45,42 @@ async function createEnvironment() {
   <div class="environment-controls">
     <label class="environment-select" title="选择请求变量环境">
       <span>环境</span>
-      <select
+      <AppSelect
+        class="environment-select-control"
         :value="workspace.activeEnvironmentId ?? ''"
+        :options="environmentOptions"
         aria-label="请求变量环境"
-        @change="selectEnvironment"
-      >
-        <option value="">无环境</option>
-        <option v-for="item in workspace.environments" :key="item.id" :value="item.id">
-          {{ item.name }}
-        </option>
-      </select>
+        @update:value="selectEnvironment"
+      />
     </label>
-    <button
-      class="variables-button"
-      type="button"
-      :disabled="!workspace.available"
-      :aria-expanded="open"
-      title="编辑环境变量"
-      @click="open = !open"
+    <AppPopover
+      v-model:show="open"
+      trigger="click"
+      placement="bottom-end"
+      :show-arrow="false"
+      :style="{ width: 'min(430px, calc(100vw - 24px))' }"
     >
-      变量
-    </button>
-
-    <div v-if="open" class="environment-popover" role="dialog" aria-label="环境变量">
+      <template #trigger>
+        <AppButton
+          class="variables-button"
+          size="small"
+          :disabled="!workspace.available"
+          :aria-expanded="open"
+          title="编辑环境变量"
+        >
+          变量
+        </AppButton>
+      </template>
+      <div class="environment-popover" role="dialog" aria-label="环境变量">
       <template v-if="workspace.activeEnvironment">
         <div class="environment-head">
-          <input
+          <AppInput
             class="environment-name"
             :value="workspace.activeEnvironment.name"
             aria-label="环境名称"
-            @input="updateEnvironmentName"
+            @update:value="updateEnvironmentName"
           />
-          <button type="button" class="link" @click="workspace.saveEnvironment()">保存</button>
+          <AppButton text type="primary" size="small" @click="workspace.saveEnvironment()">保存</AppButton>
         </div>
         <div class="environment-rows">
           <div
@@ -86,49 +88,56 @@ async function createEnvironment() {
             :key="`${workspace.activeEnvironment.id}-${index}`"
             class="environment-row"
           >
-            <input
+            <AppCheckbox
               :checked="variable.enabled"
-              type="checkbox"
               :aria-label="`启用变量 ${variable.key || '空变量'}`"
-              @change="updateEnabled(index, $event)"
+              @update:checked="updateEnabled(index, $event)"
             />
-            <input
+            <AppInput
               class="environment-key"
               :value="variable.key"
               placeholder="变量名"
-              spellcheck="false"
-              @input="updateVariable(index, 'key', $event)"
+              :input-props="{ spellcheck: false }"
+              @update:value="updateVariable(index, 'key', $event)"
             />
-            <input
+            <AppInput
               class="environment-value"
               :value="variable.value"
               placeholder="变量值"
-              spellcheck="false"
-              @input="updateVariable(index, 'value', $event)"
+              :input-props="{ spellcheck: false }"
+              @update:value="updateVariable(index, 'value', $event)"
             />
-            <button
-              type="button"
+            <AppButton
               class="delete"
+              quaternary
+              circle
+              size="small"
               aria-label="删除变量"
               @click="workspace.removeEnvironmentVariable(workspace.activeEnvironment.id, index)"
             >
-              ×
-            </button>
+              <template #icon><AppIcon :component="IconDelete" :size="15" /></template>
+            </AppButton>
           </div>
         </div>
-        <button
-          type="button"
-          class="link"
+        <AppButton
+          text
+          type="primary"
+          size="small"
           @click="workspace.addEnvironmentVariable(workspace.activeEnvironment.id)"
         >
-          + 变量
-        </button>
+          <template #icon><AppIcon :component="IconAdd" :size="14" /></template>
+          变量
+        </AppButton>
       </template>
       <template v-else>
         <p class="environment-empty">还没有环境。</p>
-        <button type="button" class="link" @click="createEnvironment">+ 创建环境</button>
+        <AppButton text type="primary" size="small" @click="createEnvironment">
+          <template #icon><AppIcon :component="IconAdd" :size="14" /></template>
+          创建环境
+        </AppButton>
       </template>
-    </div>
+      </div>
+    </AppPopover>
   </div>
 </template>
 
@@ -151,61 +160,24 @@ async function createEnvironment() {
   color: var(--a-text-faint);
   font-size: var(--a-fs-xs);
 }
-.environment-select select,
-.variables-button {
-  height: 24px;
-  border: 1px solid var(--a-border);
-  border-radius: var(--a-radius-sm);
-  background: var(--a-bg-3);
-  color: var(--a-text);
-  font: var(--a-fs-xs) var(--a-font-mono);
-}
-.environment-select select { max-width: 128px; padding: 0 5px; }
-.variables-button { padding: 0 7px; color: var(--a-text-dim); cursor: pointer; }
-.variables-button:hover:not(:disabled) { color: var(--a-text); background: var(--a-hover); }
-.variables-button:disabled { opacity: 0.5; cursor: not-allowed; }
+.environment-select-control { width: 128px; }
+.environment-select-control :deep(.n-base-selection-label) { font-family: var(--a-font-mono); }
+.variables-button { font-family: var(--a-font-mono); }
 .environment-popover {
-  position: absolute;
-  z-index: 30;
-  top: calc(100% + 5px);
-  right: 4px;
-  width: min(430px, calc(100vw - 24px));
-  padding: 8px;
-  background: var(--a-bg-2);
-  border: 1px solid var(--a-border-strong);
-  border-radius: var(--a-radius-md);
-  box-shadow: var(--a-shadow-md);
+  width: 100%;
 }
 .environment-head { display: flex; align-items: center; gap: 8px; padding-bottom: 7px; border-bottom: 1px solid var(--a-border); }
-.environment-name {
-  flex: 1;
-  min-width: 0;
-  height: 26px;
-  padding: 0 7px;
-  border: 1px solid var(--a-border);
-  border-radius: var(--a-radius-sm);
-  background: var(--a-bg-3);
-  color: var(--a-text);
-  font: 12px var(--a-font-mono);
-}
+.environment-name { flex: 1; min-width: 0; }
 .environment-rows { display: flex; flex-direction: column; gap: 5px; max-height: 260px; padding: 8px 0; overflow: auto; }
 .environment-row { display: flex; align-items: center; gap: 4px; min-width: 0; }
 .environment-key,
-.environment-value {
-  min-width: 0;
-  height: 25px;
-  padding: 0 5px;
-  border: 1px solid var(--a-border);
-  border-radius: var(--a-radius-sm);
-  background: var(--a-bg-3);
-  color: var(--a-text);
-  font: 11px var(--a-font-mono);
-}
+.environment-value { min-width: 0; }
+.environment-key :deep(.n-input__input-el),
+.environment-value :deep(.n-input__input-el),
+.environment-name :deep(.n-input__input-el) { font-family: var(--a-font-mono); }
 .environment-key { flex: 0 0 118px; }
 .environment-value { flex: 1 1 auto; }
-.delete { width: 24px; height: 24px; padding: 0; border: 0; background: transparent; color: var(--a-text-faint); cursor: pointer; }
+.delete { flex: 0 0 auto; color: var(--a-text-faint); }
 .delete:hover { color: var(--a-error); }
-.link { padding: 2px 4px; border: 0; background: transparent; color: var(--a-primary); font: inherit; cursor: pointer; }
-.link:hover { text-decoration: underline; }
 .environment-empty { margin: 4px 0 8px; color: var(--a-text-dim); font-size: 12px; }
 </style>

@@ -3,6 +3,8 @@ import { computed, ref } from 'vue'
 import type { AuthConfig, Body, KeyValue } from '@/ipc'
 import { useTabsStore, type Tab } from '@/stores/tabs'
 import { exportCurl } from '@/features/curl'
+import { AppIcon } from '@/components/ui'
+import { IconClose } from '@/components/ui/icons'
 
 /**
  * 请求编辑区 —— v0.1 先落地 Params、Headers、Body 三条发送主链。
@@ -263,7 +265,7 @@ async function copyCurl() {
   }
   window.setTimeout(() => { exportState.value = '' }, 1800)
 }
-</script>
+  </script>
 
 <template>
   <section class="req">
@@ -318,7 +320,7 @@ async function copyCurl() {
                 <td><input :value="row.value" class="cell" spellcheck="false" @input="onText(section.kind, index, 'value', $event)" /></td>
                 <td><input :value="row.description ?? ''" class="cell" @input="onText(section.kind, index, 'description', $event)" /></td>
                 <td class="c">
-                  <button class="del" type="button" aria-label="删除" @click="removeRow(section.kind, index)">×</button>
+                  <button class="del" type="button" aria-label="删除" @click="removeRow(section.kind, index)"><AppIcon :component="IconClose" :size="13" /></button>
                 </td>
               </tr>
               <tr><td class="c" /><td colspan="4"><button class="link" type="button" @click="addRow(section.kind)">+ 新增</button></td></tr>
@@ -366,7 +368,7 @@ async function copyCurl() {
                   <option value="text">文本</option><option value="file">文件</option>
                 </select>
               </td>
-              <td class="c"><button class="del" type="button" aria-label="删除" @click="removeBodyRow(index)">×</button></td>
+              <td class="c"><button class="del" type="button" aria-label="删除" @click="removeBodyRow(index)"><AppIcon :component="IconClose" :size="13" /></button></td>
             </tr>
             <tr><td class="c" /><td colspan="4"><button class="link" type="button" @click="addBodyRow">+ 新增</button></td></tr>
           </tbody>
@@ -451,7 +453,7 @@ async function copyCurl() {
   color: var(--a-text); font: 12px/1 var(--a-font-mono); padding: 0 6px;
 }
 .cell:focus { background: var(--a-bg-3); outline: 2px solid var(--a-focus); outline-offset: -2px; }
-.del { background: transparent; border: none; color: var(--a-text-faint); cursor: pointer; }
+.del { width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; background: transparent; border: none; color: var(--a-text-faint); cursor: pointer; }
 .del:hover { color: var(--a-error); }
 .body-editor { display: flex; flex-direction: column; gap: 8px; padding: 8px; min-height: 100%; }
 .body-types { display: flex; align-items: center; gap: 14px; flex: 0 0 auto; }

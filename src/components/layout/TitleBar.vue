@@ -4,6 +4,8 @@ import { useUiStore } from '@/stores/ui'
 import { useTabsStore } from '@/stores/tabs'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { windowControls, type Unlisten } from '@/ipc'
+import { AppIcon } from '@/components/ui'
+import { IconDocument, IconHistory, IconMoon, IconSettings } from '@/components/ui/icons'
 
 /**
  * 顶栏，36px（02 文档 §3.2）。
@@ -51,16 +53,22 @@ onBeforeUnmount(() => stopWatching?.())
 
     <div class="spacer" />
 
-    <button class="icon" type="button" title="Spike 面板" @click="ui.spikeOpen = true">S</button>
-    <button class="icon" type="button" title="请求历史" aria-label="请求历史" @click="ui.historyOpen = true">↶</button>
-    <button class="icon" type="button" title="设置" aria-label="设置" @click="tabs.openSettings()">⚙</button>
+    <button class="icon" type="button" title="Spike 面板" aria-label="Spike 面板" @click="ui.spikeOpen = true">
+      <AppIcon :component="IconDocument" :size="15" />
+    </button>
+    <button class="icon" type="button" title="请求历史" aria-label="请求历史" @click="ui.historyOpen = true">
+      <AppIcon :component="IconHistory" :size="15" />
+    </button>
+    <button class="icon" type="button" title="设置" aria-label="设置" @click="tabs.openSettings()">
+      <AppIcon :component="IconSettings" :size="15" />
+    </button>
     <button
       class="icon"
       type="button"
       title="切换主题"
       @click="ui.themeMode = ui.isDark ? 'light' : 'dark'; ui.applyTheme()"
     >
-      ◐
+      <AppIcon :component="IconMoon" :size="15" />
     </button>
 
     <!--
@@ -141,6 +149,7 @@ onBeforeUnmount(() => stopWatching?.())
 }
 .spacer { flex: 1 1 auto; }
 .icon { width: 24px; text-align: center; }
+.icon :deep(.n-icon) { vertical-align: middle; }
 
 /* ── 窗口控制 ──
    负 margin 抵掉 .titlebar 的右侧 padding，让按钮真正贴到窗口右上角。

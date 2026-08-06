@@ -1,13 +1,16 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useTabsStore } from '@/stores/tabs'
 import { useUiStore } from '@/stores/ui'
+import { AppInput, AppModal } from '@/components/ui'
+import NaiveThemeScope from '@/components/NaiveThemeScope.vue'
 
 const ui = useUiStore()
 const tabs = useTabsStore()
 const query = ref('')
 const selected = ref(0)
-const input = ref<HTMLInputElement | null>(null)
+const input = ref<{ focus: () => void } | null>(null)
+const show = ref(false)
 
 const commands = computed(() => [
   { id: 'new', label: '新建快捷请求', hint: 'Ctrl+T', run: () => tabs.openQuick() },
@@ -37,29 +40,56 @@ function onKeydown(event: KeyboardEvent) {
   else if (event.key === 'Enter') { event.preventDefault(); run() }
 }
 
-onMounted(() => nextTick(() => input.value?.focus()))
+watch(
+  () => ui.paletteOpen,
+  (open) => {
+    show.value = open
+  },
+)
+watch(show, (open) => {
+  if (!open && ui.paletteOpen) ui.paletteOpen = false
+})
+
+onMounted(() => {
+  void nextTick(() => { show.value = ui.paletteOpen })
+})
+
+function focusInput() {
+  void nextTick(() => input.value?.focus())
+}
 </script>
 
 <template>
-  <Teleport to="body">
-    <div class="palette-backdrop" role="presentation" @mousedown.self="ui.paletteOpen = false">
-      <section class="palette-panel" role="dialog" aria-label="命令面板" @keydown="onKeydown">
-        <input ref="input" v-model="query" class="palette-input" placeholder="搜索或输入命令" @input="selected = 0" />
+  <NaiveThemeScope>
+    <AppModal
+      v-model:show="show"
+      preset="card"
+      class="palette-panel"
+      :style="{ width: '560px', maxWidth: 'calc(100vw - 24px)' }"
+      :bordered="false"
+      :closable="false"
+      :auto-focus="false"
+      aria-label="命令面板"
+      @after-enter="focusInput"
+      @keydown="onKeydown"
+    >
+        <AppInput ref="input" v-model:value="query" class="palette-input" size="medium" placeholder="搜索或输入命令" @update:value="selected = 0" />
         <div class="commands" role="listbox">
           <button v-for="(command, index) in filtered" :key="command.id" type="button" role="option" :aria-selected="selected === index" :class="{ selected: selected === index }" @mouseenter="selected = index" @click="run(index)">
             <span>{{ command.label }}</span><kbd v-if="command.hint">{{ command.hint }}</kbd>
           </button>
           <p v-if="filtered.length === 0">没有匹配的命令</p>
         </div>
-      </section>
-    </div>
-  </Teleport>
+    </AppModal>
+  </NaiveThemeScope>
 </template>
 
 <style scoped>
-.palette-backdrop { position: fixed; inset: 0; z-index: 3000; display: flex; justify-content: center; align-items: flex-start; padding-top: min(18vh, 150px); background: rgb(0 0 0 / 38%); }
-.palette-panel { width: min(560px, calc(100vw - 24px)); overflow: hidden; background: var(--a-bg-2); border: 1px solid var(--a-border-strong); border-radius: var(--a-radius-md); box-shadow: var(--a-shadow-lg); }
-.palette-input { width: 100%; height: 46px; box-sizing: border-box; padding: 0 14px; background: var(--a-bg-2); border: 0; border-bottom: 1px solid var(--a-border); outline: none; color: var(--a-text); font: var(--a-fs-base) var(--a-font-ui); }
+.palette-panel :deep(.n-card) { overflow: hidden; }
+.palette-panel :deep(.n-card__content) { padding: 0; }
+.palette-input { width: 100%; }
+.palette-input :deep(.n-input-wrapper) { padding: 7px 12px; }
+.palette-input :deep(.n-input__input-el) { height: 32px; }
 .commands { max-height: 360px; overflow: auto; padding: 5px; }
 .commands button { width: 100%; height: 36px; display: flex; align-items: center; justify-content: space-between; padding: 0 9px; background: transparent; border: 0; border-radius: var(--a-radius-sm); color: var(--a-text); font: var(--a-fs-sm) var(--a-font-ui); cursor: pointer; }
 .commands button.selected { background: var(--a-selected); color: var(--a-primary); }

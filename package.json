@@ -30,6 +30,7 @@
     "@codemirror/state": "6.7.1",
     "@codemirror/view": "6.43.6",
     "@tauri-apps/api": "2.11.1",
+    "@vicons/ionicons5": "^0.13.0",
     "naive-ui": "2.44.1",
     "pinia": "4.0.2",
     "vue": "3.5.40"

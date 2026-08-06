@@ -8,11 +8,13 @@ import {
   AppDropdown,
   AppForm,
   AppFormItem,
+  AppIcon,
   AppInput,
   AppModal,
   AppPopconfirm,
   AppSpace,
 } from '@/components/ui'
+import { IconAdd, IconDelete, IconEdit, IconLocate, IconSort } from '@/components/ui/icons'
 import NaiveThemeScope from '@/components/NaiveThemeScope.vue'
 import {
   ROW_H,
@@ -156,19 +158,6 @@ function onSortSelect(key: string | number) {
   const option = SORT_OPTIONS.find((item) => (item.mode ?? 'default') === key)
   if (option) sortMode.value = option.mode
 }
-
-/**
- * 图标本身就区分三种状态，不靠颜色。
- *
- * 只用颜色表达「已排序」等于把状态压到单通道，色觉障碍用户读不到
- * （PRD §10.4 的双通道要求）。所以三个模式给三个形状：等长横线 = 原顺序、
- * 由短到长 = 正序、由长到短 = 倒序。
- */
-const sortGlyph = computed(() => {
-  if (sortMode.value === 'name-asc') return 'M2.5 4h3.5M2.5 8h6.5M2.5 12h9.5'
-  if (sortMode.value === 'name-desc') return 'M2.5 4h9.5M2.5 8h6.5M2.5 12h3.5'
-  return 'M2.5 4h9.5M2.5 8h9.5M2.5 12h9.5'
-})
 
 /** 可见节点：折叠的文件夹下的子节点不参与渲染。只改这个计算，不重建原数组。 */
 const visible = computed(() => sortVisible(visibleNodes(all.value, filter.value), sortMode.value))
@@ -437,9 +426,7 @@ defineExpose({
         <AppDropdown :options="CREATE_OPTIONS" @select="onCreateSelect">
           <AppButton class="head-button" quaternary circle size="small" aria-label="新建" title="新建">
             <template #icon>
-              <svg class="ico" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-                <path d="M8 3v10M3 8h10" />
-              </svg>
+              <AppIcon :component="IconAdd" :size="16" />
             </template>
           </AppButton>
         </AppDropdown>
@@ -455,10 +442,7 @@ defineExpose({
           @click="openAction('rename')"
         >
           <template #icon>
-            <svg class="ico" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-              <path d="M3 11.8V13h1.2L12.7 4.5 11.5 3.3 3 11.8Z" />
-              <path d="m10.7 4.1 1.2 1.2M3 13h10" />
-            </svg>
+            <AppIcon :component="IconEdit" :size="16" />
           </template>
         </AppButton>
 
@@ -480,9 +464,7 @@ defineExpose({
               :disabled="!selectedId"
             >
               <template #icon>
-                <svg class="ico" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-                  <path d="M3.5 4.5h9M6 4.5V3h4v1.5M5 6.5v5.8h6V6.5M7 8v2.5M9 8v2.5" />
-                </svg>
+                <AppIcon :component="IconDelete" :size="16" />
               </template>
             </AppButton>
           </template>
@@ -501,10 +483,7 @@ defineExpose({
           @click="locateActive"
         >
           <template #icon>
-            <svg class="ico" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-              <circle cx="8" cy="8" r="3.1" />
-              <path d="M8 1v2.2M8 12.8V15M1 8h2.2M12.8 8H15" />
-            </svg>
+            <AppIcon :component="IconLocate" :size="16" />
           </template>
         </AppButton>
 
@@ -520,9 +499,7 @@ defineExpose({
             aria-label="排序方式"
           >
             <template #icon>
-              <svg class="ico" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-                <path :d="sortGlyph" />
-              </svg>
+              <AppIcon :component="IconSort" :size="16" />
             </template>
           </AppButton>
         </AppDropdown>

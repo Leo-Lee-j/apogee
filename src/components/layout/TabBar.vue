@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { useTabsStore } from '@/stores/tabs'
 import EnvironmentControls from '@/components/layout/EnvironmentControls.vue'
+import { AppIcon } from '@/components/ui'
+import { IconAdd, IconClose, IconDocument } from '@/components/ui/icons'
 
 /** 标签栏，34px。`•` 表示有未保存改动（02 文档 §3.2 / §4.5）。 */
 const tabs = useTabsStore()
@@ -32,10 +34,10 @@ const methodColor: Record<string, string> = {
           class="m"
           :style="{ color: methodColor[t.method] ?? 'var(--a-head)' }"
         >{{ t.method }}</span>
-        <span v-else class="page-icon" aria-hidden="true">⚙</span>
+        <span v-else class="page-icon" aria-hidden="true"><AppIcon :component="IconDocument" :size="13" /></span>
         <span class="t">{{ t.title }}</span>
         <span v-if="t.dirty" class="dot" aria-label="未保存">•</span>
-        <span class="x" role="button" aria-label="关闭标签" @click.stop="tabs.close(t.id)">×</span>
+        <span class="x" role="button" aria-label="关闭标签" @click.stop="tabs.close(t.id)"><AppIcon :component="IconClose" :size="13" /></span>
       </button>
       <button
         class="add"
@@ -46,7 +48,7 @@ const methodColor: Record<string, string> = {
         title="新建请求"
         @click="tabs.openNewPanel()"
       >
-        +
+        <AppIcon :component="IconAdd" :size="16" />
       </button>
     </div>
     <EnvironmentControls />
@@ -92,10 +94,10 @@ const methodColor: Record<string, string> = {
 .tab.active { background: var(--a-bg-3); color: var(--a-text); box-shadow: inset 0 -2px 0 var(--a-primary); }
 .tab.preview .t { font-style: italic; }
 .m { font: var(--a-fw-semibold) var(--a-fs-xs) / 1 var(--a-font-mono); }
-.page-icon { width: 14px; color: var(--a-text-faint); font-size: 12px; line-height: 1; }
+.page-icon { width: 14px; color: var(--a-text-faint); line-height: 1; }
 .t { overflow: hidden; text-overflow: ellipsis; }
 .dot { color: var(--a-primary); }
-.x { width: 16px; text-align: center; border-radius: var(--a-radius-sm); opacity: 0.5; }
+.x { width: 16px; height: 18px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--a-radius-sm); opacity: 0.5; }
 .x:hover { background: var(--a-hover); opacity: 1; }
 .add {
   flex: 0 0 auto;

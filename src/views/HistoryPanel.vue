@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { AppAlert, AppButton, AppCard, AppInput, AppModal, AppPopconfirm } from '@/components/ui'
 import NaiveThemeScope from '@/components/NaiveThemeScope.vue'
 import { ipc, normalizeError, type HistoryEntry } from '@/ipc'
@@ -12,6 +12,12 @@ const entries = ref<HistoryEntry[]>([])
 const query = ref('')
 const loading = ref(false)
 const error = ref('')
+const show = ref(false)
+
+watch(() => ui.historyOpen, (open) => { show.value = open })
+watch(show, (open) => {
+  if (!open && ui.historyOpen) ui.historyOpen = false
+})
 
 const filtered = computed(() => {
   const needle = query.value.trim().toLowerCase()
@@ -67,12 +73,15 @@ function formatTime(ms: number) {
   return new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(ms)
 }
 
-onMounted(load)
+onMounted(() => {
+  void nextTick(() => { show.value = ui.historyOpen })
+  void load()
+})
 </script>
 
 <template>
   <NaiveThemeScope>
-    <AppModal v-model:show="ui.historyOpen">
+    <AppModal v-model:show="show">
       <AppCard class="history-card" title="请求历史" :bordered="false" size="small" role="dialog">
         <div class="toolbar">
           <AppInput v-model:value="query" clearable placeholder="搜索方法、URL 或状态码" />
