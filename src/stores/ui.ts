@@ -17,6 +17,16 @@ export const SIDEBAR_MAX_W = 480
 export const SIDEBAR_DEFAULT_W = 370
 
 /**
+ * 请求区 / 响应区的比例边界。
+ *
+ * 每个区域至少保留容器当前方向尺寸的约 1/3，最大约占 2/3；例如 900×600
+ * 的容器中，左右布局的最小宽度约为 300px，上下布局的最小高度约为 200px。
+ */
+export const SPLIT_MIN_RATIO = 1 / 3
+export const SPLIT_MAX_RATIO = 2 / 3
+export const SPLIT_DEFAULT_RATIO = 0.5
+
+/**
  * 主区的最小可用宽度。窗口窄到放不下「侧边栏上限 + 这个值」时，上限按窗口收紧。
  *
  * 硬上限 480 只在够宽的窗口里成立：1024 宽的窗口里给侧边栏 480，主区就只剩 540，
@@ -57,10 +67,21 @@ export const useUiStore = defineStore('ui', () => {
     setSidebarWidth(sidebarWidth.value)
   }
 
-  const layout = ref<LayoutMode>('stacked')
+  /** 默认左右分栏，让请求参数与响应结果在宽屏下并排显示。 */
+  const layout = ref<LayoutMode>('side-by-side')
   const themeMode = ref<ThemeMode>('light')
-  /** 请求区占比，可拖拽。默认 45%（02 文档 §3.2）。 */
-  const requestRatio = ref(0.45)
+  /** 请求区占比，可拖拽。默认 50%（02 文档 §3.2）。 */
+  const requestRatio = ref(SPLIT_DEFAULT_RATIO)
+
+  /** 所有分隔条入口统一夹在 1/3～2/3 内，保证每个区域保留至少约三分之一。 */
+  function setRequestRatio(ratio: number) {
+    if (!Number.isFinite(ratio)) return
+    requestRatio.value = Math.min(SPLIT_MAX_RATIO, Math.max(SPLIT_MIN_RATIO, ratio))
+  }
+
+  function resetRequestRatio() {
+    setRequestRatio(SPLIT_DEFAULT_RATIO)
+  }
 
   const settingsOpen = ref(false)
   const historyOpen = ref(false)
@@ -108,5 +129,6 @@ export const useUiStore = defineStore('ui', () => {
     urlFocusSeq, focusUrl,
     systemDark, isDark, applyTheme, cycleLayout,
     setSidebarWidth, resetSidebarWidth, syncViewport,
+    setRequestRatio, resetRequestRatio,
   }
 })

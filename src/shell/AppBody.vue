@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { defineAsyncComponent, computed, onMounted, onBeforeUnmount, ref } from 'vue'
+import { defineAsyncComponent, computed, nextTick, onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import TitleBar from '@/components/layout/TitleBar.vue'
 import TabBar from '@/components/layout/TabBar.vue'
 import StatusBar from '@/components/layout/StatusBar.vue'
 import UrlBar from '@/components/request/UrlBar.vue'
 import RequestPanel from '@/components/request/RequestPanel.vue'
 import ResponsePanel from '@/components/response/ResponsePanel.vue'
-import { useUiStore, SIDEBAR_MIN_W } from '@/stores/ui'
+import { useUiStore, SIDEBAR_MIN_W, SPLIT_DEFAULT_RATIO, SPLIT_MAX_RATIO, SPLIT_MIN_RATIO } from '@/stores/ui'
 import { useTabsStore } from '@/stores/tabs'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { ipc } from '@/ipc'
@@ -132,22 +132,164 @@ function onResizeKey(e: KeyboardEvent) {
 function onWindowResize() {
   ui.syncViewport(window.innerWidth)
 }
+let splitObserver: ResizeObserver | null = null
 onMounted(() => {
   onWindowResize()
   window.addEventListener('resize', onWindowResize)
+  if (typeof ResizeObserver !== 'undefined') {
+    splitObserver = new ResizeObserver(readSplitMetrics)
+    observeSplit()
+  }
 })
-onBeforeUnmount(() => window.removeEventListener('resize', onWindowResize))
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', onWindowResize)
+  splitObserver?.disconnect()
+})
 
 const splitStyle = computed(() =>
   ui.layout === 'side-by-side'
     ? { flexDirection: 'row' as const }
     : { flexDirection: 'column' as const },
 )
-const reqSize = computed(() =>
-  ui.layout === 'focus' ? '0 0 0' : `${ui.requestRatio} 1 0`,
-)
+const splitEl = ref<HTMLElement | null>(null)
+const splitSize = ref(0)
+const splitGutter = ref(3)
+const splitDragging = ref(false)
 
 const activeNewPanel = computed(() => tabs.active?.newPanel === true)
+
+/**
+ * 每个区域至少保留当前 splitter 容器方向尺寸的 1/3。
+ *
+ * Flex 比例计算会扣除中间 3px 间隙，所以把「容器尺寸 / 3」换算成可分配空间
+ * 的比例，900×600 时实际边界约为 300×200，而不是把间隙也算进内容区。
+ */
+const splitLimits = computed(() => {
+  const size = splitSize.value
+  const available = size - splitGutter.value
+  if (size <= 0 || available <= 0) {
+    return { min: SPLIT_MIN_RATIO, max: SPLIT_MAX_RATIO }
+  }
+  const minByContainer = (size / 3) / available
+  const min = Math.min(0.5, Math.max(SPLIT_MIN_RATIO, minByContainer))
+  return { min, max: 1 - min }
+})
+const splitRequestRatio = computed(() =>
+  Math.min(splitLimits.value.max, Math.max(splitLimits.value.min, ui.requestRatio)),
+)
+
+function setSplitRatio(ratio: number) {
+  if (!Number.isFinite(ratio)) return
+  const { min, max } = splitLimits.value
+  ui.setRequestRatio(Math.min(max, Math.max(min, ratio)))
+}
+
+function readSplitMetrics() {
+  const el = splitEl.value
+  if (!el) return
+  const vertical = ui.layout === 'side-by-side'
+  const styles = window.getComputedStyle(el)
+  const gutter = Number.parseFloat(vertical ? styles.columnGap : styles.rowGap)
+  splitGutter.value = Number.isFinite(gutter) ? gutter : 3
+  const rect = el.getBoundingClientRect()
+  splitSize.value = vertical ? rect.width : rect.height
+}
+
+function observeSplit() {
+  splitObserver?.disconnect()
+  if (splitEl.value && splitObserver) splitObserver.observe(splitEl.value)
+  readSplitMetrics()
+}
+
+function onSplitResizeStart(e: PointerEvent) {
+  if (e.button !== 0 || !splitEl.value) return
+  const bar = e.currentTarget as HTMLElement
+  const split = splitEl.value
+  const vertical = ui.layout === 'side-by-side'
+  const rect = split.getBoundingClientRect()
+  const start = vertical ? rect.left : rect.top
+  const size = vertical ? rect.width : rect.height
+  const gutter = splitGutter.value
+  const available = Math.max(1, size - gutter)
+  const startPosition = vertical ? e.clientX : e.clientY
+  const requestPane = split.firstElementChild as HTMLElement | null
+  const requestRect = requestPane?.getBoundingClientRect()
+  const requestSize = requestRect
+    ? (vertical ? requestRect.width : requestRect.height)
+    : available * splitRequestRatio.value
+  const dividerCenter = start + requestSize + gutter / 2
+  // 命中区比视觉分隔条更宽，保留用户点击点与分隔条中心的偏移，避免首帧跳动。
+  const grabOffset = startPosition - dividerCenter
+
+  bar.setPointerCapture(e.pointerId)
+  splitDragging.value = true
+
+  const onMove = (ev: PointerEvent) => {
+    const position = vertical ? ev.clientX : ev.clientY
+    const ratio = (position - start - grabOffset - gutter / 2) / available
+    setSplitRatio(ratio)
+  }
+  const onEnd = () => {
+    splitDragging.value = false
+    bar.removeEventListener('pointermove', onMove)
+    bar.removeEventListener('pointerup', onEnd)
+    bar.removeEventListener('pointercancel', onEnd)
+  }
+
+  bar.addEventListener('pointermove', onMove)
+  bar.addEventListener('pointerup', onEnd)
+  bar.addEventListener('pointercancel', onEnd)
+  // 阻止拖动时选中文字，并让浏览器把后续事件交给分隔条。
+  e.preventDefault()
+}
+
+/** 分隔条也支持键盘：方向键按 2% 调整，Shift 加速，Home/End 到边界。 */
+function onSplitResizeKey(e: KeyboardEvent) {
+  const vertical = ui.layout === 'side-by-side'
+  const step = e.shiftKey ? 0.05 : 0.02
+  let next: number | undefined
+
+  if ((vertical && e.key === 'ArrowLeft') || (!vertical && e.key === 'ArrowUp')) {
+    next = splitRequestRatio.value - step
+  } else if ((vertical && e.key === 'ArrowRight') || (!vertical && e.key === 'ArrowDown')) {
+    next = splitRequestRatio.value + step
+  } else if (e.key === 'Home') {
+    next = splitLimits.value.min
+  } else if (e.key === 'End') {
+    next = splitLimits.value.max
+  } else if (e.key === 'Enter' || e.key === ' ') {
+    next = SPLIT_DEFAULT_RATIO
+  } else {
+    return
+  }
+
+  setSplitRatio(next)
+  e.preventDefault()
+}
+
+function resetSplitRatio() {
+  setSplitRatio(SPLIT_DEFAULT_RATIO)
+}
+
+const reqSize = computed(() =>
+  ui.layout === 'focus' ? '0 0 0' : `${splitRequestRatio.value} 1 0`,
+)
+const responseSize = computed(() =>
+  ui.layout === 'focus' ? '1 1 0' : `${1 - splitRequestRatio.value} 1 0`,
+)
+
+watch(
+  () => ui.layout,
+  () => {
+    // 每次切换方向都从真正的 50/50 开始，避免沿用另一方向的旧比例。
+    ui.resetRequestRatio()
+    void nextTick(observeSplit)
+  },
+)
+watch(
+  [() => ui.spikeOpen, () => activeNewPanel.value],
+  () => void nextTick(observeSplit),
+)
 
 function onKeydown(e: KeyboardEvent) {
   const mod = e.ctrlKey || e.metaKey
@@ -159,11 +301,22 @@ function onKeydown(e: KeyboardEvent) {
   else if (k === 'k') { e.preventDefault(); ui.paletteOpen = true }
   else if (k === ',') { e.preventDefault(); ui.settingsOpen = true }
   else if (k === 'l' && e.shiftKey) { e.preventDefault(); ui.cycleLayout() }
+  else if (e.shiftKey && k === 'arrowup') { e.preventDefault(); setSplitRatio(splitLimits.value.max) }
+  else if (e.shiftKey && k === 'arrowdown') { e.preventDefault(); setSplitRatio(splitLimits.value.min) }
 }
 </script>
 
 <template>
-  <div class="app" :class="{ resizing: dragging }" tabindex="-1" @keydown="onKeydown">
+  <div
+    class="app"
+    :class="{
+      resizing: dragging,
+      'split-resizing': splitDragging,
+      'split-col-resizing': splitDragging && ui.layout === 'side-by-side',
+    }"
+    tabindex="-1"
+    @keydown="onKeydown"
+  >
     <TitleBar />
     <div class="mid">
       <template v-if="ui.sidebarVisible && sidebarReady">
@@ -212,13 +365,34 @@ function onKeydown(e: KeyboardEvent) {
         <div v-else-if="activeNewPanel" class="split new-content" :style="splitStyle">
           <NewPanel id="new-request-panel" class="pane a-block" />
         </div>
-        <div v-else class="split" :style="splitStyle">
+        <div v-else ref="splitEl" class="split" :style="splitStyle">
           <RequestPanel
             class="pane a-block"
             :class="{ collapsed: ui.layout === 'focus' }"
             :style="{ flex: reqSize }"
           />
-          <ResponsePanel class="pane a-block" style="flex: 1 1 0" />
+          <div
+            v-if="ui.layout !== 'focus'"
+            class="split-resizer"
+            :class="{
+              vertical: ui.layout === 'side-by-side',
+              horizontal: ui.layout !== 'side-by-side',
+              dragging: splitDragging,
+            }"
+            role="separator"
+            :aria-orientation="ui.layout === 'side-by-side' ? 'vertical' : 'horizontal'"
+            aria-label="调整请求区与响应区大小"
+            :aria-valuenow="Math.round(splitRequestRatio * 100)"
+            :aria-valuemin="Math.round(splitLimits.min * 100)"
+            :aria-valuemax="Math.round(splitLimits.max * 100)"
+            :aria-valuetext="`请求区 ${Math.round(splitRequestRatio * 100)}%，响应区 ${Math.round((1 - splitRequestRatio) * 100)}%`"
+            tabindex="0"
+            title="拖动调整请求区与响应区大小，双击恢复默认"
+            @pointerdown="onSplitResizeStart"
+            @keydown="onSplitResizeKey"
+            @dblclick="resetSplitRatio"
+          />
+          <ResponsePanel class="pane a-block" :style="{ flex: responseSize }" />
         </div>
       </main>
     </div>
@@ -240,6 +414,10 @@ function onKeydown(e: KeyboardEvent) {
  */
 .app.resizing,
 .app.resizing :deep(*) { cursor: col-resize !important; }
+.app.split-resizing,
+.app.split-resizing :deep(*) { cursor: row-resize !important; }
+.app.split-col-resizing,
+.app.split-col-resizing :deep(*) { cursor: col-resize !important; }
 
 /*
  * 内容区用「块 + 间隙」分隔（02 文档 §3.2 / §7.1）。
@@ -325,6 +503,38 @@ function onKeydown(e: KeyboardEvent) {
 }
 
 .split { flex: 1 1 auto; display: flex; min-height: 0; gap: var(--a-gutter); }
+.split-resizer {
+  flex: 0 0 auto;
+  position: relative;
+  z-index: 5;
+  touch-action: none;
+}
+.split-resizer.vertical {
+  width: var(--a-gutter);
+  margin: 0 calc(-1 * var(--a-gutter));
+  cursor: col-resize;
+}
+.split-resizer.horizontal {
+  height: var(--a-gutter);
+  margin: calc(-1 * var(--a-gutter)) 0;
+  cursor: row-resize;
+}
+.split-resizer::before,
+.split-resizer::after { content: ''; position: absolute; }
+/* 命中区比视觉间隙更宽，避免必须精确点中 3px。 */
+.split-resizer.vertical::before { inset: 0 -3px 0 -1px; }
+.split-resizer.horizontal::before { inset: -1px 0 -3px 0; }
+/* 平时不画常驻细线，只在交互时高亮间隙。 */
+.split-resizer::after {
+  inset: 0;
+  background: var(--a-primary);
+  opacity: 0;
+  transition: opacity var(--a-dur) var(--a-ease);
+}
+.split-resizer:hover::after,
+.split-resizer:focus-visible::after,
+.split-resizer.dragging::after { opacity: 1; }
+.split-resizer:focus-visible { outline-offset: -1px; }
 .pane { min-height: 0; min-width: 0; display: flex; flex-direction: column; }
 /*
  * 专注模式把请求区压到 flex: 0 0 0。块状布局下不能只压高度 ——
