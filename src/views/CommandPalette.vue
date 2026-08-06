@@ -15,7 +15,7 @@ const commands = computed(() => [
   { id: 'sidebar', label: ui.sidebarVisible ? '隐藏侧边栏' : '显示侧边栏', hint: 'Ctrl+B', run: () => { ui.sidebarVisible = !ui.sidebarVisible } },
   { id: 'layout', label: '切换请求/响应布局', hint: 'Ctrl+Shift+L', run: () => ui.cycleLayout() },
   { id: 'theme', label: ui.isDark ? '切换到亮色主题' : '切换到暗色主题', hint: '', run: () => { ui.themeMode = ui.isDark ? 'light' : 'dark'; ui.applyTheme() } },
-  { id: 'settings', label: '打开设置', hint: 'Ctrl+,', run: () => { ui.settingsOpen = true } },
+  { id: 'settings', label: '打开设置', hint: 'Ctrl+,', run: () => tabs.openSettings() },
 ])
 
 const filtered = computed(() => {

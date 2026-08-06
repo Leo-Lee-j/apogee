@@ -83,7 +83,6 @@ export const useUiStore = defineStore('ui', () => {
     setRequestRatio(SPLIT_DEFAULT_RATIO)
   }
 
-  const settingsOpen = ref(false)
   const historyOpen = ref(false)
 
   /**
@@ -125,7 +124,7 @@ export const useUiStore = defineStore('ui', () => {
 
   return {
     sidebarVisible, sidebarWidth, sidebarMaxW, layout, themeMode, requestRatio,
-    settingsOpen, historyOpen, paletteOpen, spikeOpen, spikePanel,
+    historyOpen, paletteOpen, spikeOpen, spikePanel,
     urlFocusSeq, focusUrl,
     systemDark, isDark, applyTheme, cycleLayout,
     setSidebarWidth, resetSidebarWidth, syncViewport,

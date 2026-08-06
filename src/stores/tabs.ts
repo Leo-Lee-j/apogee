@@ -27,9 +27,12 @@ import { useUiStore } from '@/stores/ui'
  */
 
 export type TabState = 'active' | 'warm' | 'cold'
+export type TabKind = 'request' | 'settings'
 
 export interface Tab {
   id: string
+  /** 决定标签下方挂载哪一种工作区内容；后续可继续扩展 history 等通用页面。 */
+  kind: TabKind
   title: string
   method: string
   url: string
@@ -184,6 +187,7 @@ export const useTabsStore = defineStore('tabs', () => {
     }
     const tab: Tab = markRaw({
       id: nextId(),
+      kind: 'request',
       title: '新建请求',
       method: 'GET',
       url: '',
@@ -222,6 +226,17 @@ export const useTabsStore = defineStore('tabs', () => {
       newPanel: true,
       newRequestParentId: parentId,
     })
+  }
+
+  /** 设置是单实例工作区页；重复点击入口只激活已有标签。 */
+  function openSettings(): Tab {
+    useUiStore().spikeOpen = false
+    const existing = tabs.value.find((tab) => tab.kind === 'settings')
+    if (existing) {
+      activate(existing.id)
+      return existing
+    }
+    return open({ kind: 'settings', title: '设置' })
   }
 
   /** 将当前新建面板标签转换为空白请求编辑标签。 */
@@ -320,6 +335,7 @@ export const useTabsStore = defineStore('tabs', () => {
     open,
     openQuick,
     openNewPanel,
+    openSettings,
     resolveNewPanel,
     activate,
     close,

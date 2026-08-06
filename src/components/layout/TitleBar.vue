@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useUiStore } from '@/stores/ui'
+import { useTabsStore } from '@/stores/tabs'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { windowControls, type Unlisten } from '@/ipc'
 
@@ -13,6 +14,7 @@ import { windowControls, type Unlisten } from '@/ipc'
  * 会把鼠标「甩」到屏幕角落点关闭，按钮不贴边就接不住这个动作。
  */
 const ui = useUiStore()
+const tabs = useTabsStore()
 const workspace = useWorkspaceStore()
 const workspaceLabel = computed(() =>
   workspace.workspaceName || (workspace.loading ? '加载中…' : '本地草稿'),
@@ -42,10 +44,6 @@ onBeforeUnmount(() => stopWatching?.())
     <button class="chip" type="button" aria-label="当前工作区">
       工作区: {{ workspaceLabel }} <span class="caret">▾</span>
     </button>
-    <button class="chip" type="button" aria-label="切换环境">
-      环境: dev <span class="caret">▾</span>
-    </button>
-
     <button class="palette" type="button" @click="ui.paletteOpen = true">
       <span>搜索或输入命令</span>
       <kbd>Ctrl</kbd><kbd>K</kbd>
@@ -55,7 +53,7 @@ onBeforeUnmount(() => stopWatching?.())
 
     <button class="icon" type="button" title="Spike 面板" @click="ui.spikeOpen = true">S</button>
     <button class="icon" type="button" title="请求历史" aria-label="请求历史" @click="ui.historyOpen = true">↶</button>
-    <button class="icon" type="button" title="设置" @click="ui.settingsOpen = true">⚙</button>
+    <button class="icon" type="button" title="设置" aria-label="设置" @click="tabs.openSettings()">⚙</button>
     <button
       class="icon"
       type="button"

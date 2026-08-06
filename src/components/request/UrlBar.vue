@@ -2,9 +2,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useTabsStore } from '@/stores/tabs'
 import { useUiStore } from '@/stores/ui'
-import { useWorkspaceStore } from '@/stores/workspace'
 import { useRequest } from '@/stores/request'
-import type { EnvironmentVariable } from '@/ipc'
 
 /**
  * URL 栏，40px —— 全产品最重要的一行（02 文档 §4.1）。
@@ -22,11 +20,9 @@ const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'] as 
 
 const tabs = useTabsStore()
 const ui = useUiStore()
-const workspace = useWorkspaceStore()
 const { sending, send } = useRequest()
 const inputEl = ref<HTMLInputElement | null>(null)
 const methodOpen = ref(false)
-const environmentOpen = ref(false)
 
 const tab = computed(() => tabs.active)
 
@@ -53,60 +49,6 @@ function onUrl(e: Event) {
 
 function save() {
   if (tab.value) void tabs.save(tab.value.id)
-}
-
-function selectEnvironment(event: Event) {
-  const id = (event.target as HTMLSelectElement).value
-  workspace.selectEnvironment(id || null)
-  environmentOpen.value = false
-}
-
-function updateEnvironmentName(event: Event) {
-  const environment = workspace.activeEnvironment
-  if (!environment) return
-  workspace.updateEnvironment(environment.id, {
-    name: (event.target as HTMLInputElement).value,
-  })
-}
-
-function updateEnvironmentVariable(
-  index: number,
-  field: 'key' | 'value',
-  event: Event,
-) {
-  const environment = workspace.activeEnvironment
-  if (!environment) return
-  const delta: Partial<EnvironmentVariable> = {
-    [field]: (event.target as HTMLInputElement).value,
-  }
-  workspace.updateEnvironmentVariable(environment.id, index, delta)
-}
-
-function updateEnvironmentEnabled(index: number, event: Event) {
-  const environment = workspace.activeEnvironment
-  if (!environment) return
-  workspace.updateEnvironmentVariable(environment.id, index, {
-    enabled: (event.target as HTMLInputElement).checked,
-  })
-}
-
-function addEnvironmentVariable() {
-  const environment = workspace.activeEnvironment
-  if (environment) workspace.addEnvironmentVariable(environment.id)
-}
-
-function removeEnvironmentVariable(index: number) {
-  const environment = workspace.activeEnvironment
-  if (environment) workspace.removeEnvironmentVariable(environment.id, index)
-}
-
-async function createEnvironment() {
-  const created = await workspace.createEnvironment()
-  if (created) environmentOpen.value = true
-}
-
-async function saveEnvironment() {
-  await workspace.saveEnvironment()
 }
 
 /** URL 中出现 :id / {id} 时自动创建对应的路径参数行。 */
@@ -190,89 +132,6 @@ defineExpose({ focus: () => inputEl.value?.select() })
       @keydown="onKeydown"
     />
 
-    <div class="environment-wrap">
-      <label class="environment-select" title="选择请求变量环境">
-        <span>环境</span>
-        <select
-          :value="workspace.activeEnvironmentId ?? ''"
-          aria-label="请求变量环境"
-          @change="selectEnvironment"
-        >
-          <option value="">无环境</option>
-          <option v-for="item in workspace.environments" :key="item.id" :value="item.id">
-            {{ item.name }}
-          </option>
-        </select>
-      </label>
-      <button
-        class="environment-button"
-        type="button"
-        :disabled="!workspace.available"
-        :aria-expanded="environmentOpen"
-        title="编辑环境变量"
-        @click="environmentOpen = !environmentOpen"
-      >
-        变量
-      </button>
-      <div v-if="environmentOpen" class="environment-popover" role="dialog" aria-label="环境变量">
-        <template v-if="workspace.activeEnvironment">
-          <div class="environment-head">
-            <input
-              class="environment-name"
-              :value="workspace.activeEnvironment.name"
-              aria-label="环境名称"
-              @input="updateEnvironmentName"
-            />
-            <button type="button" class="link" @click="saveEnvironment">保存</button>
-          </div>
-          <div class="environment-rows">
-            <div
-              v-for="(variable, index) in workspace.activeEnvironment.variables"
-              :key="`${workspace.activeEnvironment.id}-${index}`"
-              class="environment-row"
-            >
-              <input
-                :checked="variable.enabled"
-                type="checkbox"
-                :aria-label="`启用变量 ${variable.key || '空变量'}`"
-                @change="updateEnvironmentEnabled(index, $event)"
-              />
-              <input
-                class="environment-key"
-                :value="variable.key"
-                placeholder="变量名"
-                spellcheck="false"
-                @input="updateEnvironmentVariable(index, 'key', $event)"
-              />
-              <input
-                class="environment-value"
-                type="text"
-                :value="variable.value"
-                placeholder="变量值"
-                spellcheck="false"
-                @input="updateEnvironmentVariable(index, 'value', $event)"
-              />
-              <button
-                type="button"
-                class="env-icon delete"
-                aria-label="删除变量"
-                @click="removeEnvironmentVariable(index)"
-              >
-                ×
-              </button>
-            </div>
-          </div>
-          <div class="environment-actions">
-            <button type="button" class="link" @click="addEnvironmentVariable">+ 变量</button>
-          </div>
-        </template>
-        <template v-else>
-          <p class="environment-empty">还没有环境。创建一个环境后即可使用 &#123;&#123;variable&#125;&#125;。</p>
-          <button type="button" class="link create-environment" @click="createEnvironment">+ 创建环境</button>
-        </template>
-      </div>
-    </div>
-
     <button
       class="send"
       type="button"
@@ -297,53 +156,6 @@ defineExpose({ focus: () => inputEl.value?.select() })
   /* 没有 border-bottom —— URL 栏是「请求头」块的最后一行，
      下边界由块自己的边框画（见 AppBody.vue 的 .head） */
 }
-.environment-wrap { position: relative; display: flex; align-items: center; gap: 3px; flex: 0 0 auto; }
-.environment-select {
-  display: inline-flex; align-items: center; gap: 4px; height: 28px;
-  color: var(--a-text-faint); font-size: var(--a-fs-xs);
-}
-.environment-select select {
-  max-width: 112px; height: 26px; border: 1px solid var(--a-border);
-  border-radius: var(--a-radius-md); background: var(--a-bg-3); color: var(--a-text);
-  font: var(--a-fs-xs) var(--a-font-mono); padding: 0 4px;
-}
-.environment-button {
-  height: 26px; padding: 0 6px; border: 1px solid var(--a-border);
-  border-radius: var(--a-radius-md); background: var(--a-bg-3); color: var(--a-text-dim);
-  font: var(--a-fs-xs) var(--a-font-mono); cursor: pointer;
-}
-.environment-button:hover:not(:disabled) { color: var(--a-text); background: var(--a-hover); }
-.environment-button:disabled { opacity: 0.5; cursor: not-allowed; }
-.environment-popover {
-  position: absolute; z-index: 30; top: calc(100% + 5px); right: 0;
-  width: min(430px, calc(100vw - 24px)); padding: 8px;
-  background: var(--a-bg-2); border: 1px solid var(--a-border-strong);
-  border-radius: var(--a-radius-md); box-shadow: var(--a-shadow-md);
-}
-.environment-head, .environment-actions { display: flex; align-items: center; gap: 8px; }
-.environment-head { padding-bottom: 7px; border-bottom: 1px solid var(--a-border); }
-.environment-name {
-  flex: 1; min-width: 0; height: 26px; background: var(--a-bg-3);
-  border: 1px solid var(--a-border); border-radius: var(--a-radius-md);
-  color: var(--a-text); padding: 0 7px; font: 12px var(--a-font-mono);
-}
-.environment-rows { display: flex; flex-direction: column; gap: 5px; padding: 8px 0; max-height: 260px; overflow: auto; }
-.environment-row { display: flex; align-items: center; gap: 4px; min-width: 0; }
-.environment-key, .environment-value {
-  min-width: 0; height: 25px; background: var(--a-bg-3); border: 1px solid var(--a-border);
-  border-radius: var(--a-radius-sm); color: var(--a-text); padding: 0 5px; font: 11px var(--a-font-mono);
-}
-.environment-key { flex: 0 0 118px; }
-.environment-value { flex: 1 1 auto; }
-.env-icon {
-  width: 24px; height: 24px; padding: 0; border: none; background: transparent;
-  color: var(--a-text-faint); cursor: pointer; font: 11px var(--a-font-mono);
-}
-.env-icon:hover { color: var(--a-text); }
-.env-icon.delete:hover { color: var(--a-error); }
-.environment-empty { margin: 4px 0 8px; color: var(--a-text-dim); font-size: 12px; }
-.create-environment { padding: 0; }
-
 .method-wrap { position: relative; }
 /* 方法选择器是全产品最显眼的语义控件，用 Apogee 的「半透明底 + 高亮前景」处理。
    底色与描边由 :style 按当前方法绑定，见 methodBg()。颜色 + 文字双通道，

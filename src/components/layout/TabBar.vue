@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useTabsStore } from '@/stores/tabs'
+import EnvironmentControls from '@/components/layout/EnvironmentControls.vue'
 
 /** 标签栏，34px。`•` 表示有未保存改动（02 文档 §3.2 / §4.5）。 */
 const tabs = useTabsStore()
@@ -14,34 +15,41 @@ const methodColor: Record<string, string> = {
 </script>
 
 <template>
-  <div class="tabbar" role="tablist">
-    <button
-      v-for="t in tabs.tabs"
-      :key="t.id"
-      class="tab"
-      :class="{ active: t.id === tabs.activeId, preview: t.preview }"
-      role="tab"
-      :aria-selected="t.id === tabs.activeId"
-      :title="`${t.method} ${t.url || t.title}（${tabs.stateOf(t.id)}）`"
-      @click="tabs.activate(t.id)"
-    >
-      <span class="m" :style="{ color: methodColor[t.method] ?? 'var(--a-head)' }">{{ t.method }}</span>
-      <span class="t">{{ t.title }}</span>
-      <span v-if="t.dirty" class="dot" aria-label="未保存">•</span>
-      <span class="x" role="button" aria-label="关闭标签" @click.stop="tabs.close(t.id)">×</span>
-    </button>
-    <!-- 点击“+”创建独立的“新建请求”标签，选项面板只属于这个标签。 -->
-    <button
-      class="add"
-      type="button"
-      aria-label="新建请求"
-      aria-controls="new-request-panel"
-      :aria-expanded="tabs.active?.newPanel === true"
-      title="新建请求"
-      @click="tabs.openNewPanel()"
-    >
-      +
-    </button>
+  <div class="tabbar">
+    <div class="tab-strip" role="tablist" aria-label="工作区标签">
+      <button
+        v-for="t in tabs.tabs"
+        :key="t.id"
+        class="tab"
+        :class="{ active: t.id === tabs.activeId, preview: t.preview }"
+        role="tab"
+        :aria-selected="t.id === tabs.activeId"
+        :title="t.kind === 'request' ? `${t.method} ${t.url || t.title}（${tabs.stateOf(t.id)}）` : t.title"
+        @click="tabs.activate(t.id)"
+      >
+        <span
+          v-if="t.kind === 'request'"
+          class="m"
+          :style="{ color: methodColor[t.method] ?? 'var(--a-head)' }"
+        >{{ t.method }}</span>
+        <span v-else class="page-icon" aria-hidden="true">⚙</span>
+        <span class="t">{{ t.title }}</span>
+        <span v-if="t.dirty" class="dot" aria-label="未保存">•</span>
+        <span class="x" role="button" aria-label="关闭标签" @click.stop="tabs.close(t.id)">×</span>
+      </button>
+      <button
+        class="add"
+        type="button"
+        aria-label="新建请求"
+        aria-controls="new-request-panel"
+        :aria-expanded="tabs.active?.newPanel === true"
+        title="新建请求"
+        @click="tabs.openNewPanel()"
+      >
+        +
+      </button>
+    </div>
+    <EnvironmentControls />
   </div>
 </template>
 
@@ -53,11 +61,18 @@ const methodColor: Record<string, string> = {
   align-items: stretch;
   background: var(--a-bg-2);
   border-bottom: 1px solid var(--a-border);
+  overflow: visible;
+}
+.tab-strip {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: stretch;
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: none;
 }
-.tabbar::-webkit-scrollbar { height: 0; }
+.tab-strip::-webkit-scrollbar { height: 0; }
 .tab {
   display: flex; align-items: center; gap: 6px;
   padding: 0 8px 0 10px;
@@ -77,6 +92,7 @@ const methodColor: Record<string, string> = {
 .tab.active { background: var(--a-bg-3); color: var(--a-text); box-shadow: inset 0 -2px 0 var(--a-primary); }
 .tab.preview .t { font-style: italic; }
 .m { font: var(--a-fw-semibold) var(--a-fs-xs) / 1 var(--a-font-mono); }
+.page-icon { width: 14px; color: var(--a-text-faint); font-size: 12px; line-height: 1; }
 .t { overflow: hidden; text-overflow: ellipsis; }
 .dot { color: var(--a-primary); }
 .x { width: 16px; text-align: center; border-radius: var(--a-radius-sm); opacity: 0.5; }

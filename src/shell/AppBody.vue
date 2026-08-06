@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { defineAsyncComponent, computed, nextTick, onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import TitleBar from '@/components/layout/TitleBar.vue'
-import TabBar from '@/components/layout/TabBar.vue'
+import WorkspaceArea from '@/components/layout/WorkspaceArea.vue'
 import StatusBar from '@/components/layout/StatusBar.vue'
 import UrlBar from '@/components/request/UrlBar.vue'
 import RequestPanel from '@/components/request/RequestPanel.vue'
@@ -27,7 +27,7 @@ import { ipc } from '@/ipc'
  */
 
 const Sidebar = defineAsyncComponent(() => import('@/components/sidebar/Sidebar.vue'))
-const SettingsModal = defineAsyncComponent(() => import('@/views/SettingsModal.vue'))
+const SettingsPanel = defineAsyncComponent(() => import('@/views/SettingsModal.vue'))
 const HistoryPanel = defineAsyncComponent(() => import('@/views/HistoryPanel.vue'))
 const CommandPalette = defineAsyncComponent(() => import('@/views/CommandPalette.vue'))
 const NewPanel = defineAsyncComponent(() => import('@/views/NewPanel.vue'))
@@ -157,6 +157,7 @@ const splitGutter = ref(3)
 const splitDragging = ref(false)
 
 const activeNewPanel = computed(() => tabs.active?.newPanel === true)
+const activeKind = computed(() => tabs.active?.kind ?? 'request')
 
 /**
  * 每个区域至少保留当前 splitter 容器方向尺寸的 1/3。
@@ -287,7 +288,7 @@ watch(
   },
 )
 watch(
-  [() => ui.spikeOpen, () => activeNewPanel.value],
+  [() => ui.spikeOpen, () => activeNewPanel.value, () => activeKind.value],
   () => void nextTick(observeSplit),
 )
 
@@ -299,7 +300,7 @@ function onKeydown(e: KeyboardEvent) {
   // Ctrl+T 是 1 步操作（02 文档 §1 第 3 条），直接创建并激活“新建请求”标签。
   else if (k === 't') { e.preventDefault(); tabs.openQuick() }
   else if (k === 'k') { e.preventDefault(); ui.paletteOpen = true }
-  else if (k === ',') { e.preventDefault(); ui.settingsOpen = true }
+  else if (k === ',') { e.preventDefault(); tabs.openSettings() }
   else if (k === 'l' && e.shiftKey) { e.preventDefault(); ui.cycleLayout() }
   else if (e.shiftKey && k === 'arrowup') { e.preventDefault(); setSplitRatio(splitLimits.value.max) }
   else if (e.shiftKey && k === 'arrowdown') { e.preventDefault(); setSplitRatio(splitLimits.value.min) }
@@ -342,16 +343,10 @@ function onKeydown(e: KeyboardEvent) {
           @dblclick="ui.resetSidebarWidth()"
         />
       </template>
-      <main class="main">
-        <!--
-          标签栏与 URL 栏合成一个「请求头」块。分成两块会让顶部出现三条圆角边，
-          视觉上过碎；它们本来也是同一层语义（当前请求是谁 + 请求发到哪）。
-        -->
-        <div class="a-block head">
-          <TabBar />
-          <!-- URL 栏始终对应当前激活的请求标签。 -->
-          <UrlBar v-if="!ui.spikeOpen && !activeNewPanel" />
-        </div>
+      <WorkspaceArea>
+        <template #toolbar>
+          <UrlBar v-if="!ui.spikeOpen && activeKind === 'request' && !activeNewPanel" />
+        </template>
 
         <div v-if="ui.spikeOpen" class="a-block spike">
           <div class="spike-head">
@@ -362,6 +357,7 @@ function onKeydown(e: KeyboardEvent) {
           <S3Panel v-if="ui.spikePanel === 's3'" />
           <S2Panel v-else />
         </div>
+        <SettingsPanel v-else-if="activeKind === 'settings'" />
         <div v-else-if="activeNewPanel" class="split new-content" :style="splitStyle">
           <NewPanel id="new-request-panel" class="pane a-block" />
         </div>
@@ -394,10 +390,9 @@ function onKeydown(e: KeyboardEvent) {
           />
           <ResponsePanel class="pane a-block" :style="{ flex: responseSize }" />
         </div>
-      </main>
+      </WorkspaceArea>
     </div>
     <StatusBar />
-    <SettingsModal v-if="ui.settingsOpen" />
     <HistoryPanel v-if="ui.historyOpen" />
     <CommandPalette v-if="ui.paletteOpen" />
   </div>
@@ -436,15 +431,6 @@ function onKeydown(e: KeyboardEvent) {
   padding: var(--a-gutter);
   background: var(--a-bg-1);
 }
-.main {
-  flex: 1 1 auto;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  min-height: 0;
-  gap: var(--a-gutter);
-}
-
 /*
  * 侧边栏与主区之间的宽度分隔条。
  *
@@ -485,22 +471,6 @@ function onKeydown(e: KeyboardEvent) {
 .resizer.dragging::after { opacity: 1; }
 /* 焦点环画在分隔条内侧：3px 宽的元素套 2px outline + 1px offset 会糊成一团。 */
 .resizer:focus-visible { outline-offset: -1px; }
-
-.head { flex: 0 0 auto; display: flex; flex-direction: column; }
-/*
- * 覆盖 .a-block 的 overflow: hidden —— URL 栏里方法选择器的下拉菜单要能溢出
- * 这个块（块只有 74px 高，菜单有 110px+），裁掉就等于菜单打不开。
- * 圆角改成传给首尾子元素，视觉效果一样但不裁剪弹层。
- */
-.head { overflow: visible; }
-.head > :first-child {
-  border-top-left-radius: inherit;
-  border-top-right-radius: inherit;
-}
-.head > :last-child {
-  border-bottom-left-radius: inherit;
-  border-bottom-right-radius: inherit;
-}
 
 .split { flex: 1 1 auto; display: flex; min-height: 0; gap: var(--a-gutter); }
 .split-resizer {
