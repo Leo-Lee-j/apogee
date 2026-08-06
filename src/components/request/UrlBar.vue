@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { h } from 'vue'
-import type { SelectOption } from 'naive-ui'
+import { NInput, NInputGroup, type InputInst, type SelectOption } from 'naive-ui'
 import { useTabsStore } from '@/stores/tabs'
 import { useUiStore } from '@/stores/ui'
 import { useRequest } from '@/stores/request'
@@ -26,7 +26,7 @@ const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'] as 
 const tabs = useTabsStore()
 const ui = useUiStore()
 const { sending, send } = useRequest()
-const inputEl = ref<HTMLInputElement | null>(null)
+const inputEl = ref<InputInst | null>(null)
 
 const tab = computed(() => tabs.active)
 
@@ -55,9 +55,8 @@ function renderMethodLabel(option: SelectOption, selected: boolean) {
   )
 }
 
-function onUrl(e: Event) {
-  const v = (e.target as HTMLInputElement).value
-  if (tab.value) tabs.patch(tab.value.id, { url: v, dirty: true })
+function onUrl(value: string) {
+  if (tab.value) tabs.patch(tab.value.id, { url: value, dirty: true })
 }
 
 function save() {
@@ -105,27 +104,28 @@ defineExpose({ focus: () => inputEl.value?.select() })
 <template>
   <div class="urlbar">
   <NaiveThemeScope>
-    <AppSelect
-      class="method-select"
-      :value="tab?.method ?? 'GET'"
-      :options="METHODS.map((value) => ({ label: value, value }))"
-      :render-label="renderMethodLabel"
-      size="small"
-      @update:value="setMethod(String($event))"
-    />
+    <NInputGroup class="request-input-group">
+      <AppSelect
+        class="method-select"
+        :value="tab?.method ?? 'GET'"
+        :options="METHODS.map((value) => ({ label: value, value }))"
+        :render-label="renderMethodLabel"
+        :consistent-menu-width="false"
+        size="medium"
+        @update:value="setMethod(String($event))"
+      />
 
-    <input
-      ref="inputEl"
-      class="url a-selectable"
-      type="text"
-      spellcheck="false"
-      autocomplete="off"
-      placeholder="输入 URL，或粘贴 cURL 命令"
-      aria-label="请求地址"
-      :value="tab?.url ?? ''"
-      @input="onUrl"
-      @keydown="onKeydown"
-    />
+      <NInput
+        ref="inputEl"
+        class="url a-selectable"
+        size="medium"
+        placeholder="输入 URL，或粘贴 cURL 命令"
+        :value="tab?.url ?? ''"
+        :input-props="{ spellcheck: false, autocomplete: 'off', 'aria-label': '请求地址' }"
+        @update:value="onUrl"
+        @keydown="onKeydown"
+      />
+    </NInputGroup>
 
     <AppButton
       class="send"
@@ -151,52 +151,14 @@ defineExpose({ focus: () => inputEl.value?.select() })
   /* 没有 border-bottom —— URL 栏是「请求头」块的最后一行，
      下边界由块自己的边框画（见 AppBody.vue 的 .head） */
 }
-.method-wrap { position: relative; }
-.method-select { width: 116px; flex: 0 0 116px; }
+.request-input-group { flex: 1 1 auto; min-width: 0; }
+.method-select { width: fit-content; flex: 0 0 auto; }
 .method-select :deep(.n-base-selection) { font-family: var(--a-font-mono); font-weight: var(--a-fw-semibold); }
 .method-select :deep(.n-base-selection-label) { justify-content: center; }
-/* 方法选择器是全产品最显眼的语义控件，用 Apogee 的「半透明底 + 高亮前景」处理。
-   底色与描边由 :style 按当前方法绑定，见 methodBg()。颜色 + 文字双通道，
-   两种形态（pill 与裸文字）的对比度都由 scripts/check-contrast.mjs 守着。 */
-.method {
-  height: 28px; min-width: 84px;
-  border: 1px solid transparent;
-  border-radius: var(--a-radius-md);
-  font: var(--a-fw-semibold) var(--a-fs-sm) / 1 var(--a-font-mono);
-  cursor: pointer;
-}
-.caret { color: currentcolor; opacity: 0.65; font-weight: var(--a-fw-normal); }
-.menu {
-  position: absolute; top: 32px; left: 0; z-index: 20;
-  margin: 0; padding: 4px; list-style: none;
-  min-width: 110px;
-  background: var(--a-bg-3);
-  border: 1px solid var(--a-border-strong);
-  border-radius: var(--a-radius-md);
-  box-shadow: var(--a-shadow-md);
-}
-.menu button {
-  display: block; width: 100%; text-align: left;
-  background: transparent; border: none; border-radius: var(--a-radius-sm);
-  padding: 4px 8px; font: var(--a-fw-semibold) var(--a-fs-sm) / 1.6 var(--a-font-mono); cursor: pointer;
-}
-.menu button:hover { background: var(--a-hover); }
-.url {
-  flex: 1 1 auto; height: 28px;
-  background: var(--a-bg-3);
-  border: 1px solid var(--a-border);
-  border-radius: var(--a-radius-md);
-  color: var(--a-text);
-  font: var(--a-fs-base) / 1 var(--a-font-mono);
-  padding: 0 8px;
-}
-/* 不能写 outline: none（原来是这么写的）—— `.url:focus` 的特异性高于
-   tokens.css 里的全局 `:focus-visible`，会把键盘焦点环整个盖掉，违反 PRD §10.4。
-   改成 1px 内侧焦点线，保留键盘可见性但不增加输入框视觉重量。 */
-.url:focus-visible {
-  border-color: var(--a-focus);
-  outline: 1px solid var(--a-focus);
-  outline-offset: -1px;
+.url { flex: 1 1 auto; min-width: 0; }
+.url :deep(.n-input__input-el) {
+  font-family: var(--a-font-mono);
+  font-size: var(--a-fs-base);
 }
 .send, .save {
   height: 28px; padding: 0 14px; border-radius: var(--a-radius-md); cursor: pointer;
