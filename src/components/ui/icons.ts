@@ -21,6 +21,7 @@ export {
   InformationCircleOutline as IconInfo,
   EyeOutline as IconPreview,
   ListOutline as IconList,
+  LinkOutline as IconLink,
   MoonOutline as IconMoon,
   RemoveOutline as IconMinimize,
   RemoveCircleOutline as IconRemoveCircle,

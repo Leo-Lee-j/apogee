@@ -1,12 +1,20 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { h } from 'vue'
-import { NInput, NInputGroup, type InputInst, type SelectOption } from 'naive-ui'
+import {
+  NInput,
+  NRadio,
+  type DropdownOption,
+  type InputInst,
+  type SelectOption,
+} from 'naive-ui'
 import { useTabsStore } from '@/stores/tabs'
 import { useUiStore } from '@/stores/ui'
 import { useRequest } from '@/stores/request'
-import { AppSelect } from '@/components/ui'
-import { AppButton } from '@/components/ui'
+import { useWorkspaceStore } from '@/stores/workspace'
+import { AppButton, AppDropdown, AppIcon, AppSelect } from '@/components/ui'
+import { IconLink } from '@/components/ui/icons'
+import type { Environment } from '@/ipc'
 import NaiveThemeScope from '@/components/NaiveThemeScope.vue'
 
 /**
@@ -22,13 +30,122 @@ import NaiveThemeScope from '@/components/NaiveThemeScope.vue'
  */
 
 const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'] as const
+const NO_ENVIRONMENT_KEY = '__no_environment__'
 
 const tabs = useTabsStore()
 const ui = useUiStore()
+const workspace = useWorkspaceStore()
 const { sending, send } = useRequest()
 const inputEl = ref<InputInst | null>(null)
+const urlFocused = ref(false)
 
 const tab = computed(() => tabs.active)
+const environmentOptions = computed(() => [
+  {
+    label: '无环境',
+    key: NO_ENVIRONMENT_KEY,
+    host: '不使用环境',
+    environmentName: '无环境',
+  },
+  ...workspace.environments.map((environment) => {
+    const host = hostForEnvironment(environment)
+    return {
+      label: environment.name,
+      key: environment.id,
+      host: host || '未配置 Host',
+      environmentName: environment.name,
+    }
+  }),
+])
+const activeHost = computed(() => {
+  const environment = workspace.activeEnvironment
+  return environment ? hostForEnvironment(environment) : ''
+})
+
+function domainVariablesFor(environment: Environment) {
+  return environment.variables.filter((variable) => {
+    if (!variable.enabled || !variable.value.trim()) return false
+    return /(url|host|domain|endpoint|origin)/i.test(variable.key)
+      || /^(?:https?:\/\/|wss?:\/\/)/i.test(variable.value.trim())
+  })
+}
+
+function previewEnvironmentValue(environment: Environment, raw: string) {
+  const values = new Map(
+    environment.variables
+      .filter((variable) => variable.enabled && variable.key.trim())
+      .map((variable) => [variable.key.trim(), variable.value]),
+  )
+  let resolved = raw
+  for (let depth = 0; depth < 4; depth += 1) {
+    const next = resolved.replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (match, key: string) => values.get(key) ?? match)
+    if (next === resolved) break
+    resolved = next
+  }
+  return resolved
+}
+
+function hostForEnvironment(environment: Environment) {
+  const candidate = domainVariablesFor(environment)[0]
+  if (!candidate) return ''
+  const value = previewEnvironmentValue(environment, candidate.value).trim()
+  if (!value || value.includes('{{')) return ''
+
+  try {
+    const normalized = /^(?:https?|wss?):\/\//i.test(value) ? value : `https://${value}`
+    return new URL(normalized).host
+  } catch {
+    return value.replace(/^(?:https?|wss?):\/\//i, '').split(/[/?#]/, 1)[0] ?? ''
+  }
+}
+
+function selectEnvironment(key: string | number) {
+  workspace.selectEnvironment(key === NO_ENVIRONMENT_KEY ? null : String(key))
+}
+
+function renderEnvironmentLabel(option: DropdownOption) {
+  const selectedKey = workspace.activeEnvironmentId ?? NO_ENVIRONMENT_KEY
+  return h('div', {
+    style: {
+      display: 'grid',
+      gridTemplateColumns: '18px minmax(150px, max-content) max-content',
+      alignItems: 'center',
+      columnGap: '5px',
+      width: 'max-content',
+      minWidth: '320px',
+      maxWidth: 'min(620px, calc(100vw - 48px))',
+    },
+  }, [
+    h(NRadio, {
+      checked: option.key === selectedKey,
+      focusable: false,
+      style: { pointerEvents: 'none' },
+    }),
+    h('span', {
+      style: {
+        overflow: 'hidden',
+        maxWidth: '360px',
+        color: 'var(--a-text)',
+        fontFamily: 'var(--a-font-mono)',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+      },
+    }, String(option.host ?? '未配置 Host')),
+    h('span', {
+      style: {
+        overflow: 'hidden',
+        justifySelf: 'end',
+        maxWidth: '160px',
+        marginLeft: '20px',
+        color: 'var(--a-text-dim)',
+        fontSize: 'var(--a-fs-xs)',
+        textAlign: 'right',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+      },
+    }, String(option.environmentName ?? '')),
+  ])
+}
 
 function setMethod(m: string) {
   if (tab.value) tabs.patch(tab.value.id, { method: m, dirty: true })
@@ -104,28 +221,59 @@ defineExpose({ focus: () => inputEl.value?.select() })
 <template>
   <div class="urlbar">
   <NaiveThemeScope>
-    <NInputGroup class="request-input-group">
-      <AppSelect
-        class="method-select"
-        :value="tab?.method ?? 'GET'"
-        :options="METHODS.map((value) => ({ label: value, value }))"
-        :render-label="renderMethodLabel"
-        :consistent-menu-width="false"
-        size="medium"
-        @update:value="setMethod(String($event))"
-      />
+    <div class="request-input-group">
+      <div class="request-editor" :class="{ focused: urlFocused }">
+        <AppSelect
+          class="method-select"
+          :value="tab?.method ?? 'GET'"
+          :options="METHODS.map((value) => ({ label: value, value }))"
+          :render-label="renderMethodLabel"
+          :consistent-menu-width="false"
+          size="medium"
+          @update:value="setMethod(String($event))"
+        />
 
-      <NInput
-        ref="inputEl"
-        class="url a-selectable"
-        size="medium"
-        placeholder="输入 URL，或粘贴 cURL 命令"
-        :value="tab?.url ?? ''"
-        :input-props="{ spellcheck: false, autocomplete: 'off', 'aria-label': '请求地址' }"
-        @update:value="onUrl"
-        @keydown="onKeydown"
-      />
-    </NInputGroup>
+        <div class="environment-prefix">
+          <AppDropdown
+            trigger="click"
+            placement="bottom-start"
+            :options="environmentOptions"
+            :render-label="renderEnvironmentLabel"
+            :disabled="!workspace.available"
+            @select="selectEnvironment"
+          >
+            <button
+              class="environment-tag"
+              :class="{ active: workspace.activeEnvironment }"
+              type="button"
+              tabindex="-1"
+              :aria-label="workspace.activeEnvironment ? `当前环境 ${workspace.activeEnvironment.name}，点击切换` : '未选择环境，点击切换'"
+              @pointerdown.stop
+              @mousedown.stop.prevent
+              @click.stop
+            >
+              <AppIcon :component="IconLink" :size="14" />
+              <span v-if="workspace.activeEnvironment" class="environment-host">
+                {{ activeHost || '未配置 Host' }}
+              </span>
+            </button>
+          </AppDropdown>
+        </div>
+        <NInput
+          ref="inputEl"
+          class="url a-selectable"
+          size="medium"
+          :bordered="false"
+          placeholder="输入 URL，或粘贴 cURL 命令"
+          :value="tab?.url ?? ''"
+          :input-props="{ spellcheck: false, autocomplete: 'off', 'aria-label': '请求地址' }"
+          @update:value="onUrl"
+          @keydown="onKeydown"
+          @focus="urlFocused = true"
+          @blur="urlFocused = false"
+        />
+      </div>
+    </div>
 
     <AppButton
       class="send"
@@ -143,7 +291,11 @@ defineExpose({ focus: () => inputEl.value?.select() })
 
 <style scoped>
 .urlbar {
-  height: var(--a-h-urlbar);
+  --url-control-height: 36px;
+  --url-inner-height: 28px;
+  --url-radius: 7px;
+  --url-inner-radius: 5px;
+  height: 52px;
   flex: 0 0 auto;
   position: relative;
   display: flex;
@@ -153,15 +305,101 @@ defineExpose({ focus: () => inputEl.value?.select() })
   /* 没有 border-bottom —— URL 栏是「请求头」块的最后一行，
      下边界由块自己的边框画（见 AppBody.vue 的 .head） */
 }
-.request-input-group { flex: 1 1 auto; min-width: 0; }
-.method-select { width: fit-content; flex: 0 0 auto; }
-.method-select :deep(.n-base-selection) { font-family: var(--a-font-mono); font-weight: var(--a-fw-semibold); }
-.method-select :deep(.n-base-selection-label) { justify-content: center; }
-.url { flex: 1 1 auto; min-width: 0; }
+.request-input-group {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: var(--url-control-height);
+}
+.request-editor {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  height: 100%;
+  overflow: hidden;
+  border: 1px solid var(--a-border);
+  border-radius: var(--url-radius);
+  background: color-mix(in srgb, var(--a-bg-3) 72%, var(--a-bg-2));
+  padding: 3px 4px;
+  gap: 4px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.request-editor.focused {
+  z-index: 1;
+  border-color: var(--a-primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--a-primary) 18%, transparent);
+}
+.method-select { width: fit-content; height: var(--url-inner-height); flex: 0 0 auto; }
+.method-select :deep(.n-base-selection) {
+  display: flex;
+  align-items: center;
+  height: var(--url-inner-height);
+  min-height: var(--url-inner-height);
+  border: 0;
+  border-radius: var(--url-inner-radius);
+  background: color-mix(in srgb, var(--a-bg-2) 82%, var(--a-bg-3));
+  font-family: var(--a-font-mono);
+  font-weight: var(--a-fw-semibold);
+}
+.method-select :deep(.n-base-selection-label) {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  border-radius: inherit;
+  background: transparent;
+}
+.method-select :deep(.n-base-selection-label__render-label) {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  line-height: 1;
+}
+.environment-prefix {
+  display: flex;
+  align-items: center;
+  align-self: stretch;
+  flex: 0 0 auto;
+  padding: 0;
+}
+.environment-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: min(260px, 28vw);
+  height: var(--url-inner-height);
+  padding: 0 7px;
+  border: 0;
+  border-radius: var(--url-inner-radius);
+  background: color-mix(in srgb, var(--a-bg-2) 82%, var(--a-bg-3));
+  color: var(--a-text-dim);
+  cursor: pointer;
+}
+.environment-tag:hover { border-color: var(--a-primary); color: var(--a-text); }
+.environment-tag.active {
+  background: color-mix(in srgb, var(--a-primary) 9%, var(--a-bg-2));
+  color: var(--a-primary-hover);
+}
+.environment-host {
+  overflow: hidden;
+  color: var(--a-text-soft);
+  font-family: var(--a-font-mono);
+  font-size: var(--a-fs-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.url { flex: 1 1 auto; min-width: 0; height: 100%; background: transparent; }
+.url :deep(.n-input-wrapper) { height: 100%; }
 .url :deep(.n-input__input-el) {
   font-family: var(--a-font-mono);
   font-size: var(--a-fs-base);
 }
-.send, .save { min-width: 54px; }
+.send, .save {
+  min-width: 54px;
+  height: var(--url-control-height);
+  min-height: var(--url-control-height);
+  border-radius: var(--url-radius);
+}
 .send { font-weight: var(--a-fw-semibold); }
 </style>

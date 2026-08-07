@@ -1,20 +1,12 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { ref } from 'vue'
 import type { EnvironmentVariable } from '@/ipc'
 import { useWorkspaceStore } from '@/stores/workspace'
-import { AppButton, AppCheckbox, AppIcon, AppInput, AppPopover, AppSelect } from '@/components/ui'
+import { AppButton, AppCheckbox, AppIcon, AppInput, AppPopover } from '@/components/ui'
 import { IconAdd, IconDelete } from '@/components/ui/icons'
 
 const workspace = useWorkspaceStore()
 const open = ref(false)
-const environmentOptions = computed(() => [
-  { label: '无环境', value: '' },
-  ...workspace.environments.map((item) => ({ label: item.name, value: item.id })),
-])
-
-function selectEnvironment(id: string | null) {
-  workspace.selectEnvironment(id || null)
-}
 
 function updateEnvironmentName(value: string) {
   const environment = workspace.activeEnvironment
@@ -43,16 +35,6 @@ async function createEnvironment() {
 
 <template>
   <div class="environment-controls">
-    <label class="environment-select" title="选择请求变量环境">
-      <span>环境</span>
-      <AppSelect
-        class="environment-select-control"
-        :value="workspace.activeEnvironmentId ?? ''"
-        :options="environmentOptions"
-        aria-label="请求变量环境"
-        @update:value="selectEnvironment"
-      />
-    </label>
     <AppPopover
       v-model:show="open"
       trigger="click"
@@ -68,7 +50,7 @@ async function createEnvironment() {
           :aria-expanded="open"
           title="编辑环境变量"
         >
-          变量
+          环境配置
         </AppButton>
       </template>
       <div class="environment-popover" role="dialog" aria-label="环境变量">
@@ -153,15 +135,6 @@ async function createEnvironment() {
   border-left: 1px solid var(--a-border);
   background: var(--a-bg-2);
 }
-.environment-select {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  color: var(--a-text-faint);
-  font-size: var(--a-fs-xs);
-}
-.environment-select-control { width: 128px; }
-.environment-select-control :deep(.n-base-selection-label) { font-family: var(--a-font-mono); }
 .variables-button { font-family: var(--a-font-mono); }
 .environment-popover {
   width: 100%;
