@@ -346,6 +346,14 @@ export const ipc = {
     return call('workspace_forget', { workspaceId })
   },
 
+  workspaceRelocate(workspaceId: string, path: string): Promise<WorkspaceDescriptor> {
+    return call('workspace_relocate', { workspaceId, path })
+  },
+
+  workspaceReveal(workspaceId: string): Promise<void> {
+    return call('workspace_reveal', { workspaceId })
+  },
+
   /** 读取 Rust 侧已经扁平化的集合树。 */
   workspaceLoad(): Promise<WorkspaceSnapshot> {
     return call('workspace_load', sessionArgs())

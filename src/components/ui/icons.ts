@@ -9,5 +9,5 @@ export {
   CircleMinus as IconRemoveCircle, Grip as IconDrag, CircleX as IconCloseCircle, Settings as IconSettings,
   ArrowUpDown as IconSort, History as IconHistory, Clock3 as IconTime, Trash2 as IconDelete,
   Palette as IconPalette, Network as IconNetwork, ShieldCheck as IconShield, Sun as IconSun,
-  RotateCcw as IconReset,
+  RotateCcw as IconReset, MoreHorizontal as IconMore, ExternalLink as IconExternalLink,
 } from 'lucide-vue-next'

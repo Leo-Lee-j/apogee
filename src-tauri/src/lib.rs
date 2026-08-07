@@ -71,6 +71,8 @@ pub fn run() {
             commands::workspace_open,
             commands::workspace_close,
             commands::workspace_forget,
+            commands::workspace_relocate,
+            commands::workspace_reveal,
             commands::workspace_load,
             commands::workspace_read_request,
             commands::workspace_save_request,
@@ -270,6 +272,51 @@ mod commands {
         registry(&app)?
             .forget(parse_id(&workspace_id)?)
             .map_err(|error| error.to_string())
+    }
+
+    #[tauri::command]
+    pub fn workspace_relocate(
+        app: tauri::AppHandle,
+        workspace_id: String,
+        path: String,
+    ) -> Result<WorkspaceDescriptor, String> {
+        registry(&app)?
+            .relocate(parse_id(&workspace_id)?, path)
+            .map_err(|error| error.to_string())
+    }
+
+    #[tauri::command]
+    pub fn workspace_reveal(app: tauri::AppHandle, workspace_id: String) -> Result<(), String> {
+        let descriptor = registry(&app)?
+            .find(parse_id(&workspace_id)?)
+            .map_err(|error| error.to_string())?;
+        let path = std::path::PathBuf::from(&descriptor.path);
+        if !path.exists() {
+            return Err("工作区目录不存在".into());
+        }
+        #[cfg(target_os = "windows")]
+        {
+            std::process::Command::new("explorer.exe")
+                .arg(format!("/select,{}", path.display()))
+                .spawn()
+                .map_err(|error| error.to_string())?;
+        }
+        #[cfg(target_os = "macos")]
+        {
+            std::process::Command::new("open")
+                .arg("-R")
+                .arg(&path)
+                .spawn()
+                .map_err(|error| error.to_string())?;
+        }
+        #[cfg(all(unix, not(target_os = "macos")))]
+        {
+            std::process::Command::new("xdg-open")
+                .arg(&path)
+                .spawn()
+                .map_err(|error| error.to_string())?;
+        }
+        Ok(())
     }
 
     fn open_repository(

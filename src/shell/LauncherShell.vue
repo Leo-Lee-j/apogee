@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import type { DropdownOption } from 'naive-ui'
 import { useAppStore } from '@/stores/app'
 import { useUiStore } from '@/stores/ui'
-import { AppIcon } from '@/components/ui'
-import { IconAdd, IconFolderOpen, IconMoon, IconSun } from '@/components/ui/icons'
+import { AppDropdown, AppIcon } from '@/components/ui'
+import { IconAdd, IconFolderOpen, IconMore, IconMoon, IconSun } from '@/components/ui/icons'
 import { windowControls, type Unlisten } from '@/ipc'
 import logoUrl from '../../src-tauri/icons/128x128.png'
 
@@ -32,10 +33,12 @@ async function pickDirectory() {
 }
 
 async function activate(index: number) {
+  if (app.shell === 'opening') return
   const row = rows.value[index]
   if (!row) return
   if (row.kind === 'workspace') {
     if (row.workspace.status === 'available') await app.openWorkspace({ workspaceId: row.workspace.id })
+    else await relocate(row.workspace.id)
     return
   }
   if (row.kind === 'open') {
@@ -46,10 +49,38 @@ async function activate(index: number) {
   app.createDialogOpen = true
 }
 
+async function relocate(workspaceId: string) {
+  const selected = await pickDirectory()
+  if (typeof selected === 'string') await app.relocateWorkspace(workspaceId, selected)
+}
+
+function workspaceMenu(workspace: { id: string; status: string }): DropdownOption[] {
+  return [
+    { key: 'reveal', label: '在文件管理器中显示', disabled: workspace.status !== 'available' },
+    { key: 'relocate', label: '重新定位' },
+    { key: 'remove', label: '从列表移除' },
+  ]
+}
+
+async function selectWorkspaceAction(workspace: { id: string }, key: string | number) {
+  if (key === 'reveal') await app.revealWorkspace(workspace.id)
+  else if (key === 'relocate') await relocate(workspace.id)
+  else if (key === 'remove') removeWorkspace(workspace.id)
+}
+
+async function removeWorkspace(workspaceId: string) {
+  if (confirm('仅从工作区列表移除记录？磁盘目录不会被删除。')) await app.forgetWorkspace(workspaceId)
+}
+
 function onKeydown(event: KeyboardEvent) {
+  if (app.shell === 'opening') return
   if (event.key === 'ArrowDown') focused.value = Math.min(rows.value.length - 1, focused.value + 1)
   else if (event.key === 'ArrowUp') focused.value = Math.max(0, focused.value - 1)
   else if (event.key === 'Enter') void activate(focused.value)
+  else if (event.key === 'Delete') {
+    const row = rows.value[focused.value]
+    if (row?.kind === 'workspace') void removeWorkspace(row.workspace.id)
+  }
   else return
   event.preventDefault()
 }
@@ -80,14 +111,16 @@ function statusText(status: string) {
       </div>
 
       <section class="workspace-list" aria-label="工作区">
-        <button
+        <div
           v-for="(row, index) in rows"
           :key="row.kind === 'workspace' ? row.workspace.id : row.kind"
           class="workspace-row"
           :class="{ focused: focused === index, command: row.kind !== 'workspace', unavailable: row.kind === 'workspace' && row.workspace.status !== 'available' }"
-          type="button"
-          :disabled="app.shell === 'opening'"
+          :role="'button'"
+          :tabindex="index === focused ? 0 : -1"
+          :aria-disabled="app.shell === 'opening'"
           @focus="focused = index"
+          @focusin="focused = index"
           @click="activate(index)"
         >
           <template v-if="row.kind === 'workspace'">
@@ -97,13 +130,24 @@ function statusText(status: string) {
             </span>
             <span v-if="app.busyWorkspaceId === row.workspace.id" class="spinner" aria-label="正在打开" />
             <span v-else-if="statusText(row.workspace.status)" class="status">{{ statusText(row.workspace.status) }}</span>
+            <AppDropdown
+              v-if="app.shell !== 'opening' && app.busyWorkspaceId !== row.workspace.id"
+              trigger="click"
+              placement="bottom-end"
+              :options="workspaceMenu(row.workspace)"
+              @select="selectWorkspaceAction(row.workspace, $event)"
+            >
+              <button class="row-action remove-action" type="button" aria-label="更多工作区操作" title="更多工作区操作" @click.stop>
+                <AppIcon :component="IconMore" :size="16" />
+              </button>
+            </AppDropdown>
           </template>
           <template v-else>
             <AppIcon :component="row.kind === 'create' ? IconAdd : IconFolderOpen" :size="17" />
             <span>{{ row.kind === 'create' ? '新建工作区' : '打开本地工作区' }}</span>
             <span v-if="app.busyWorkspaceId === row.kind" class="spinner" />
           </template>
-        </button>
+        </div>
       </section>
       <p v-if="app.lastError" class="launcher-error">{{ app.lastError.message }}</p>
     </main>
@@ -130,6 +174,7 @@ function statusText(status: string) {
 .brand img { display: block; border-radius: var(--a-radius-md); box-shadow: var(--a-shadow-sm); }
 .workspace-list { overflow: hidden; border: 1px solid var(--a-border); border-radius: var(--a-radius-md); background: var(--a-bg-2); box-shadow: var(--a-shadow-sm); }
 .workspace-row { width: 100%; min-height: 58px; display: flex; align-items: center; gap: 10px; padding: 9px 14px; border: 0; border-bottom: 1px solid var(--a-border); background: transparent; color: var(--a-text); font: inherit; text-align: left; cursor: pointer; transition: background 150ms ease, color 150ms ease; }
+.workspace-row[aria-disabled='true'] { cursor: default; }
 .workspace-row:last-child { border-bottom: 0; }
 .workspace-row:hover, .workspace-row.focused { background: var(--a-hover); }
 .workspace-row:focus-visible { outline: 1px solid var(--a-focus); outline-offset: -1px; }
@@ -140,6 +185,9 @@ function statusText(status: string) {
 .workspace-copy strong { overflow: hidden; font-size: 14px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .path { overflow: hidden; color: var(--a-text-dim); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .status { color: var(--a-error); font-size: 12px; }
+.row-action { flex: 0 0 28px; width: 28px; height: 28px; display: grid; place-items: center; border: 0; border-radius: var(--a-radius-sm); background: transparent; color: var(--a-text-dim); cursor: pointer; opacity: 0; }
+.workspace-row:hover .row-action, .workspace-row:focus-within .row-action { opacity: 1; }
+.row-action:hover { background: var(--a-hover-strong); color: var(--a-text); }
 .spinner { width: 14px; height: 14px; border: 2px solid var(--a-border-strong); border-top-color: var(--a-primary); border-radius: 50%; animation: spin .7s linear infinite; }
 .launcher-error { margin: 12px 0 0; color: var(--a-error); font-size: 12px; text-align: center; }
 @keyframes spin { to { transform: rotate(360deg); } }

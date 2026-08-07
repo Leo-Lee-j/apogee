@@ -167,8 +167,29 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
+  async function relocateWorkspace(id: string, path: string) {
+    try {
+      await ipc.workspaceRelocate(id, path)
+      await refresh()
+      return true
+    } catch (error) {
+      lastError.value = normalizeError(error)
+      return false
+    }
+  }
+
+  async function revealWorkspace(id: string) {
+    try {
+      await ipc.workspaceReveal(id)
+      return true
+    } catch (error) {
+      lastError.value = normalizeError(error)
+      return false
+    }
+  }
+
   return {
     shell, workspaces, busyWorkspaceId, lastError, createDialogOpen, settings,
-    initialize, refresh, openWorkspace, createWorkspace, closeWorkspace, switchWorkspace, forgetWorkspace, saveSettings,
+    initialize, refresh, openWorkspace, createWorkspace, closeWorkspace, switchWorkspace, forgetWorkspace, relocateWorkspace, revealWorkspace, saveSettings,
   }
 })
