@@ -177,6 +177,10 @@ async function createCollection() {
   color: var(--a-text-dim);
   font: var(--a-fw-medium) var(--a-fs-sm) / 1 var(--a-font-ui);
 }
+/* 名称输入框沿用应用统一的字段输入样式（与 Sidebar / EnvironmentControls 一致）：
+   不单独设置时 naive-ui 默认 36px/10px padding，与其它字段并排时明显矮一截。 */
+.save-picker :deep(.n-input) { min-height: 38px; }
+.save-picker :deep(.n-input-wrapper) { padding-inline: 12px; }
 .error { flex: 0 0 auto; }
 .target-list {
   max-height: 260px;

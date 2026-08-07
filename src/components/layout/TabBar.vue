@@ -2,7 +2,7 @@
 import { useTabsStore } from '@/stores/tabs'
 import EnvironmentControls from '@/components/layout/EnvironmentControls.vue'
 import { AppIcon } from '@/components/ui'
-import { IconAdd, IconClose, IconDocument } from '@/components/ui/icons'
+import { IconAdd, IconClose, IconDocument, IconFlash } from '@/components/ui/icons'
 
 /** 标签栏，34px。`•` 表示有未保存改动（02 文档 §3.2 / §4.5）。 */
 const tabs = useTabsStore()
@@ -26,11 +26,15 @@ const methodColor: Record<string, string> = {
         :class="{ active: t.id === tabs.activeId, preview: t.preview }"
         role="tab"
         :aria-selected="t.id === tabs.activeId"
-        :title="t.kind === 'request' ? `${t.method} ${t.url || t.title}（${tabs.stateOf(t.id)}）` : t.title"
+        :title="t.kind === 'request' && !t.newPanel ? `${t.method} ${t.url || t.title}（${tabs.stateOf(t.id)}）` : t.title"
         @click="tabs.activate(t.id)"
       >
+        <!-- 新建请求面板：还没选请求类型，不冒充 GET，用闪电图标表示「待选择」 -->
+        <span v-if="t.newPanel && t.kind === 'request'" class="m new-bolt" aria-hidden="true">
+          <AppIcon :component="IconFlash" :size="13" />
+        </span>
         <span
-          v-if="t.kind === 'request'"
+          v-else-if="t.kind === 'request'"
           class="m"
           :style="{ color: methodColor[t.method] ?? 'var(--a-head)' }"
         >{{ t.method }}</span>
@@ -94,6 +98,9 @@ const methodColor: Record<string, string> = {
 .tab.active { background: var(--a-bg-3); color: var(--a-text); box-shadow: inset 0 -2px 0 var(--a-primary); }
 .tab.preview .t { font-style: italic; }
 .m { font: var(--a-fw-semibold) var(--a-fs-xs) / 1 var(--a-font-mono); }
+/* 新建请求面板的占位图标：与内容区「快捷请求」卡片的闪电同色（--a-primary），
+   让标签图标和内容区的图标一眼对应；普通标签仍用方法彩色文本。 */
+.new-bolt { display: inline-flex; align-items: center; justify-content: center; width: 14px; color: var(--a-primary); }
 .page-icon { width: 14px; color: var(--a-text-faint); line-height: 1; }
 .t { overflow: hidden; text-overflow: ellipsis; }
 .dot { color: var(--a-primary); }
