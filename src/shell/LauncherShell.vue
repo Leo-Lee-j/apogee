@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { useUiStore } from '@/stores/ui'
 import { AppIcon } from '@/components/ui'
-import { IconAdd, IconFolderOpen, IconMoon } from '@/components/ui/icons'
+import { IconAdd, IconFolderOpen, IconMoon, IconSun } from '@/components/ui/icons'
 import { windowControls, type Unlisten } from '@/ipc'
 import logoUrl from '../../src-tauri/icons/128x128.png'
 
@@ -63,8 +63,8 @@ function statusText(status: string) {
   <div class="launcher" tabindex="0" @keydown="onKeydown">
     <header class="launcher-titlebar" data-tauri-drag-region>
       <div class="launcher-spacer" />
-      <button class="title-icon" type="button" title="切换主题" @click="ui.themeMode = ui.isDark ? 'light' : 'dark'; ui.applyTheme()">
-        <AppIcon :component="IconMoon" :size="15" />
+      <button class="title-icon" type="button" :title="ui.isDark ? '切换到亮色主题' : '切换到暗色主题'" :aria-label="ui.isDark ? '切换到亮色主题' : '切换到暗色主题'" @click="ui.themeMode = ui.isDark ? 'light' : 'dark'; ui.applyTheme()">
+        <AppIcon :component="ui.isDark ? IconSun : IconMoon" :size="15" />
       </button>
       <div v-if="windowControls.available" class="window-controls">
         <button type="button" title="最小化" @click="windowControls.minimize()"><span class="minimize" /></button>
@@ -125,11 +125,11 @@ function statusText(status: string) {
 .restore { top: 14px; height: 8px; border: 1px solid currentColor; background: transparent; box-shadow: 2px -2px 0 -1px var(--a-bg-1), 2px -2px 0 0 currentColor; }
 .close-mark { top: 17px; transform: rotate(45deg); }
 .close-mark::after { content: ''; position: absolute; inset: 0; transform: rotate(90deg); background: currentColor; }
-.launcher-content { width: min(680px, calc(100% - 48px)); margin: 0 auto; padding-top: max(76px, 10vh); }
-.brand { display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 32px; color: var(--a-text); font-size: 24px; font-weight: 600; }
-.brand img { display: block; border-radius: 9px; }
+.launcher-content { width: min(700px, calc(100% - 40px)); margin: 0 auto; padding-top: max(52px, 8vh); }
+.brand { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 32px; color: var(--a-text); font-size: 23px; font-weight: 600; }
+.brand img { display: block; border-radius: var(--a-radius-md); box-shadow: var(--a-shadow-sm); }
 .workspace-list { overflow: hidden; border: 1px solid var(--a-border); border-radius: var(--a-radius-md); background: var(--a-bg-2); box-shadow: var(--a-shadow-sm); }
-.workspace-row { width: 100%; min-height: 58px; display: flex; align-items: center; gap: 12px; padding: 8px 16px; border: 0; border-bottom: 1px solid var(--a-border); background: transparent; color: var(--a-text); font: inherit; text-align: left; cursor: pointer; }
+.workspace-row { width: 100%; min-height: 58px; display: flex; align-items: center; gap: 10px; padding: 9px 14px; border: 0; border-bottom: 1px solid var(--a-border); background: transparent; color: var(--a-text); font: inherit; text-align: left; cursor: pointer; transition: background 150ms ease, color 150ms ease; }
 .workspace-row:last-child { border-bottom: 0; }
 .workspace-row:hover, .workspace-row.focused { background: var(--a-hover); }
 .workspace-row:focus-visible { outline: 1px solid var(--a-focus); outline-offset: -1px; }

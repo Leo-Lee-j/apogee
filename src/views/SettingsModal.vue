@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { ref } from 'vue'
 import {
   AppAlert,
   AppButton,
@@ -11,6 +11,8 @@ import {
   AppSwitch,
 } from '@/components/ui'
 import NaiveThemeScope from '@/components/NaiveThemeScope.vue'
+import { AppIcon } from '@/components/ui'
+import { IconFolderOpen, IconNetwork, IconPalette, IconReset, IconShield } from '@/components/ui/icons'
 import { useUiStore } from '@/stores/ui'
 import { useAppStore } from '@/stores/app'
 
@@ -24,15 +26,12 @@ const timeout = ref(30000)
 const verifyTls = ref(true)
 const telemetry = ref(false)
 
-const sections: Array<{ id: SettingsSection; label: string }> = [
-  { id: 'appearance', label: '外观与布局' },
-  { id: 'network', label: '网络' },
-  { id: 'privacy', label: '隐私' },
+const sections = [
+  { id: 'appearance' as const, label: '外观与布局', icon: IconPalette },
+  { id: 'network' as const, label: '网络', icon: IconNetwork },
+  { id: 'privacy' as const, label: '隐私', icon: IconShield },
 ]
 
-const sectionTitle = computed(() =>
-  sections.find((section) => section.id === activeSection.value)?.label ?? '设置',
-)
 const themeOptions = [
   { label: '暗色', value: 'dark' },
   { label: '亮色', value: 'light' },
@@ -59,9 +58,12 @@ async function setAutoOpen(value: boolean) {
 
 <template>
   <NaiveThemeScope>
-    <section class="settings-page a-block" aria-labelledby="settings-title">
+    <section class="settings-page" aria-label="设置">
       <aside class="settings-nav" aria-label="设置分类">
-        <div class="nav-title">设置</div>
+        <div class="nav-heading">
+          <div class="nav-title">设置</div>
+          <div class="nav-subtitle">偏好设置</div>
+        </div>
         <button
           v-for="section in sections"
           :key="section.id"
@@ -69,15 +71,12 @@ async function setAutoOpen(value: boolean) {
           :class="{ active: activeSection === section.id }"
           @click="activeSection = section.id"
         >
-          {{ section.label }}
+          <AppIcon :component="section.icon" :size="16" />
+          <span>{{ section.label }}</span>
         </button>
       </aside>
 
       <div class="settings-content">
-        <header class="settings-header">
-          <h1 id="settings-title">{{ sectionTitle }}</h1>
-        </header>
-
         <div class="settings-scroll">
           <template v-if="activeSection === 'appearance'">
             <section class="settings-group">
@@ -85,10 +84,11 @@ async function setAutoOpen(value: boolean) {
                 <h2>界面</h2>
                 <p>控制应用主题和工作区排列方式。</p>
               </div>
-              <AppForm label-placement="left" label-width="112" size="small">
+              <AppForm label-placement="left" label-width="112" size="medium">
                 <AppFormItem label="主题">
                   <AppSelect
                     class="control"
+                    size="medium"
                     :value="ui.themeMode"
                     :options="themeOptions"
                     @update:value="(value: any) => { ui.themeMode = value; ui.applyTheme() }"
@@ -97,6 +97,7 @@ async function setAutoOpen(value: boolean) {
                 <AppFormItem label="内容布局">
                   <AppSelect
                     class="control"
+                    size="medium"
                     :value="ui.layout"
                     :options="layoutOptions"
                     @update:value="(value: any) => { ui.setLayout(value) }"
@@ -110,7 +111,10 @@ async function setAutoOpen(value: boolean) {
                 <h2>侧边栏</h2>
                 <p>恢复工作区导航栏的默认宽度。</p>
               </div>
-              <AppButton size="small" @click="ui.resetSidebarWidth()">恢复默认宽度</AppButton>
+              <AppButton secondary @click="ui.resetSidebarWidth()">
+                <template #icon><AppIcon :component="IconReset" :size="16" /></template>
+                恢复默认宽度
+              </AppButton>
             </section>
 
             <section class="settings-group">
@@ -118,7 +122,7 @@ async function setAutoOpen(value: boolean) {
                 <h2>启动</h2>
                 <p>控制 Apogee 启动后首先显示的界面。</p>
               </div>
-              <AppForm label-placement="left" label-width="190" size="small">
+              <AppForm label-placement="left" label-width="190" size="medium">
                 <AppFormItem label="启动时打开上次使用的工作区">
                   <AppSwitch
                     :value="app.settings.openLastWorkspaceOnStart"
@@ -134,8 +138,9 @@ async function setAutoOpen(value: boolean) {
                 <p>新建工作区默认保存到此目录，已有工作区不会被移动。</p>
               </div>
               <div class="workspace-root-control">
+                <span class="workspace-icon"><AppIcon :component="IconFolderOpen" :size="17" /></span>
                 <AppInput :value="app.settings.defaultWorkspaceRoot" readonly />
-                <AppButton size="small" @click="chooseWorkspaceRoot">更改位置</AppButton>
+                <AppButton secondary @click="chooseWorkspaceRoot">更改位置</AppButton>
               </div>
             </section>
           </template>
@@ -146,11 +151,12 @@ async function setAutoOpen(value: boolean) {
                 <h2>连接</h2>
                 <p>设置请求使用的代理、超时和证书校验策略。</p>
               </div>
-              <AppForm label-placement="left" label-width="112" size="small">
+              <AppForm label-placement="left" label-width="112" size="medium">
                 <AppFormItem label="代理">
                   <AppSelect
                     v-model:value="proxyMode"
                     class="control"
+                    size="medium"
                     :options="[
                       { label: '系统代理', value: 'system' },
                       { label: '手动配置', value: 'manual' },
@@ -178,7 +184,7 @@ async function setAutoOpen(value: boolean) {
                 <h2>使用数据</h2>
                 <p>Apogee 默认不发送遥测数据。</p>
               </div>
-              <AppForm label-placement="left" label-width="140" size="small">
+              <AppForm label-placement="left" label-width="140" size="medium">
                 <AppFormItem label="发送匿名使用数据">
                   <AppSwitch v-model:value="telemetry" />
                 </AppFormItem>
@@ -198,65 +204,110 @@ async function setAutoOpen(value: boolean) {
 .settings-page {
   flex: 1 1 auto;
   display: grid;
-  grid-template-columns: 190px minmax(0, 1fr);
+  grid-template-columns: 208px minmax(0, 1fr);
   min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--a-border);
+  border-radius: var(--a-radius-md);
+  background: var(--a-bg-1);
+  box-shadow: var(--a-shadow-sm);
 }
 .settings-nav {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 12px 8px;
+  gap: 6px;
+  padding: 16px 10px;
   border-right: 1px solid var(--a-border);
-  background: var(--a-bg-2);
+  background: var(--a-sidebar, #f4f4f5);
 }
+.nav-heading { padding: 0 10px 12px; }
 .nav-title {
-  height: 30px;
-  padding: 0 10px;
   color: var(--a-text);
+  font-size: 16px;
   font-weight: var(--a-fw-semibold);
-  line-height: 30px;
+  line-height: 24px;
 }
+.nav-subtitle { margin-top: 2px; color: var(--a-text-dim); font-size: 12px; line-height: 18px; }
 .settings-nav button {
-  height: 30px;
-  padding: 0 10px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
   border: 0;
-  border-radius: var(--a-radius-sm);
+  border-radius: var(--a-radius-md);
   background: transparent;
   color: var(--a-text-dim);
-  font: inherit;
+  font-size: 13px;
+  font-weight: var(--a-fw-medium);
   text-align: left;
   cursor: pointer;
 }
 .settings-nav button:hover { background: var(--a-hover); color: var(--a-text); }
 .settings-nav button.active {
-  background: var(--a-selected);
-  color: var(--a-text);
-  box-shadow: inset 2px 0 0 var(--a-primary);
+  background: #111827;
+  color: #ffffff;
+  box-shadow: 0 1px 2px rgba(17, 24, 39, 0.12);
 }
-.settings-content { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-.settings-header {
-  flex: 0 0 auto;
-  height: 56px;
-  display: flex;
-  align-items: center;
-  padding: 0 24px;
-  border-bottom: 1px solid var(--a-border);
+.settings-content { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--a-bg-1); }
+.settings-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(280px, 1fr));
+  align-content: start;
+  gap: 10px;
+  overflow: auto;
+  padding: 18px;
 }
-.settings-header h1 { margin: 0; font-size: 16px; line-height: 1.3; font-weight: var(--a-fw-semibold); }
-.settings-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 24px; }
-.settings-group { width: min(680px, 100%); padding-bottom: 24px; }
-.settings-group + .settings-group { padding-top: 24px; border-top: 1px solid var(--a-border); }
-.group-heading { margin-bottom: 18px; }
-.group-heading h2 { margin: 0 0 4px; color: var(--a-text); font-size: 14px; line-height: 20px; }
-.group-heading p { margin: 0; color: var(--a-text-dim); font-size: 12px; line-height: 18px; }
+.settings-group {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--a-border);
+  border-radius: var(--a-radius-md);
+  background: var(--a-bg-2);
+  box-shadow: var(--a-shadow-sm);
+}
+.settings-group.wide,
+.settings-group:only-child { grid-column: 1 / -1; }
+.group-heading { margin-bottom: 12px; }
+.group-heading h2 { margin: 0 0 6px; color: var(--a-text); font-size: 14px; line-height: 20px; font-weight: var(--a-fw-semibold); }
+.group-heading p { margin: 0; color: var(--a-text-dim); font-size: 13px; line-height: 20px; }
 .control { width: min(320px, 100%); }
-.workspace-root-control { display: flex; align-items: center; gap: 10px; max-width: 680px; }
+.workspace-root-control { display: flex; align-items: center; gap: 8px; max-width: 680px; }
 .workspace-root-control :deep(.n-input) { min-width: 0; flex: 1; }
+.workspace-icon {
+  width: 40px;
+  height: 40px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--a-border);
+  border-radius: var(--a-radius-md);
+  background: var(--a-bg-3);
+  color: var(--a-text-dim);
+}
 .unit { margin-left: 8px; color: var(--a-text-faint); font: var(--a-fs-xs) var(--a-font-mono); }
+.settings-group :deep(.n-form-item:last-child) { margin-bottom: 0; }
+.settings-group :deep(.n-form-item-label) { color: var(--a-text-soft); font-weight: var(--a-fw-medium); }
+.settings-group :deep(.n-base-selection),
+.settings-group :deep(.n-input) { box-shadow: none; }
 
 @media (max-width: 760px) {
-  .settings-page { grid-template-columns: 150px minmax(0, 1fr); }
-  .settings-scroll { padding: 18px; }
-  .settings-header { padding: 0 18px; }
+  .settings-page { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
+  .settings-nav {
+    flex-direction: row;
+    overflow-x: auto;
+    padding: 10px;
+    border-right: 0;
+    border-bottom: 1px solid var(--a-border);
+  }
+  .nav-heading { display: none; }
+  .settings-nav button { flex: 0 0 auto; }
+  .settings-scroll { grid-template-columns: 1fr; padding: 14px; }
+  .settings-group { padding: 10px; }
+  .workspace-root-control { flex-wrap: wrap; }
+  .workspace-root-control :deep(.n-input) { flex-basis: calc(100% - 48px); }
 }
 </style>

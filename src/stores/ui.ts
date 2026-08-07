@@ -14,7 +14,7 @@ export type ThemeMode = 'dark' | 'light' | 'system'
  */
 export const SIDEBAR_MIN_W = 180
 export const SIDEBAR_MAX_W = 480
-export const SIDEBAR_DEFAULT_W = 370
+export const SIDEBAR_DEFAULT_W = 296
 
 /**
  * 请求区 / 响应区的比例边界。

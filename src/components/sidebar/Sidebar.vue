@@ -594,18 +594,18 @@ defineExpose({
   display: flex; flex-direction: column; min-height: 0;
   /* 没有 border-right —— 与主区之间靠 --a-gutter 的间隙分隔（02 文档 §3.2）。
      背景由 .a-block 提供，这里保留一份是为了组件单独使用时也有底色。 */
-  background: var(--a-bg-2);
+  background: var(--a-sidebar, var(--a-bg-2));
 }
 /* 功能按钮单独一行，过滤框独占下一行，避免侧边栏变窄时控件互相挤压。 */
 .head {
-  padding: 6px;
+  padding: 8px;
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   align-items: stretch;
   gap: 4px;
 }
-.head-tools { display: flex; align-items: center; gap: 2px; min-height: 24px; }
+.head-tools { display: flex; align-items: center; gap: 3px; min-height: 30px; }
 .head-button {
   flex: 0 0 auto;
   color: var(--a-text-dim);
@@ -617,10 +617,10 @@ defineExpose({
   flex: 0 0 auto;
   width: 100%;
   min-width: 0;
-  height: 24px;
+  height: 36px;
   padding: 0;
   background: var(--a-bg-3);
-  border-radius: 4px;
+  border-radius: var(--a-radius-md);
   color: var(--a-text);
   font: 12px/1 var(--a-font-ui);
 }
@@ -630,7 +630,7 @@ defineExpose({
   padding: 0 6px;
 }
 .filter :deep(.n-input__border),
-.filter :deep(.n-input__state-border) { border-radius: 4px; }
+.filter :deep(.n-input__state-border) { border-radius: var(--a-radius-md); }
 /* 不能写 outline: none —— 那会盖掉 tokens.css 里的全局 :focus-visible 焦点环。 */
 .filter:focus-within :deep(.n-input__state-border) {
   border-color: var(--a-focus);
@@ -680,11 +680,15 @@ defineExpose({
  * 用 box-shadow 画色条而不是 border-left，免得改变 padding 算出来的缩进。
  */
 .row.active {
-  background: var(--a-selected);
-  color: var(--a-text);
-  box-shadow: inset 2px 0 0 var(--a-primary);
+  background: #111827;
+  color: #ffffff;
+  border-radius: var(--a-radius-md);
+  margin: 0 8px;
+  right: 8px;
+  box-shadow: none;
 }
-.row.active:hover { background: var(--a-selected); }
+.row.active:hover { background: #111827; }
+.row.active .node-icon, .row.active .m { color: #ffffff !important; }
 .node-icon {
   display: flex;
   align-items: center;

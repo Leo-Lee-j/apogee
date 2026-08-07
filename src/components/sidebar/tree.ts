@@ -12,7 +12,7 @@
  */
 
 /** 行高（px）。虚拟滚动靠定高换取 O(1) 的索引换算，不做动态测高。 */
-export const ROW_H = 22
+export const ROW_H = 28
 
 /** 可视区上下各多渲染的行数。缓冲越大越不容易露白，代价是每帧多算几行。 */
 export const OVERSCAN = 10

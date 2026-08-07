@@ -46,6 +46,7 @@
   --a-bg-1: #0c0e12;
   --a-bg-2: #14171f;
   --a-bg-3: #1a1e29;
+  --a-sidebar: #171a22;
   --a-border: #232733;
   --a-border-strong: #2f3648;
 
@@ -70,7 +71,7 @@
      否则按钮一半的文字不可读，这正是 Apogee 原方案的缺陷所在。 */
   --a-grad-from: #4f80ff;
   --a-grad-to: #38bdf8;
-  --a-primary-gradient: linear-gradient(135deg, var(--a-grad-from) 0%, var(--a-grad-to) 100%);
+  --a-primary-gradient: var(--a-primary);
   /* 纯装饰光晕，不承载信息，不参与过渡动画。 */
   --a-glow: rgba(56, 189, 248, 0.14);
 
@@ -128,29 +129,29 @@
   --a-danger-bg: #9f1239;
 
   /* ── 阴影（静态，不参与过渡）── */
-  --a-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.5);
-  --a-shadow-md: 0 4px 12px rgba(0, 0, 0, 0.65);
-  --a-shadow-lg: 0 30px 90px -20px rgba(0, 0, 0, 0.85);
+  --a-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.18);
+  --a-shadow-md: 0 4px 14px rgba(0, 0, 0, 0.22);
+  --a-shadow-lg: 0 18px 48px rgba(0, 0, 0, 0.32);
 
   /* ── 圆角 ──
      Apogee 的 6/9/14 整体下移一档。密集工具界面 28px 行高配 9px 圆角会显胖，
      Linear 实际用的是 4～6px。胶囊只留给徽章。 */
-  --a-radius-sm: 4px;
-  --a-radius-md: 6px;
-  --a-radius-lg: 10px;
-  --a-radius-pill: 999px;
+  --a-radius-sm: 8px;
+  --a-radius-md: 12px;
+  --a-radius-lg: 12px;
+  --a-radius-pill: 12px;
 
   /* ── 尺寸（02 文档 §3.2）── */
-  --a-h-titlebar: 36px;
-  --a-h-tabbar: 34px;
+  --a-h-titlebar: 40px;
+  --a-h-tabbar: 36px;
   --a-h-urlbar: 40px;
-  --a-h-toolbar: 32px;
+  --a-h-toolbar: 40px;
   --a-h-statusbar: 24px;
-  --a-w-sidebar: 370px;
+  --a-w-sidebar: 296px;
   /* S3 虚拟树对照实验保持固定测量宽度，不随产品默认布局变化。 */
   --a-w-sidebar-bench: 240px;
-  --a-row: 28px;
-  --a-row-compact: 24px;
+  --a-row: 32px;
+  --a-row-compact: 28px;
 
   /* ── 排版（02 文档 §7.3）──
      固定 px，不用 clamp。Inter 放首位但不下载字体文件，装了就用、没装回落系统字体。 */
@@ -172,7 +173,7 @@
      刻意不挂到 --a-space-* 的 4px 栅格上：栅格管的是内容的排版节奏（padding、
      行距），而这里是**分隔尺寸**，和边框粗细同类。加上两侧块各自 1px 边框，
      实际视觉分隔是 5px。 */
-  --a-gutter: 3px;
+  --a-gutter: 4px;
 
   /* ── 间距（4px 基数）── */
   --a-space-1: 4px;
@@ -197,21 +198,22 @@
 :root[data-theme='light'] {
   color-scheme: light;
 
-  --a-bg-1: #f8fafb;
+  --a-bg-1: #fafafb;
   --a-bg-2: #ffffff;
-  --a-bg-3: #f1f4f7;
-  --a-border: #dbe2ea;
-  --a-border-strong: #c2ccd9;
+  --a-bg-3: #f7f7f8;
+  --a-sidebar: #f4f4f5;
+  --a-border: #e5e7eb;
+  --a-border-strong: #d1d5db;
 
-  --a-text: #0f172a;
-  --a-text-soft: #334155;
-  --a-text-dim: #475569;
-  --a-text-faint: #5e6c80;
-  --a-text-ghost: #c2ccd9;
+  --a-text: #111827;
+  --a-text-soft: #374151;
+  --a-text-dim: #6b7280;
+  --a-text-faint: #6b7280;
+  --a-text-ghost: #d1d5db;
 
   --a-primary: #2563eb;
-  --a-primary-hover: #1d4fd8;
-  --a-primary-pressed: #1a45c0;
+  --a-primary-hover: #1d4ed8;
+  --a-primary-pressed: #1d4ed8;
   /* 亮主题下白字在 #2563EB 上是 5.17:1，可以用白字。 */
   --a-on-primary: #ffffff;
   /* 渐变末端从 Apogee 的 #0EA5E9 压深到 #0E7CAE。
@@ -220,13 +222,13 @@
      暗主题不必付这个代价，因为它用深色前景，#38BDF8 上是 9.02:1。 */
   --a-grad-from: #2563eb;
   --a-grad-to: #0e7cae;
-  --a-primary-gradient: linear-gradient(135deg, var(--a-grad-from) 0%, var(--a-grad-to) 100%);
-  --a-glow: rgba(37, 99, 235, 0.1);
+  --a-primary-gradient: var(--a-primary);
+  --a-glow: rgba(59, 130, 246, 0.08);
 
-  --a-hover: rgba(37, 99, 235, 0.07);
-  --a-selected: rgba(37, 99, 235, 0.11);
+  --a-hover: #f3f4f6;
+  --a-selected: #eff6ff;
   --a-focus: #2563eb;
-  --a-focus-halo: 0 0 0 3px rgba(37, 99, 235, 0.2);
+  --a-focus-halo: 0 0 0 3px rgba(59, 130, 246, 0.14);
 
   --a-get: #047857;
   --a-get-bg: rgba(5, 150, 105, 0.09);
@@ -252,9 +254,9 @@
   --a-neterr: #fff1f2;
   --a-neterr-bg: #9f1239;
 
-  --a-shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.08);
-  --a-shadow-md: 0 4px 12px rgba(15, 23, 42, 0.12);
-  --a-shadow-lg: 0 24px 70px -22px rgba(15, 23, 42, 0.24);
+  --a-shadow-sm: 0 1px 2px rgba(17, 24, 39, 0.04);
+  --a-shadow-md: 0 4px 12px rgba(17, 24, 39, 0.06);
+  --a-shadow-lg: 0 18px 48px rgba(17, 24, 39, 0.12);
 }
 
 /* 尊重系统减弱动效偏好（02 文档 §7.4 / PRD §10.4） */
@@ -267,6 +269,9 @@
 }
 
 * { box-sizing: border-box; }
+
+button, input, textarea, select { font: inherit; }
+button { transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease, opacity 150ms ease; }
 
 html, body, #app { height: 100%; margin: 0; }
 
@@ -322,18 +327,19 @@ input, textarea, [contenteditable], .a-selectable { user-select: text; }
   background: var(--a-bg-2);
   border: 1px solid var(--a-border);
   border-radius: var(--a-radius-md);
+  box-shadow: var(--a-shadow-sm);
   overflow: hidden;
   min-width: 0;
   min-height: 0;
 }
 
 /* 滚动条：细、低对比，不抢视觉预算 */
-::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar { width: 12px; height: 12px; }
 ::-webkit-scrollbar-thumb {
   background: var(--a-border-strong);
   border: 3px solid transparent;
   background-clip: content-box;
-  border-radius: 5px;
+  border-radius: 8px;
 }
 ::-webkit-scrollbar-thumb:hover { background-clip: content-box; background-color: var(--a-text-faint); }
 ::-webkit-scrollbar-corner { background: transparent; }

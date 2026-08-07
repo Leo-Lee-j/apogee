@@ -52,8 +52,8 @@ const commonDark = {
 
   // --a-radius-md / --a-radius-sm。Apogee 的 9px/6px 各下移一档，
   // 28px 行高配 9px 圆角在密集表格里会显胖。
-  borderRadius: '6px',
-  borderRadiusSmall: '4px',
+  borderRadius: '12px',
+  borderRadiusSmall: '8px',
 
   // 固定 px，不用 clamp —— 理由见 tokens.css 文件头。
   fontFamily:
@@ -68,8 +68,8 @@ const commonDark = {
 const commonLight = {
   ...commonDark,
   primaryColor: '#2563eb',
-  primaryColorHover: '#1d4fd8',
-  primaryColorPressed: '#1a45c0',
+  primaryColorHover: '#1d4ed8',
+  primaryColorPressed: '#1d4ed8',
   primaryColorSuppl: '#2563eb',
 
   successColor: '#059669',
@@ -77,44 +77,44 @@ const commonLight = {
   errorColor: '#dc2626',
   infoColor: '#2563eb',
 
-  textColorBase: '#0f172a',
-  textColor1: '#0f172a',
-  textColor2: '#334155',
-  textColor3: '#475569',
+  textColorBase: '#111827',
+  textColor1: '#111827',
+  textColor2: '#374151',
+  textColor3: '#6b7280',
 
   // 亮主题里画布是云母白、面板是纯白（层级方向与暗主题相反，见 tokens.css）
-  bodyColor: '#f8fafb',
+  bodyColor: '#fafafb',
   cardColor: '#ffffff',
   modalColor: '#ffffff',
   popoverColor: '#ffffff',
-  inputColor: '#f1f4f7',
+  inputColor: '#f7f7f8',
   tableColor: '#ffffff',
 
-  borderColor: '#dbe2ea',
-  dividerColor: '#dbe2ea',
+  borderColor: '#e5e7eb',
+  dividerColor: '#e5e7eb',
 } as const
 
 /** 组件级只覆写必要的部分。改得越多，样式计算越慢。 */
 const components = {
   Input: {
-    heightSmall: '24px',
-    paddingSmall: '0 6px',
+    heightSmall: '30px',
+    paddingSmall: '0 10px',
     fontSizeSmall: '12px',
     lineHeight: '20px',
-    borderRadius: '4px',
-    heightMedium: '28px',
-    paddingMedium: '0 8px',
+    borderRadius: '12px',
+    heightMedium: '36px',
+    paddingMedium: '0 10px',
     fontSizeMedium: '13px',
   },
   Button: {
-    heightSmall: '24px',
-    paddingSmall: '0 8px',
+    heightSmall: '32px',
+    paddingSmall: '0 12px',
     fontSizeSmall: '12px',
-    borderRadiusSmall: '4px',
-    heightMedium: '28px',
-    paddingMedium: '0 12px',
+    borderRadiusSmall: '12px',
+    heightMedium: '36px',
+    paddingMedium: '0 14px',
     fontSizeMedium: '13px',
-    borderRadiusMedium: '6px',
+    borderRadiusMedium: '12px',
     textColorPrimary: '#0c0e12',
     textColorHoverPrimary: '#0c0e12',
     textColorPressedPrimary: '#0c0e12',
@@ -122,7 +122,7 @@ const components = {
     textColorDisabledPrimary: '#0c0e12',
   },
   Card: {
-    borderRadius: '6px',
+    borderRadius: '12px',
     paddingSmall: '12px',
     fontSizeSmall: '12px',
     titleFontSizeSmall: '13px',
@@ -147,11 +147,11 @@ const components = {
     peers: {
       InternalSelection: {
         fontSizeSmall: '12px',
-        heightSmall: '24px',
-        borderRadius: '4px',
+        heightSmall: '30px',
+        borderRadius: '12px',
         paddingSingle: '0 8px',
         fontSizeMedium: '13px',
-        heightMedium: '28px',
+        heightMedium: '36px',
       },
     },
   },

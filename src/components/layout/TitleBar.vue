@@ -6,7 +6,7 @@ import { useTabsStore } from '@/stores/tabs'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { windowControls, type Unlisten } from '@/ipc'
 import { AppDropdown, AppIcon } from '@/components/ui'
-import { IconChevronDown, IconDocument, IconHistory, IconMoon, IconSettings } from '@/components/ui/icons'
+import { IconChevronDown, IconDocument, IconHistory, IconMoon, IconSettings, IconSun } from '@/components/ui/icons'
 import { useAppStore } from '@/stores/app'
 
 /**
@@ -129,10 +129,11 @@ onBeforeUnmount(() => stopWatching?.())
     <button
       class="icon"
       type="button"
-      title="切换主题"
+      :title="ui.isDark ? '切换到亮色主题' : '切换到暗色主题'"
+      :aria-label="ui.isDark ? '切换到亮色主题' : '切换到暗色主题'"
       @click="ui.themeMode = ui.isDark ? 'light' : 'dark'; ui.applyTheme()"
     >
-      <AppIcon :component="IconMoon" :size="15" />
+      <AppIcon :component="ui.isDark ? IconSun : IconMoon" :size="15" />
     </button>
 
     <!--
@@ -179,8 +180,8 @@ onBeforeUnmount(() => stopWatching?.())
   flex: 0 0 auto;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 0 8px;
+  gap: 6px;
+  padding: 0 10px;
   background: var(--a-bg-2);
   border-bottom: 1px solid var(--a-border);
 }
@@ -192,8 +193,8 @@ onBeforeUnmount(() => stopWatching?.())
   border: 1px solid transparent;
   color: var(--a-text-dim);
   font: inherit;
-  height: 24px;
-  border-radius: 4px;
+  height: 32px;
+  border-radius: var(--a-radius-md);
   cursor: pointer;
   transition: background var(--a-dur) var(--a-ease);
 }
@@ -212,7 +213,7 @@ onBeforeUnmount(() => stopWatching?.())
   border-radius: var(--a-radius-sm); padding: 2px 4px;
 }
 .spacer { flex: 1 1 auto; }
-.icon { width: 24px; text-align: center; }
+.icon { width: 32px; text-align: center; }
 .icon :deep(.n-icon) { vertical-align: middle; }
 
 /* ── 窗口控制 ──
@@ -222,7 +223,7 @@ onBeforeUnmount(() => stopWatching?.())
   display: flex;
   align-self: stretch;
   margin-left: 4px;
-  margin-right: -8px;
+  margin-right: -10px;
 }
 .wc {
   width: 46px;

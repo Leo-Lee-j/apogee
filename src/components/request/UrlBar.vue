@@ -292,16 +292,16 @@ defineExpose({ focus: () => inputEl.value?.select() })
 <style scoped>
 .urlbar {
   --url-control-height: 36px;
-  --url-inner-height: 28px;
-  --url-radius: 7px;
-  --url-inner-radius: 5px;
+  --url-inner-height: 30px;
+  --url-radius: 12px;
+  --url-inner-radius: 8px;
   height: 52px;
   flex: 0 0 auto;
   position: relative;
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 0 8px;
+  padding: 0 10px;
   /* 没有 border-bottom —— URL 栏是「请求头」块的最后一行，
      下边界由块自己的边框画（见 AppBody.vue 的 .head） */
 }
@@ -319,17 +319,17 @@ defineExpose({ focus: () => inputEl.value?.select() })
   overflow: hidden;
   border: 1px solid var(--a-border);
   border-radius: var(--url-radius);
-  background: color-mix(in srgb, var(--a-bg-3) 72%, var(--a-bg-2));
+  background: var(--a-bg-2);
   padding: 3px 4px;
   gap: 4px;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
 }
 .request-editor.focused {
   z-index: 1;
   border-color: var(--a-primary);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--a-primary) 18%, transparent);
 }
-.method-select { width: fit-content; height: var(--url-inner-height); flex: 0 0 auto; }
+.method-select { width: 76px; height: var(--url-inner-height); flex: 0 0 auto; }
 .method-select :deep(.n-base-selection) {
   display: flex;
   align-items: center;
@@ -348,6 +348,7 @@ defineExpose({ focus: () => inputEl.value?.select() })
   height: 100%;
   border-radius: inherit;
   background: transparent;
+  padding-right: 18px;
 }
 .method-select :deep(.n-base-selection-label__render-label) {
   display: flex;
@@ -355,7 +356,10 @@ defineExpose({ focus: () => inputEl.value?.select() })
   justify-content: center;
   height: 100%;
   line-height: 1;
+  overflow: hidden;
 }
+.method-select :deep(.n-base-selection__arrow) { right: 5px; width: 16px; }
+.method-select :deep(.n-base-suffix) { right: 4px; width: 18px; justify-content: center; }
 .environment-prefix {
   display: flex;
   align-items: center;
@@ -390,8 +394,12 @@ defineExpose({ focus: () => inputEl.value?.select() })
   white-space: nowrap;
 }
 .url { flex: 1 1 auto; min-width: 0; height: 100%; background: transparent; }
-.url :deep(.n-input-wrapper) { height: 100%; }
+.url :deep(.n-input-wrapper) { height: 100%; align-items: center; }
+.url :deep(.n-input__input) { height: 100%; display: flex; align-items: center; }
 .url :deep(.n-input__input-el) {
+  height: 100%;
+  padding-block: 0;
+  line-height: 20px;
   font-family: var(--a-font-mono);
   font-size: var(--a-fs-base);
 }
