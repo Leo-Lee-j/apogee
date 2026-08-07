@@ -3,7 +3,6 @@ import { computed, h, ref } from 'vue'
 import type { DataTableColumns } from 'naive-ui'
 import type { AuthConfig, Body, KeyValue } from '@/ipc'
 import { useTabsStore, type Tab } from '@/stores/tabs'
-import { exportCurl } from '@/features/curl'
 import {
   AppButton,
   AppCheckbox,
@@ -14,7 +13,7 @@ import {
   AppSelect,
   AppTooltip,
 } from '@/components/ui'
-import { IconClose, IconInfo } from '@/components/ui/icons'
+import { IconClose } from '@/components/ui/icons'
 import NaiveThemeScope from '@/components/NaiveThemeScope.vue'
 import ParameterEditor from './ParameterEditor.vue'
 import VariableInput from './VariableInput.vue'
@@ -27,10 +26,6 @@ import VariableInput from './VariableInput.vue'
  */
 const TABS = ['Params', 'Headers', 'Body', 'Auth', 'Scripts', 'Settings'] as const
 type PanelTab = (typeof TABS)[number]
-const TAB_HINTS: Partial<Record<PanelTab, string>> = {
-  Params: 'Path 参数由 URL 中的 :id 或 {id} 自动识别；禁用的 Query 参数会保留在草稿中，但不会发送。',
-  Headers: '请求头名称不区分大小写；重复名称由后端按最终请求规则处理。',
-}
 type RowField = 'params' | 'pathParams' | 'headers'
 type BodyType = Body['type']
 
@@ -58,13 +53,11 @@ interface EditorSection {
   kind: RowField
   label: string
   rows: KeyValue[]
-  hint?: string
 }
 
 const tabs = useTabsStore()
 const tab = computed(() => tabs.active)
 const current = ref<PanelTab>('Params')
-const exportState = ref('')
 
 /** 当前 tab 下需要显示的参数/请求头表格。 */
 const editorSections = computed<EditorSection[]>(() => {
@@ -78,14 +71,12 @@ const editorSections = computed<EditorSection[]>(() => {
         kind: 'pathParams',
         label: 'Path 参数',
         rows: currentTab.pathParams,
-        hint: '由 URL 中的 :id 或 {id} 自动识别。',
       })
     }
     sections.push({
       kind: 'params',
       label: 'Query 参数',
       rows: currentTab.params,
-      hint: '禁用参数会保留在草稿中，但不会发送。',
     })
     return sections
   }
@@ -96,7 +87,6 @@ const editorSections = computed<EditorSection[]>(() => {
         kind: 'headers',
         label: '请求 Headers',
         rows: currentTab.headers,
-        hint: '请求头名称不区分大小写；重复名称由后端按最终请求规则处理。',
       },
     ]
   }
@@ -182,6 +172,71 @@ function reorderRows(kind: RowField, from: number, to: number) {
   if (!moved) return
   rows.splice(to, 0, moved)
   patchRows(kind, rows)
+}
+
+/**
+ * 批量编辑：Params 只编辑 Query 参数（Path 参数由 URL 自动识别，不参与批量），
+ * Headers 编辑全部请求头。纯文本一行一条，`key: value` 格式，`//` 前缀行在应用后禁用。
+ */
+const bulkEditing = ref(false)
+const bulkDraft = ref('')
+
+const bulkKind = computed<RowField | null>(() => {
+  if (current.value === 'Params') return 'params'
+  if (current.value === 'Headers') return 'headers'
+  return null
+})
+
+function rowsToBulkText(rows: KeyValue[]): string {
+  return rows
+    .map((row) => {
+      const pair = row.value ? `${row.key}: ${row.value}` : row.key
+      return row.enabled ? pair : `// ${pair}`
+    })
+    .join('\n')
+}
+
+function bulkTextToRows(text: string): KeyValue[] {
+  return text.split('\n').flatMap((line): KeyValue[] => {
+    let enabled = true
+    let raw = line.trim()
+    if (raw.startsWith('//')) {
+      enabled = false
+      raw = raw.slice(2).trimStart()
+    }
+    if (!raw) return []
+    const colon = raw.indexOf(':')
+    const tab = raw.indexOf('\t')
+    let sep = colon
+    if (sep === -1 || (tab !== -1 && tab < sep)) sep = tab
+    const key = sep === -1 ? raw : raw.slice(0, sep).trim()
+    if (!key) return []
+    const value = sep === -1 ? '' : raw.slice(sep + 1).trim()
+    return [{ enabled, key, value, description: '', kind: 'text' }]
+  })
+}
+
+function openBulkEdit() {
+  const kind = bulkKind.value
+  if (!kind || !tab.value) return
+  bulkDraft.value = rowsToBulkText(rowsFor(kind))
+  bulkEditing.value = true
+}
+
+function applyBulkEdit() {
+  const kind = bulkKind.value
+  if (kind) patchRows(kind, bulkTextToRows(bulkDraft.value))
+  bulkEditing.value = false
+}
+
+function cancelBulkEdit() {
+  bulkEditing.value = false
+}
+
+function selectTab(next: PanelTab) {
+  if (next === current.value) return
+  if (bulkEditing.value) applyBulkEdit()
+  current.value = next
 }
 
 function setBodyType(nextType: BodyType) {
@@ -298,19 +353,7 @@ function setAuthType(type: AuthType) {
 function patchAuth(delta: Record<string, string>) {
   patchTab({ auth: { ...auth.value, ...delta } as AuthConfig })
 }
-
-async function copyCurl() {
-  const currentTab = tab.value
-  if (!currentTab) return
-  try {
-    await navigator.clipboard.writeText(exportCurl(currentTab))
-    exportState.value = '已复制'
-  } catch (error) {
-    exportState.value = error instanceof Error ? error.message : '复制失败'
-  }
-  window.setTimeout(() => { exportState.value = '' }, 1800)
-}
-  </script>
+</script>
 
 <template>
   <section class="req">
@@ -322,39 +365,47 @@ async function copyCurl() {
           role="tab"
           :aria-selected="current === t"
           :class="{ on: current === t }"
-          @click="current = t"
+          @click="selectTab(t)"
         >
           {{ t }}
         </button>
-        <AppTooltip v-if="TAB_HINTS[t]">
-          <template #trigger>
-            <span class="tab-hint" tabindex="0" :aria-label="`${t} 说明`">
-              <AppIcon :component="IconInfo" :size="13" />
-            </span>
-          </template>
-          {{ TAB_HINTS[t] }}
-        </AppTooltip>
       </span>
       <span class="spacer" />
-      <span v-if="exportState" class="export-state" role="status">{{ exportState }}</span>
-      <AppButton quaternary size="small" class="link" title="复制为 cURL" @click="copyCurl">导出 cURL</AppButton>
-      <AppButton quaternary size="small" class="link" title="批量编辑将在请求模型稳定后接入">批量编辑</AppButton>
+      <template v-if="bulkKind">
+        <template v-if="bulkEditing">
+          <AppButton quaternary size="small" title="放弃本次批量编辑，返回表格" @click="cancelBulkEdit">取消</AppButton>
+          <AppButton quaternary size="small" class="link" title="应用批量编辑，返回表格" @click="applyBulkEdit">完成</AppButton>
+        </template>
+        <AppButton v-else quaternary size="small" class="link" title="以纯文本批量编辑 key: value 列表" @click="openBulkEdit">批量编辑</AppButton>
+      </template>
     </nav>
 
     <div v-if="!tab" class="empty">先新建一个请求，再开始编辑。</div>
     <div v-else class="body">
       <template v-if="current === 'Params' || current === 'Headers'">
-        <section v-for="section in editorSections" :key="section.kind" class="parameter-table">
-          <ParameterEditor
-            :rows="section.rows"
-            :allow-create="section.kind !== 'pathParams'"
-            @update-field="(index, field, value) => updateParameterField(section.kind, index, field, value)"
-            @update-enabled="(index, enabled) => updateRow(section.kind, index, { enabled })"
-            @set-all-enabled="setAllRowsEnabled(section.kind, $event)"
-            @remove="removeRow(section.kind, $event)"
-            @reorder="(from, to) => reorderRows(section.kind, from, to)"
+        <section v-if="bulkEditing" class="parameter-table bulk-editor">
+          <textarea
+            v-model="bulkDraft"
+            class="bulk-textarea"
+            spellcheck="false"
+            aria-label="批量编辑内容"
+            :placeholder="'每行一个参数，格式：key: value\n以 // 开头的行应用后禁用该参数'"
           />
+          <p class="bulk-hint">每行一个参数；`key: value`，以 `//` 开头的行应用后禁用该参数。</p>
         </section>
+        <template v-else>
+          <section v-for="section in editorSections" :key="section.kind" class="parameter-table">
+            <ParameterEditor
+              :rows="section.rows"
+              :allow-create="section.kind !== 'pathParams'"
+              @update-field="(index, field, value) => updateParameterField(section.kind, index, field, value)"
+              @update-enabled="(index, enabled) => updateRow(section.kind, index, { enabled })"
+              @set-all-enabled="setAllRowsEnabled(section.kind, $event)"
+              @remove="removeRow(section.kind, $event)"
+              @reorder="(from, to) => reorderRows(section.kind, from, to)"
+            />
+          </section>
+        </template>
       </template>
 
       <section v-else-if="current === 'Body'" class="config-block body-editor">
@@ -446,20 +497,23 @@ async function copyCurl() {
 .tabs button:hover { background: var(--a-hover); color: var(--a-text); }
 .tabs button.on { color: var(--a-text); box-shadow: inset 0 -2px 0 var(--a-primary); border-radius: 0; }
 .tab-item { display: inline-flex; align-items: center; height: 100%; }
-.tab-item > button { padding-right: 3px; }
-.tab-hint {
-  width: 18px; height: 22px;
-  display: inline-flex; align-items: center; justify-content: center;
-  color: var(--a-text-faint); cursor: help;
-}
-.tab-hint:hover, .tab-hint:focus-visible { color: var(--a-text); }
 .badge {
   font-size: var(--a-fs-xs); color: var(--a-text-faint);
   background: var(--a-bg-3); border-radius: var(--a-radius-pill); padding: 0 5px; margin-left: 2px;
 }
 .spacer { flex: 1 1 auto; }
-.export-state { color: var(--a-success); font-size: 11px; }
 .link { color: var(--a-primary) !important; }
+.bulk-editor { display: flex; flex-direction: column; gap: 8px; min-height: 100%; }
+.bulk-textarea {
+  flex: 1 1 auto; min-height: 240px; width: 100%; box-sizing: border-box;
+  background: var(--a-bg-3); border: 1px solid var(--a-border); border-radius: var(--a-radius-md);
+  color: var(--a-text); caret-color: var(--a-text); padding: 10px; font: 12px/1.6 var(--a-font-mono);
+  /* 原生 textarea + 全局自定义滚动条的组合在 WebView2 下偶发光标消失，
+     显式声明 text 光标强制 WebView 重绘指针。 */
+  cursor: text;
+}
+.bulk-textarea:focus { outline: 2px solid var(--a-focus); outline-offset: -2px; border-color: var(--a-focus); }
+.bulk-hint { margin: 0 2px; color: var(--a-text-faint); font-size: 11px; }
 .body { flex: 1 1 auto; overflow: auto; min-height: 0; padding: 8px; }
 .empty, .editor-empty { padding: 16px; color: var(--a-text-dim); font-size: 12px; }
 .config-block {

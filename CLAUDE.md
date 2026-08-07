@@ -64,7 +64,7 @@ Tauri 的 `beforeBuildCommand` 使用 `pnpm build:nocheck`，因此不能把桌�
   - `views/`：设置、历史、命令面板等延迟加载视图
   - `stores/`：Pinia 状态
   - `ipc/index.ts`：前端与 Rust 通信的唯一出口及共享 IPC 类型
-  - `shell/`：首屏应用骨架；启动热路径
+  - `shell/`：启动热路径；`RootShell.vue` 按 `app.shell` 状态在 LauncherShell（工作区选择器）/ 打开工作区加载屏 / `AppBody` 主界面之间切换
   - `styles/tokens.css`：全局设计令牌
 - `src-tauri/`：Tauri 宿主、命令注册、自定义协议、应用状态和工作区适配
 - `crates/apogee-core/`：不依赖 Tauri 的领域核心；HTTP、变量、cURL、响应索引和工作区模型
@@ -91,12 +91,15 @@ Tauri 的 `beforeBuildCommand` 使用 `pnpm build:nocheck`，因此不能把桌�
 - IPC 类型/字段：Rust serde 类型、Tauri 命令参数、`src/ipc/index.ts` 和所有调用方
 - 工作区文件格式：`crates/apogee-core` 模型、读写实现、格式版本和兼容性测试
 - 应用名、bundle identifier 或数据目录：配置、协议、量测脚本和已有用户数据迁移策略
+- Tauri 插件版本：npm `@tauri-apps/plugin-*` 与 Rust `tauri-plugin-*` 的 major/minor 必须对齐。Cargo.toml 的 caret（如 `"2.4.2"`）会把 crate 解析到更新的 minor，Tauri 启动时对不上前端包版本会报警告（功能可能失效）
 
 ## 前端约定
 
 - 使用 Vue Composition API、`<script setup lang="ts">` 和严格 TypeScript。
 - 使用 `@/` 路径别名；应用 shell 通过 `@app-shell` 选择，避免破坏 Vite 的 S5 变体量测。
 - 高频热路径优先使用本地轻量组件和 CSS；Naive UI 用于设置、弹窗等非热路径，并保持按需引入。
+- 窗口拖动用 `data-tauri-drag-region="deep"`。裸属性在 Tauri 2.11+ 只对「直接点中该元素本身」生效，标题栏被子元素占满时会完全拖不动；`deep` 让非交互子元素可拖，按钮等可点元素仍拦截拖动。
+- 组件同时绑定 `@blur/@focus/@click` 又 `v-bind` attrs 中同名监听器时，Vue 会合并成数组，而 naive-ui Popover 的 `appendEvents` 只认单个函数，失焦会抛 `originalHandler is not a function`。参照 `VariableInput.vue` 的 `forwardHandler`，把冲突事件从 attrs 剥掉手动转发。
 - 颜色、间距和状态样式优先复用 `src/styles/tokens.css`；不要另建一套平行设计令牌。
 - 大对象使用浅响应或非响应结构，避免对大型树或响应数据做深度 `reactive`。
 - 错误必须进入统一 `AppError` 展示，包含可操作的 `hints`；不要只写到控制台或吞掉异常。
