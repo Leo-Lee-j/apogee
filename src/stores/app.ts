@@ -49,18 +49,41 @@ export const useAppStore = defineStore('app', () => {
     await refresh()
   }
 
+  /**
+   * Rust 会话已建立但前端落盘/进入失败，回到启动页前必须回滚会话。
+   * 否则下次打开同一工作区会撞上 WORKSPACE_ALREADY_OPEN（Rust 侧 open_workspace
+   * 也会自愈替换孤儿会话，这里是第一道防线）。
+   */
+  async function rollbackSession() {
+    try {
+      await ipc.workspaceClose()
+    } catch {
+      /* 尽力回滚；失败时 Rust 侧会在下一次 open 时替换孤儿会话 */
+    }
+  }
+
   async function openWorkspace(input: { workspaceId?: string; path?: string }, busyId = input.workspaceId ?? 'path') {
     shell.value = 'opening'
     busyWorkspaceId.value = busyId
     lastError.value = null
     try {
-      await acceptOpen(await ipc.workspaceOpen(input))
+      const result = await ipc.workspaceOpen(input)
+      try {
+        await acceptOpen(result)
+      } catch (error) {
+        await rollbackSession()
+        throw error
+      }
       return true
     } catch (error) {
-      lastError.value = normalizeError(error)
+      const appError = normalizeError(error)
+      console.error('[openWorkspace]', appError)
       shell.value = 'launcher'
       busyWorkspaceId.value = null
       await refresh()
+      // refresh() 成功时会把 lastError 清空，必须在它之后设置，
+      // 否则打开失败的错误会被吞掉，启动页上只看到一闪而过的转圈。
+      lastError.value = appError
       return false
     }
   }
@@ -70,12 +93,20 @@ export const useAppStore = defineStore('app', () => {
     busyWorkspaceId.value = 'create'
     lastError.value = null
     try {
-      await acceptOpen(await ipc.workspaceCreate(path, name))
+      const result = await ipc.workspaceCreate(path, name)
+      try {
+        await acceptOpen(result)
+      } catch (error) {
+        await rollbackSession()
+        throw error
+      }
       return true
     } catch (error) {
-      lastError.value = normalizeError(error)
+      const appError = normalizeError(error)
+      console.error('[createWorkspace]', appError)
       shell.value = 'launcher'
       busyWorkspaceId.value = null
+      lastError.value = appError
       return false
     }
   }
@@ -145,15 +176,24 @@ export const useAppStore = defineStore('app', () => {
     workspace.reset()
     shell.value = 'opening'
     try {
-      await acceptOpen(await ipc.workspaceOpen({ workspaceId }))
+      const result = await ipc.workspaceOpen({ workspaceId })
+      try {
+        await acceptOpen(result)
+      } catch (error) {
+        await rollbackSession()
+        throw error
+      }
       return true
     } catch (error) {
-      lastError.value = normalizeError(error)
+      const appError = normalizeError(error)
+      console.error('[switchWorkspace]', appError)
       tabs.resetWorkspace()
       workspace.reset()
       shell.value = 'launcher'
       busyWorkspaceId.value = null
       await refresh()
+      // 与 openWorkspace 相同：错误要在 refresh() 之后再设置，避免被清空。
+      lastError.value = appError
       return false
     }
   }

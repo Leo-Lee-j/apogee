@@ -69,9 +69,11 @@ impl AppState {
             .workspace
             .write()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if guard.is_some() {
-            bail!("WORKSPACE_ALREADY_OPEN");
-        }
+        // 正常流程前端会先 close 再 open；这里仍残留会话，说明是前端重载或中途
+        // 失败遗留的孤儿会话（前端已回到启动页且丢失 sessionId，无法再 close）。
+        // 直接替换而不是报 WORKSPACE_ALREADY_OPEN，否则用户会卡死在启动页，
+        // 无论点哪个工作区都进不去。
+        let replaced = guard.is_some();
         let spool = Spool::new(runtime_root.as_ref().join("responses"))?;
         *self.spool.write().unwrap_or_else(|poisoned| poisoned.into_inner()) = spool;
         *guard = Some(WorkspaceSession {
@@ -79,6 +81,11 @@ impl AppState {
             workspace_id,
             repository,
         });
+        drop(guard);
+        if replaced {
+            // 旧会话的请求全部作废，与 close_workspace 语义一致。
+            self.cancel_all_inflight();
+        }
         Ok((workspace_id, session_id))
     }
 
@@ -408,7 +415,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn expired_workspace_session_cannot_access_new_workspace() {
+    fn opening_a_workspace_replaces_an_orphaned_session() {
         let root = std::env::temp_dir().join(format!("apogee-session-test-{}", Uuid::new_v4()));
         let first_root = root.join("first");
         let second_root = root.join("second");
@@ -431,29 +438,35 @@ mod tests {
             })
             .unwrap();
 
+        // 前端重载后可能残留孤儿会话；再次 open 应替换旧会话而不是报
+        // WORKSPACE_ALREADY_OPEN，否则用户会卡死在启动页无法进入任何工作区。
         let second = WorkspaceRepository::create(&second_root, "Second".into()).unwrap();
-        let error = state
-            .open_workspace(second, root.join("runtime-second"))
-            .unwrap_err();
-        assert_eq!(error.to_string(), "WORKSPACE_ALREADY_OPEN");
-        state.close_workspace(first_workspace, first_session).unwrap();
-        assert_eq!(cancellation.try_recv(), Ok(()));
-        let second = WorkspaceRepository::open(&second_root).unwrap();
-        state
+        let (second_workspace, second_session) = state
             .open_workspace(second, root.join("runtime-second"))
             .unwrap();
+        assert_ne!(second_session, first_session);
+        // 替换时取消旧会话的 in-flight 请求，与 close_workspace 语义一致。
+        assert_eq!(cancellation.try_recv(), Ok(()));
         assert!(state
             .spool
             .read()
             .unwrap()
             .path_for(Uuid::new_v4())
             .starts_with(root.join("runtime-second").join("responses")));
+
+        // 旧会话已失效，新会话可以正常使用。
         let error = state
             .with_workspace(first_workspace, first_session, |repository| {
                 repository.snapshot()
             })
             .unwrap_err();
         assert_eq!(error.to_string(), "WORKSPACE_SESSION_EXPIRED");
+        state
+            .with_workspace(second_workspace, second_session, |repository| {
+                repository.snapshot()
+            })
+            .unwrap();
+        state.close_workspace(second_workspace, second_session).unwrap();
 
         std::fs::remove_dir_all(root).unwrap();
     }
