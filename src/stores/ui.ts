@@ -84,6 +84,8 @@ export const useUiStore = defineStore('ui', () => {
   }
 
   const historyOpen = ref(false)
+  /** 「保存到」位置选择器。草稿保存（保存按钮或 Ctrl+S）从任意位置打开它。 */
+  const saveAsOpen = ref(false)
 
   /**
    * 「把焦点交给 URL 栏」的信号计数器。
@@ -131,7 +133,7 @@ export const useUiStore = defineStore('ui', () => {
 
   return {
     sidebarVisible, sidebarWidth, sidebarMaxW, layout, themeMode, requestRatio,
-    historyOpen, paletteOpen, spikeOpen, spikePanel,
+    historyOpen, saveAsOpen, paletteOpen, spikeOpen, spikePanel,
     urlFocusSeq, focusUrl,
     systemDark, isDark, applyTheme, cycleLayout, setLayout,
     setSidebarWidth, resetSidebarWidth, syncViewport,

@@ -14,6 +14,8 @@ import { useWorkspaceStore } from '@/stores/workspace'
 import { AppButton, AppDropdown, AppIcon, AppSelect } from '@/components/ui'
 import { IconLink } from '@/components/ui/icons'
 import NaiveThemeScope from '@/components/NaiveThemeScope.vue'
+import { saveCurrentRequest } from '@/features/saveRequest'
+import SaveToPicker from './SaveToPicker.vue'
 import VariableInput from './VariableInput.vue'
 
 /**
@@ -148,8 +150,9 @@ function onUrl(value: string) {
   if (tab.value) tabs.patch(tab.value.id, { url: value, dirty: true })
 }
 
+/** 保存由 saveCurrentRequest 统一处理反馈；草稿会打开「保存到」选择器。 */
 function save() {
-  if (tab.value) void tabs.save(tab.value.id)
+  void saveCurrentRequest()
 }
 
 /** URL 中出现 :id / {id} 时自动创建对应的路径参数行。 */
@@ -257,6 +260,9 @@ defineExpose({ focus: () => inputEl.value?.select() })
       {{ sending ? '等待中…' : '发送' }}
     </AppButton>
     <AppButton class="save" secondary size="medium" @click="save">保存</AppButton>
+
+    <!-- 草稿保存：位置选择器（保存按钮与 Ctrl+S 共用，状态在 ui store） -->
+    <SaveToPicker v-model:show="ui.saveAsOpen" />
   </NaiveThemeScope>
   </div>
 </template>

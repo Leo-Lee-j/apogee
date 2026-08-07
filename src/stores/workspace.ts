@@ -13,7 +13,7 @@ import {
   type WorkspaceRequest,
   type WorkspaceSnapshot,
 } from '@/ipc'
-import { useTabsStore } from '@/stores/tabs'
+import { useTabsStore, type Tab } from '@/stores/tabs'
 import { useUiStore } from '@/stores/ui'
 
 /**
@@ -295,7 +295,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     try {
       const request = await ipc.workspaceReadRequest(node.id)
       const spec = request.spec
-      useTabsStore().open({
+      const tabsStore = useTabsStore()
+      // 已打开的接口重新激活时不抢焦点：每次都全选 URL 会让「切换/双击固定」很突兀。
+      // 只有真正打开（之前没开）才聚焦 URL 栏（02 文档 §5.1）。
+      const alreadyOpen = tabsStore.tabs.some((tab) => tab.nodeId === node.id)
+      tabsStore.open({
         title: request.name,
         nodeId: request.id,
         preview,
@@ -308,12 +312,34 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         auth: spec.auth ?? { type: 'inherit' },
         settings: spec.settings ?? {},
       })
-      useUiStore().focusUrl()
+      if (!alreadyOpen) useUiStore().focusUrl()
       return request
     } catch (error) {
       report(error)
       return null
     }
+  }
+
+  /**
+   * 展开 nodeId 自身（若是文件夹/集合）及其祖先路径。
+   *
+   * 新建节点后调用，让新节点所在路径在侧边栏可见。扁平树的 `expanded` 在节点上，
+   * 直接改对象再换数组引用就能触发侧边栏的 props watch 重算（03 文档 §4.2）。
+   */
+  function expandPath(nodeId: string) {
+    const list = nodes.value
+    if (!list) return
+    const byId = new Map(list.map((node) => [node.id, node]))
+    let changed = false
+    let cursor = byId.get(nodeId)
+    while (cursor) {
+      if (cursor.isFolder && !cursor.expanded) {
+        cursor.expanded = true
+        changed = true
+      }
+      cursor = cursor.parentId ? byId.get(cursor.parentId) : undefined
+    }
+    if (changed) nodes.value = [...list]
   }
 
   async function createCollection(name = '新建集合'): Promise<boolean> {
@@ -328,7 +354,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       report(new Error('请先创建一个集合'))
       return false
     }
-    return applySnapshot(ipc.workspaceCreateFolder(parent, name))
+    const ok = await applySnapshot(ipc.workspaceCreateFolder(parent, name))
+    if (ok) expandPath(parent)
+    return ok
   }
 
   async function createRequest(parentId?: string, name = '新建请求'): Promise<WorkspaceRequest | null> {
@@ -342,6 +370,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     try {
       const request = await ipc.workspaceCreateRequest(parent, name)
       await load()
+      expandPath(parent)
       useTabsStore().open({
         title: request.name,
         nodeId: request.id,
@@ -360,6 +389,34 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     } catch (error) {
       report(error)
       return null
+    }
+  }
+
+  /**
+   * 把草稿标签保存为集合内节点（「保存到」选择器流程）。
+   *
+   * 顺序必须是「先建节点 → 绑定 nodeId → 再落盘内容」：新建的节点 spec 是空的，
+   * 绑定后再走 `tabs.save` 才会把当前编辑内容写进磁盘文件。失败统一走 report。
+   */
+  async function saveTabAs(tab: Tab, parentId: string, name: string): Promise<boolean> {
+    if (!inTauri) return false
+    try {
+      const request = await ipc.workspaceCreateRequest(parentId, name)
+      await load()
+      expandPath(parentId)
+      const tabs = useTabsStore()
+      tabs.patch(tab.id, {
+        nodeId: request.id,
+        title: request.name,
+        newPanel: false,
+        newRequestParentId: undefined,
+      })
+      const saved = await tabs.save(tab.id)
+      if (!saved.ok && saved.error) report(saved.error)
+      return saved.ok
+    } catch (error) {
+      report(error)
+      return false
     }
   }
 
@@ -407,6 +464,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     createCollection,
     createFolder,
     createRequest,
+    saveTabAs,
     renameNode,
     deleteNode,
   }

@@ -6,8 +6,6 @@ import {
   AppAlert,
   AppButton,
   AppDropdown,
-  AppForm,
-  AppFormItem,
   AppIcon,
   AppInput,
   AppModal,
@@ -73,6 +71,8 @@ const selectedId = ref<string | null>(null)
 type ActionKind = 'collection' | 'folder' | 'rename'
 const actionKind = ref<ActionKind | null>(null)
 const actionName = ref('')
+/** 「新建文件夹」的保存位置（集合/文件夹 id），在弹窗里手动选择。 */
+const actionParentId = ref<string | null>(null)
 const actionError = ref('')
 const deleteError = ref('')
 const actionSaving = ref(false)
@@ -93,7 +93,7 @@ const actionModalTitle = computed(() => {
 const actionModalHint = computed(() => {
   if (actionKind.value === 'rename') return '名称只影响显示，不会改变稳定 ID 或文件路径。'
   if (actionKind.value === 'collection') return '集合会保存到本地工作区，并立即出现在侧边栏。'
-  if (actionKind.value === 'folder') return '文件夹用于组织请求，可继续嵌套在当前选中容器下。'
+  if (actionKind.value === 'folder') return '文件夹用于组织请求，可在下方选择任意集合或文件夹作为保存位置。'
   return ''
 })
 const actionNamePlaceholder = computed(() => {
@@ -162,6 +162,10 @@ function onSortSelect(key: string | number) {
 /** 可见节点：折叠的文件夹下的子节点不参与渲染。只改这个计算，不重建原数组。 */
 const visible = computed(() => sortVisible(visibleNodes(all.value, filter.value), sortMode.value))
 
+/** 新建文件夹可选的目标：集合 + 文件夹（扁平树，按 depth 缩进渲染）。 */
+const folderTargets = computed(() => all.value.filter((node) => node.isFolder))
+const firstCollectionId = computed(() => all.value.find((node) => node.kind === 'collection')?.id ?? null)
+
 const startIdx = computed(() => Math.max(0, Math.floor(scrollTop.value / ROW_H) - OVERSCAN))
 const endIdx = computed(() =>
   Math.min(visible.value.length, Math.ceil((scrollTop.value + viewportH.value) / ROW_H) + OVERSCAN),
@@ -224,6 +228,12 @@ function toggle(n: FlatNode) {
   all.value = [...all.value]
 }
 
+/** 双击固定：以正式标签（非预览）打开请求（02 文档 §4.5 单击预览/双击固定）。 */
+function pinOpen(n: FlatNode) {
+  if (n.isFolder || n.kind !== 'request') return
+  void workspace.openRequest(n, false)
+}
+
 function selectedContainerId(): string | undefined {
   const selected = all.value.find((node) => node.id === selectedId.value)
   if (selected?.isFolder) return selected.id
@@ -251,8 +261,11 @@ function openAction(kind: ActionKind) {
   }
 
   actionName.value = ''
-  if (kind !== 'collection' && !selectedContainerId()) {
-    actionError.value = '请先在集合树中选择一个集合或文件夹。'
+  if (kind === 'folder') {
+    // 默认继承当前选中的容器；没有选中时退回第一个集合。选择器里可以再改。
+    actionParentId.value = selectedContainerId() ?? firstCollectionId.value
+    if (!actionParentId.value) actionError.value = '请先创建一个集合。'
+    return
   }
 }
 
@@ -260,6 +273,7 @@ function closeAction() {
   if (actionSaving.value) return
   actionKind.value = null
   actionName.value = ''
+  actionParentId.value = null
   actionError.value = ''
 }
 
@@ -272,9 +286,9 @@ async function submitAction() {
     return
   }
 
-  const parentId = kind === 'folder' ? selectedContainerId() : undefined
+  const parentId = kind === 'folder' ? (actionParentId.value ?? undefined) : undefined
   if (kind === 'folder' && !parentId) {
-    actionError.value = '请先在集合树中选择一个集合或文件夹。'
+    actionError.value = '请选择保存位置。'
     return
   }
   if (kind === 'rename' && !selectedNode.value?.kind) {
@@ -538,19 +552,43 @@ defineExpose({
           <AppAlert v-if="actionError" class="action-error" type="error" :show-icon="false">
             {{ actionError }}
           </AppAlert>
-          <AppForm @submit.prevent="submitAction">
-            <AppFormItem label="名称" required>
-              <AppInput
-                v-model:value="actionName"
-                autofocus
-                clearable
-                maxlength="120"
-                show-count
-                :placeholder="actionNamePlaceholder"
-                @keyup.enter="submitAction"
-              />
-            </AppFormItem>
-          </AppForm>
+
+          <template v-if="actionKind === 'folder'">
+            <span class="action-label">保存位置</span>
+            <div class="action-target-list" role="listbox" aria-label="选择新建文件夹的位置">
+              <button
+                v-for="node in folderTargets"
+                :key="node.id"
+                type="button"
+                class="action-target-row"
+                :class="{ selected: node.id === actionParentId }"
+                role="option"
+                :aria-selected="node.id === actionParentId"
+                :style="{ paddingLeft: `${8 + node.depth * 14}px` }"
+                @click="actionParentId = node.id"
+              >
+                <span class="action-target-icon">
+                  <AppIcon :component="node.kind === 'collection' ? IconFolder : IconFolderOpen" :size="15" />
+                </span>
+                <span class="action-target-name">{{ node.name }}</span>
+              </button>
+              <p v-if="!folderTargets.length" class="action-target-empty">还没有集合，请先创建集合。</p>
+            </div>
+          </template>
+
+          <label class="action-field">
+            <span>名称</span>
+            <AppInput
+              v-model:value="actionName"
+              autofocus
+              clearable
+              maxlength="120"
+              show-count
+              :placeholder="actionNamePlaceholder"
+              :input-props="{ spellcheck: false }"
+              @keyup.enter="submitAction"
+            />
+          </label>
         </div>
         <template #footer>
           <AppSpace justify="end">
@@ -573,6 +611,7 @@ defineExpose({
             paddingLeft: `${8 + n.depth * 14}px`,
           }"
           @click="toggle(n)"
+          @dblclick="pinOpen(n)"
         >
           <span class="node-icon" :class="{ folder: n.isFolder }">
             <AppIcon :component="n.isFolder ? (n.expanded ? IconFolderOpen : IconFolder) : IconRequest" :size="15" />
@@ -658,6 +697,48 @@ defineExpose({
 .action-modal { display: flex; flex-direction: column; gap: 10px; }
 .action-hint { margin: 0; color: var(--a-text-dim); font-size: 12px; line-height: 1.5; }
 .action-error { margin-bottom: 2px; }
+.action-label {
+  color: var(--a-text-dim);
+  font: var(--a-fw-medium) var(--a-fs-sm) / 1 var(--a-font-ui);
+}
+.action-field {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  color: var(--a-text-soft);
+  font: var(--a-fs-sm) / 1 var(--a-font-ui);
+}
+.action-field :deep(.n-input) { min-height: 38px; }
+.action-field :deep(.n-input-wrapper) { padding-inline: 12px; }
+.action-target-list {
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid var(--a-border);
+  border-radius: var(--a-radius-md);
+  background: var(--a-bg-2);
+  padding: 4px;
+}
+.action-target-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  box-sizing: border-box;
+  height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--a-radius-sm);
+  background: transparent;
+  color: var(--a-text);
+  font: var(--a-fs-sm) / 1 var(--a-font-ui);
+  text-align: left;
+  cursor: pointer;
+}
+.action-target-row:hover { background: var(--a-hover); }
+.action-target-row.selected { background: var(--a-selected); }
+.action-target-icon { flex: 0 0 auto; display: inline-flex; color: var(--a-primary); }
+.action-target-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.action-target-empty { margin: 0; padding: 12px 8px; color: var(--a-text-faint); font-size: 12px; text-align: center; }
 
 /* scrollbar-gutter: stable —— 树加载/滚动条出现时内容区不会因 12px 滚动条而左右抖动。 */
 .scroller { flex: 1 1 auto; overflow-y: auto; overflow-x: hidden; min-height: 0; scrollbar-gutter: stable; }

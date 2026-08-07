@@ -9,7 +9,7 @@ import type {
   RequestSpec,
   ResponseSummary,
 } from '@/ipc'
-import { inTauri, ipc } from '@/ipc'
+import { inTauri, ipc, normalizeError } from '@/ipc'
 import { useUiStore } from '@/stores/ui'
 
 /**
@@ -118,14 +118,19 @@ export const useTabsStore = defineStore('tabs', () => {
     }
   }
 
-  async function persist(tab: Tab): Promise<boolean> {
-    if (!inTauri || !tab.nodeId) return true
+  /**
+   * 落盘一次。成功返回 null；失败返回归一化后的 AppError，调用方负责把它
+   * 展示给用户（不要只写控制台）。草稿（无 nodeId）或非 Tauri 短路为成功，
+   * 因为没有可写盘的对象。
+   */
+  async function persist(tab: Tab): Promise<AppError | null> {
+    if (!inTauri || !tab.nodeId) return null
     try {
       await ipc.workspaceSaveRequest(tab.nodeId, tab.title, requestSpec(tab))
-      return true
+      return null
     } catch (error) {
       console.error('[workspace] 保存请求失败', error)
-      return false
+      return normalizeError(error)
     }
   }
 
@@ -173,16 +178,42 @@ export const useTabsStore = defineStore('tabs', () => {
   }
 
   function open(init?: Partial<Tab>): Tab {
+    // 已打开的接口直接激活，不重复开标签：nodeId 是稳定身份（URL 可被用户改写）。
+    // 没有这一条，单击一个已固定打开的接口时，预览复用会把另一个预览标签改写成它，
+    // 同一个接口就出现两个标签（02 文档 §4.5 的预期是「已打开则激活」）。
+    if (init?.nodeId) {
+      const existing = tabs.value.find((tab) => tab.nodeId === init.nodeId)
+      if (existing) {
+        // 双击固定：预览标签被显式要求以正式标签打开（preview:false）时提升为正式。
+        if (existing.preview && init.preview === false) {
+          patch(existing.id, { preview: false })
+        }
+        activate(existing.id)
+        return existing
+      }
+    }
     // 单击预览：已有临时标签时复用它，避免浏览集合时开出 30 个标签（02 文档 §4.5）
     if (init?.preview) {
       const existing = tabs.value.find((t) => t.preview)
       if (existing) {
-        // `nodeId` 先清掉再合并：`init` 没带节点 id 时不能留着上一次预览的那个，
-        // 否则侧边栏会继续高亮一个与当前内容无关的行。
-        Object.assign(existing, { nodeId: undefined }, init, { id: existing.id })
-        tabs.value = [...tabs.value]
+        // 不能原地改 markRaw 对象：active 是 computed，返回同一个对象引用时 Vue 认为
+        // 值没变，依赖它的组件不重渲染，内容区会停在旧请求上。建新对象替换。
+        // 同时重置不应跨请求保留的脏/错误/响应状态（否则切到 B 还带着 A 的草稿标记）。
+        const next: Tab = markRaw({
+          ...existing,
+          nodeId: undefined, // 先清旧预览的 nodeId，再让 init 决定，避免高亮错行
+          ...init,
+          id: existing.id,
+          preview: true,
+          dirty: false,
+          error: null,
+          response: null,
+          newPanel: false,
+          newRequestParentId: undefined,
+        })
+        tabs.value = tabs.value.map((tab) => (tab.id === existing.id ? next : tab))
         activate(existing.id)
-        return existing
+        return next
       }
     }
     const tab: Tab = markRaw({
@@ -284,27 +315,32 @@ export const useTabsStore = defineStore('tabs', () => {
     if (Object.keys(delta).some((key) => PERSISTED_FIELDS.has(key))) schedulePersist(next)
   }
 
-  /** 立即保存当前标签，并清除未保存标记。 */
-  async function save(id: string): Promise<boolean> {
+  /**
+   * 立即保存当前标签并清除未保存标记。
+   *
+   * 草稿（无 nodeId）返回 `{ ok: false, error: null }` 且**不**清脏点——
+   * 它没有可写盘的对象，保存要先走「保存到」选择器建节点（`workspace.saveTabAs`）。
+   * 这里不再谎清脏标记，避免「脏点消失但内容没落盘」的假象。
+   */
+  async function save(id: string): Promise<{ ok: boolean; error: AppError | null }> {
     const tab = tabs.value.find((item) => item.id === id)
-    if (!tab) return false
-    if (tab.nodeId) {
-      const timer = persistTimers.get(tab.nodeId)
-      if (timer !== undefined) {
-        clearTimeout(timer)
-        persistTimers.delete(tab.nodeId)
-      }
-      if (!(await persist(tab))) return false
+    if (!tab || !tab.nodeId) return { ok: false, error: null }
+    const timer = persistTimers.get(tab.nodeId)
+    if (timer !== undefined) {
+      clearTimeout(timer)
+      persistTimers.delete(tab.nodeId)
     }
+    const error = await persist(tab)
+    if (error) return { ok: false, error }
     markClean(id)
-    return true
+    return { ok: true, error: null }
   }
 
   async function flushAll(): Promise<boolean> {
     for (const timer of persistTimers.values()) clearTimeout(timer)
     persistTimers.clear()
     for (const tab of tabs.value) {
-      if (tab.nodeId && !(await persist(tab))) return false
+      if (tab.nodeId && (await persist(tab))) return false
     }
     return true
   }

@@ -10,6 +10,7 @@ import { useUiStore, SIDEBAR_MIN_W, SPLIT_DEFAULT_RATIO, SPLIT_MAX_RATIO, SPLIT_
 import { useTabsStore } from '@/stores/tabs'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { ipc } from '@/ipc'
+import { saveCurrentRequest } from '@/features/saveRequest'
 
 /**
  * 布局主体。两个 shell 变体共用这一份，差别只在外层有没有 naive-ui 的
@@ -308,6 +309,9 @@ function onKeydown(e: KeyboardEvent) {
   else if (k === 'k') { e.preventDefault(); ui.paletteOpen = true }
   else if (k === ',') { e.preventDefault(); tabs.openSettings() }
   else if (k === 'l' && e.shiftKey) { e.preventDefault(); ui.cycleLayout() }
+  // Ctrl+S 保存（02 文档 §6.3）。草稿会打开「保存到」选择器；已绑定的节点直接落盘。
+  // 预留 Ctrl+Shift+S 给 v0.2 的「另存为」，现在不拦截。
+  else if (k === 's' && !e.shiftKey) { e.preventDefault(); void saveCurrentRequest() }
   else if (e.shiftKey && k === 'arrowup') { e.preventDefault(); setSplitRatio(splitLimits.value.max) }
   else if (e.shiftKey && k === 'arrowdown') { e.preventDefault(); setSplitRatio(splitLimits.value.min) }
 }
