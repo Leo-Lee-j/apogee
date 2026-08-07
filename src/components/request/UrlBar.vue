@@ -2,7 +2,6 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { h } from 'vue'
 import {
-  NInput,
   NRadio,
   type DropdownOption,
   type InputInst,
@@ -15,6 +14,7 @@ import { useWorkspaceStore } from '@/stores/workspace'
 import { AppButton, AppDropdown, AppIcon, AppSelect } from '@/components/ui'
 import { IconLink } from '@/components/ui/icons'
 import NaiveThemeScope from '@/components/NaiveThemeScope.vue'
+import VariableInput from './VariableInput.vue'
 
 /**
  * URL 栏，40px —— 全产品最重要的一行（02 文档 §4.1）。
@@ -231,7 +231,7 @@ defineExpose({ focus: () => inputEl.value?.select() })
             </button>
           </AppDropdown>
         </div>
-        <NInput
+        <VariableInput
           ref="inputEl"
           class="url a-selectable"
           size="medium"

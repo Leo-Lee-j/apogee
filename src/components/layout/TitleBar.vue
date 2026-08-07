@@ -6,7 +6,7 @@ import { useTabsStore } from '@/stores/tabs'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { windowControls, type Unlisten } from '@/ipc'
 import { AppDropdown, AppIcon } from '@/components/ui'
-import { IconChevronDown, IconDocument, IconHistory, IconMoon, IconSettings, IconSun } from '@/components/ui/icons'
+import { IconAdd, IconChevronDown, IconDocument, IconHistory, IconMoon, IconSettings, IconSun } from '@/components/ui/icons'
 import { useAppStore } from '@/stores/app'
 
 /**
@@ -21,19 +21,42 @@ const ui = useUiStore()
 const tabs = useTabsStore()
 const workspace = useWorkspaceStore()
 const app = useAppStore()
+const CREATE_WORKSPACE_KEY = '__create_workspace__'
 const workspaceLabel = computed(() =>
   workspace.workspaceName || (workspace.loading ? '加载中…' : '本地草稿'),
 )
-const workspaceOptions = computed<DropdownOption[]>(() => app.workspaces
-  .filter((item) => item.status === 'available')
-  .map((item) => ({
-    key: item.id,
-    label: item.name,
-    disabled: item.id === workspace.workspaceId || app.busyWorkspaceId !== null,
-    workspacePath: item.path,
-  })))
+const workspaceOptions = computed<DropdownOption[]>(() => [
+  ...app.workspaces
+    .filter((item) => item.status === 'available')
+    .map((item) => ({
+      key: item.id,
+      label: item.name,
+      disabled: item.id === workspace.workspaceId || app.busyWorkspaceId !== null,
+      workspacePath: item.path,
+    })),
+  {
+    key: CREATE_WORKSPACE_KEY,
+    label: '新增工作区',
+    disabled: app.busyWorkspaceId !== null,
+  },
+])
 
 function renderWorkspaceLabel(option: DropdownOption) {
+  if (option.key === CREATE_WORKSPACE_KEY) {
+    return h('div', {
+      style: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '8px',
+        width: '260px',
+        height: '24px',
+        color: 'var(--a-primary)',
+      },
+    }, [
+      h(IconAdd, { size: 15 }),
+      h('span', '新增工作区'),
+    ])
+  }
   const current = option.key === workspace.workspaceId
   return h('div', {
     style: {
@@ -74,6 +97,10 @@ function renderWorkspaceLabel(option: DropdownOption) {
 }
 
 function selectWorkspace(key: string | number) {
+  if (key === CREATE_WORKSPACE_KEY) {
+    app.createDialogOpen = true
+    return
+  }
   void app.switchWorkspace(String(key))
 }
 

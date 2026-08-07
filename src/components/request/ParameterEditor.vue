@@ -4,6 +4,7 @@ import Sortable from 'sortablejs'
 import type { KeyValue } from '@/ipc'
 import { AppButton, AppCheckbox, AppIcon, AppInput } from '@/components/ui'
 import { IconCloseCircle, IconDrag, IconRemoveCircle } from '@/components/ui/icons'
+import VariableInput from './VariableInput.vue'
 
 type Field = 'key' | 'value' | 'description'
 
@@ -130,7 +131,7 @@ watch(() => props.rows, () => { pendingDelete.value = null })
           />
         </div>
         <div role="cell">
-          <AppInput
+          <VariableInput
             :value="row.key"
             size="small"
             :bordered="true"
@@ -139,7 +140,7 @@ watch(() => props.rows, () => { pendingDelete.value = null })
           />
         </div>
         <div role="cell">
-          <AppInput
+          <VariableInput
             :value="row.value"
             size="small"
             :bordered="true"
@@ -182,7 +183,7 @@ watch(() => props.rows, () => { pendingDelete.value = null })
       >
         <div role="cell" />
         <div role="cell">
-          <AppInput
+          <VariableInput
             size="small"
             :bordered="true"
             :input-props="{ spellcheck: false }"
@@ -193,7 +194,7 @@ watch(() => props.rows, () => { pendingDelete.value = null })
           />
         </div>
         <div role="cell">
-          <AppInput
+          <VariableInput
             size="small"
             :bordered="true"
             :input-props="{ spellcheck: false }"

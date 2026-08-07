@@ -17,6 +17,7 @@ import {
 import { IconClose, IconInfo } from '@/components/ui/icons'
 import NaiveThemeScope from '@/components/NaiveThemeScope.vue'
 import ParameterEditor from './ParameterEditor.vue'
+import VariableInput from './VariableInput.vue'
 
 /**
  * 请求编辑区 —— v0.1 先落地 Params、Headers、Body 三条发送主链。
@@ -213,14 +214,6 @@ function setBodyType(nextType: BodyType) {
   patchTab({ body: nextBody })
 }
 
-function updateBodyContent(event: Event) {
-  const value = (event.target as HTMLTextAreaElement).value
-  if (body.value.type === 'json') patchTab({ body: { type: 'json', content: value } })
-  else if (body.value.type === 'text') {
-    patchTab({ body: { type: 'text', content: value, contentType: body.value.contentType } })
-  }
-}
-
 function bodyRows(): KeyValue[] {
   return body.value.type === 'formData' || body.value.type === 'urlEncoded' ? body.value.rows : []
 }
@@ -254,11 +247,11 @@ const bodyColumns = computed<DataTableColumns<EditableRow>>(() => {
     },
     {
       title: 'Key', key: 'key', minWidth: 160,
-      render: (row) => h(AppInput, { value: row.key, bordered: false, 'onUpdate:value': (value: string) => updateBodyRow(row.rowIndex, { key: value }) }),
+      render: (row) => h(VariableInput, { value: row.key, bordered: false, 'onUpdate:value': (value: string) => updateBodyRow(row.rowIndex, { key: value }) }),
     },
     {
       title: 'Value', key: 'value', minWidth: 220,
-      render: (row) => h(AppInput, { value: row.value, bordered: false, placeholder: row.kind === 'file' ? '本地文件路径' : '', 'onUpdate:value': (value: string) => updateBodyRow(row.rowIndex, { value }) }),
+      render: (row) => h(VariableInput, { value: row.value, bordered: false, placeholder: row.kind === 'file' ? '本地文件路径' : '', 'onUpdate:value': (value: string) => updateBodyRow(row.rowIndex, { value }) }),
     },
   ]
   if (bodyType.value === 'formData') {
@@ -379,14 +372,15 @@ async function copyCurl() {
         </header>
 
         <div v-if="bodyType === 'none'" class="editor-empty">此请求不发送请求体。</div>
-        <textarea
+        <VariableInput
           v-else-if="bodyType === 'json' || bodyType === 'text'"
           class="payload"
           :value="bodyContent"
+          multiline
           :placeholder="bodyPlaceholder"
           spellcheck="false"
           aria-label="请求体内容"
-          @input="updateBodyContent"
+          @update:value="body.type === 'json' ? patchTab({ body: { type: 'json', content: $event } }) : body.type === 'text' && patchTab({ body: { ...body, content: $event } })"
         />
         <label v-if="bodyType === 'text'" class="content-type">
           Content-Type
@@ -401,8 +395,8 @@ async function copyCurl() {
           <AppInput :value="body.type === 'binary' ? body.path : ''" :input-props="{ spellcheck: false }" placeholder="C:\path\to\payload.bin" @update:value="patchBodyField('path', $event)" />
         </label>
         <div v-else-if="body.type === 'graphQl'" class="graphql-grid">
-          <label class="field-stack"><span>Query</span><textarea :value="body.query" spellcheck="false" @input="patchBodyField('query', ($event.target as HTMLTextAreaElement).value)" /></label>
-          <label class="field-stack"><span>Variables (JSON)</span><textarea :value="body.variables" spellcheck="false" @input="patchBodyField('variables', ($event.target as HTMLTextAreaElement).value)" /></label>
+          <label class="field-stack"><span>Query</span><VariableInput :value="body.query" multiline spellcheck="false" @update:value="patchBodyField('query', $event)" /></label>
+          <label class="field-stack"><span>Variables (JSON)</span><VariableInput :value="body.variables" multiline spellcheck="false" @update:value="patchBodyField('variables', $event)" /></label>
           <label class="field-stack"><span>Operation Name（可选）</span><AppInput :value="body.operationName ?? ''" @update:value="patchBodyField('operationName', $event)" /></label>
         </div>
         <AppTooltip class="body-hint">
@@ -530,6 +524,8 @@ async function copyCurl() {
   border-radius: var(--a-radius-md); color: var(--a-text); padding: 10px;
   font: 12px/1.5 var(--a-font-mono);
 }
+.payload :deep(.n-input-wrapper) { padding: 0; }
+.payload :deep(.n-input__textarea-el) { min-height: 180px; padding: 10px; font: 12px/1.5 var(--a-font-mono); }
 .payload:focus, .content-type input:focus { border-color: var(--a-focus); outline: 2px solid var(--a-focus); outline-offset: -2px; }
 .content-type { display: flex; align-items: center; gap: 8px; color: var(--a-text-dim); font-size: 12px; }
 .content-type input {
@@ -546,7 +542,8 @@ async function copyCurl() {
   border-radius: var(--a-radius-md); color: var(--a-text); padding: 4px 8px; font: 12px var(--a-font-mono);
 }
 .graphql-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 8px; min-height: 220px; }
-.graphql-grid textarea { min-height: 180px; resize: vertical; background: var(--a-bg-3); border: 1px solid var(--a-border); border-radius: var(--a-radius-md); color: var(--a-text); padding: 8px; font: 12px/1.5 var(--a-font-mono); }
+.graphql-grid :deep(.n-input) { min-height: 180px; background: var(--a-bg-3); }
+.graphql-grid :deep(.n-input__textarea-el) { min-height: 180px; padding: 8px; font: 12px/1.5 var(--a-font-mono); }
 .graphql-grid label:last-child { grid-column: 1 / -1; }
 .auth-editor { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(240px, 2fr); align-content: start; gap: 12px; padding: 12px; }
 .auth-editor > .auth-kind { margin: -12px -12px 0; padding: 12px; border-bottom: 1px solid var(--a-border); }
