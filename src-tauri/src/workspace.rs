@@ -319,6 +319,7 @@ impl WorkspaceRepository {
         let environment = Environment {
             id: Uuid::new_v4(),
             name: name.clone(),
+            host: String::new(),
             variables: Vec::new(),
         };
         write_yaml(&self.environment_path(environment.id), &environment)?;
@@ -334,6 +335,7 @@ impl WorkspaceRepository {
 
     pub fn save_environment(&self, mut environment: Environment) -> Result<Environment> {
         environment.name = required_name(&environment.name)?;
+        environment.host = normalize_environment_host(&environment.host)?;
         let mut manifest = self.read_manifest()?;
         let entry = manifest
             .environments
@@ -344,6 +346,39 @@ impl WorkspaceRepository {
         write_yaml(&self.environment_path(environment.id), &environment)?;
         write_yaml(&self.manifest_path(), &manifest)?;
         Ok(environment)
+    }
+
+    pub fn delete_environment(&self, id: Uuid) -> Result<WorkspaceSnapshot> {
+        let mut manifest = self.read_manifest()?;
+        let original_len = manifest.environments.len();
+        manifest.environments.retain(|entry| entry.id != id);
+        if manifest.environments.len() == original_len {
+            bail!("未知的环境：{id}");
+        }
+        let path = self.environment_path(id);
+        let tombstone = path
+            .parent()
+            .map(|parent| parent.join(format!(".{id}.{}.deleted", Uuid::new_v4())));
+        if let Some(tombstone) = &tombstone {
+            if path.exists() {
+                fs::rename(&path, tombstone)
+                    .with_context(|| format!("暂存待删除环境失败：{}", path.display()))?;
+            }
+        }
+        if let Err(error) = write_yaml(&self.manifest_path(), &manifest) {
+            if let Some(tombstone) = &tombstone {
+                if tombstone.exists() {
+                    let _ = fs::rename(tombstone, &path);
+                }
+            }
+            return Err(error);
+        }
+        if let Some(tombstone) = tombstone {
+            if tombstone.exists() {
+                let _ = fs::remove_file(tombstone);
+            }
+        }
+        self.snapshot()
     }
 
     pub fn save_request(&self, id: Uuid, name: String, spec: RequestSpec) -> Result<()> {
@@ -518,6 +553,7 @@ impl WorkspaceRepository {
             &Environment {
                 id: environment_id,
                 name: "本地".to_string(),
+                host: String::new(),
                 variables: Vec::new(),
             },
         )?;
@@ -766,6 +802,41 @@ mod tests {
     }
 
     #[test]
+    fn deleting_environment_updates_manifest_and_removes_file() {
+        let root = std::env::temp_dir()
+            .join(format!("apogee-environment-test-{}", Uuid::new_v4()));
+        let repository = WorkspaceRepository::create(&root, "测试工作区".into()).unwrap();
+        let environment = repository.create_environment("待删除".into()).unwrap();
+        let environment_path = repository.environment_path(environment.id);
+
+        let snapshot = repository.delete_environment(environment.id).unwrap();
+
+        assert!(!environment_path.exists());
+        assert!(!snapshot
+            .environments
+            .iter()
+            .any(|item| item.id == environment.id));
+        assert!(repository.read_environment(environment.id).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn environment_host_is_validated_and_normalized_on_save() {
+        let root = std::env::temp_dir()
+            .join(format!("apogee-environment-host-test-{}", Uuid::new_v4()));
+        let repository = WorkspaceRepository::create(&root, "测试工作区".into()).unwrap();
+        let mut environment = repository.create_environment("开发".into()).unwrap();
+
+        environment.host = "https://api.example.test/".into();
+        let saved = repository.save_environment(environment.clone()).unwrap();
+        assert_eq!(saved.host, "https://api.example.test");
+
+        environment.host = "https://api.example.test/v1".into();
+        assert!(repository.save_environment(environment).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn history_round_trip_preserves_request_response_and_body() {
         let root = std::env::temp_dir().join(format!("apogee-history-test-{}", Uuid::new_v4()));
         let repository = WorkspaceRepository::create(&root, "测试工作区".into()).unwrap();
@@ -824,4 +895,19 @@ mod tests {
         assert!(requests.iter().any(|r| matches!(r.spec.auth, AuthConfig::ApiKey { .. })));
         fs::remove_dir_all(root).unwrap();
     }
+}
+
+fn normalize_environment_host(host: &str) -> Result<String> {
+    let value = host.trim();
+    if value.is_empty() {
+        return Ok(String::new());
+    }
+    let parsed = url::Url::parse(value).context("Host 必须是完整的 http:// 或 https:// 地址")?;
+    if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
+        bail!("Host 必须是完整的 http:// 或 https:// 地址");
+    }
+    if parsed.path() != "/" || parsed.query().is_some() || parsed.fragment().is_some() {
+        bail!("Host 只能包含协议、域名和端口，不能包含路径、查询参数或片段");
+    }
+    Ok(parsed.origin().ascii_serialization())
 }

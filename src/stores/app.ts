@@ -96,6 +96,7 @@ export const useAppStore = defineStore('app', () => {
     shell.value = 'closing'
     const tabs = useTabsStore()
     const workspace = useWorkspaceStore()
+    await workspace.flushWorkspaceState()
     if (!(await workspace.saveDirtyEnvironments()) || !(await tabs.flushAll())) {
       shell.value = 'workspace'
       lastError.value = workspace.lastError ?? normalizeError(new Error('保存工作区失败，已取消返回'))
@@ -121,6 +122,7 @@ export const useAppStore = defineStore('app', () => {
     const tabs = useTabsStore()
     busyWorkspaceId.value = workspaceId
     lastError.value = null
+    await workspace.flushWorkspaceState()
     if (!(await workspace.saveDirtyEnvironments()) || !(await tabs.flushAll())) {
       lastError.value = workspace.lastError ?? normalizeError(new Error('保存当前工作区失败，已取消切换'))
       busyWorkspaceId.value = null

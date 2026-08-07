@@ -17,6 +17,7 @@ mod protocol;
 mod state;
 mod workspace;
 mod workspace_registry;
+mod workspace_state;
 
 use state::AppState;
 use std::sync::Arc;
@@ -80,6 +81,8 @@ pub fn run() {
             commands::workspace_delete_node,
             commands::workspace_create_environment,
             commands::workspace_save_environment,
+            commands::workspace_delete_environment,
+            commands::workspace_save_state,
             commands::history_record,
             commands::history_list,
             commands::history_read,
@@ -176,6 +179,7 @@ mod commands {
         workspace_id: Uuid,
         session_id: Uuid,
         snapshot: WorkspaceSnapshot,
+        state: crate::workspace_state::WorkspaceState,
     }
 
     #[tauri::command]
@@ -277,6 +281,26 @@ mod commands {
         let descriptor = registry(app)?
             .register(&repository)
             .map_err(|error| error.to_string())?;
+        let data_dir = app
+            .path()
+            .app_data_dir()
+            .map_err(|error| error.to_string())?;
+        let mut workspace_state = crate::workspace_state::WorkspaceStateRepository::new(&data_dir)
+            .load(snapshot.id)
+            .map_err(|error| error.to_string())?;
+        if !workspace_state.active_environment_set {
+            workspace_state.active_environment_id = snapshot
+                .environments
+                .first()
+                .map(|environment| environment.id);
+        } else if workspace_state.active_environment_id.is_some_and(|id| {
+            !snapshot
+                .environments
+                .iter()
+                .any(|environment| environment.id == id)
+        }) {
+            workspace_state.active_environment_id = None;
+        }
         let (workspace_id, session_id) = state
             .open_workspace(repository)
             .map_err(|error| error.to_string())?;
@@ -285,6 +309,7 @@ mod commands {
             workspace_id,
             session_id,
             snapshot,
+            state: workspace_state,
         })
     }
 
@@ -788,6 +813,51 @@ mod commands {
             .with_workspace(workspace_id, session_id, |repository| {
                 repository.save_environment(environment)
             })
+            .map_err(|error| error.to_string())
+    }
+
+    #[tauri::command]
+    pub fn workspace_delete_environment(
+        state: State<'_, Arc<AppState>>,
+        workspace_id: String,
+        session_id: String,
+        environment_id: String,
+    ) -> Result<WorkspaceSnapshot, String> {
+        let environment_id = parse_id(&environment_id)?;
+        let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
+        state
+            .with_workspace(workspace_id, session_id, |repository| {
+                repository.delete_environment(environment_id)
+            })
+            .map_err(|error| error.to_string())
+    }
+
+    #[tauri::command]
+    pub fn workspace_save_state(
+        app: tauri::AppHandle,
+        state: State<'_, Arc<AppState>>,
+        workspace_id: String,
+        session_id: String,
+        workspace_state: crate::workspace_state::WorkspaceState,
+    ) -> Result<(), String> {
+        let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
+        if !workspace_state.active_environment_set {
+            return Err("工作区状态缺少环境选择标记".into());
+        }
+        state
+            .with_workspace(workspace_id, session_id, |repository| {
+                if let Some(environment_id) = workspace_state.active_environment_id {
+                    repository.read_environment(environment_id)?;
+                }
+                Ok(())
+            })
+            .map_err(|error| error.to_string())?;
+        let data_dir = app
+            .path()
+            .app_data_dir()
+            .map_err(|error| error.to_string())?;
+        crate::workspace_state::WorkspaceStateRepository::new(&data_dir)
+            .save(workspace_id, &workspace_state)
             .map_err(|error| error.to_string())
     }
 

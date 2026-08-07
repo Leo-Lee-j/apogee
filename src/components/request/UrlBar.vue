@@ -14,7 +14,6 @@ import { useRequest } from '@/stores/request'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { AppButton, AppDropdown, AppIcon, AppSelect } from '@/components/ui'
 import { IconLink } from '@/components/ui/icons'
-import type { Environment } from '@/ipc'
 import NaiveThemeScope from '@/components/NaiveThemeScope.vue'
 
 /**
@@ -48,7 +47,7 @@ const environmentOptions = computed(() => [
     environmentName: '无环境',
   },
   ...workspace.environments.map((environment) => {
-    const host = hostForEnvironment(environment)
+    const host = displayHost(environment.host)
     return {
       label: environment.name,
       key: environment.id,
@@ -59,43 +58,16 @@ const environmentOptions = computed(() => [
 ])
 const activeHost = computed(() => {
   const environment = workspace.activeEnvironment
-  return environment ? hostForEnvironment(environment) : ''
+  return environment ? displayHost(environment.host) : ''
 })
 
-function domainVariablesFor(environment: Environment) {
-  return environment.variables.filter((variable) => {
-    if (!variable.enabled || !variable.value.trim()) return false
-    return /(url|host|domain|endpoint|origin)/i.test(variable.key)
-      || /^(?:https?:\/\/|wss?:\/\/)/i.test(variable.value.trim())
-  })
-}
-
-function previewEnvironmentValue(environment: Environment, raw: string) {
-  const values = new Map(
-    environment.variables
-      .filter((variable) => variable.enabled && variable.key.trim())
-      .map((variable) => [variable.key.trim(), variable.value]),
-  )
-  let resolved = raw
-  for (let depth = 0; depth < 4; depth += 1) {
-    const next = resolved.replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (match, key: string) => values.get(key) ?? match)
-    if (next === resolved) break
-    resolved = next
-  }
-  return resolved
-}
-
-function hostForEnvironment(environment: Environment) {
-  const candidate = domainVariablesFor(environment)[0]
-  if (!candidate) return ''
-  const value = previewEnvironmentValue(environment, candidate.value).trim()
-  if (!value || value.includes('{{')) return ''
-
+function displayHost(host: string) {
+  const value = host.trim()
+  if (!value) return ''
   try {
-    const normalized = /^(?:https?|wss?):\/\//i.test(value) ? value : `https://${value}`
-    return new URL(normalized).host
+    return new URL(value).host
   } catch {
-    return value.replace(/^(?:https?|wss?):\/\//i, '').split(/[/?#]/, 1)[0] ?? ''
+    return value
   }
 }
 

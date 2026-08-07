@@ -18,6 +18,8 @@ pub struct Environment {
     pub id: Uuid,
     pub name: String,
     #[serde(default)]
+    pub host: String,
+    #[serde(default)]
     pub variables: Vec<EnvironmentVariable>,
 }
 
@@ -51,6 +53,9 @@ pub fn resolve_request(
     let mut resolved = spec.clone();
 
     resolved.url = resolver.resolve_text(&spec.url)?;
+    if let Some(environment) = environment {
+        resolved.url = with_environment_host(&resolved.url, &environment.host);
+    }
     resolved.params = resolver.resolve_rows(&spec.params)?;
     resolved.path_params = resolver.resolve_rows(&spec.path_params)?;
     resolved.headers = resolver.resolve_rows(&spec.headers)?;
@@ -86,6 +91,10 @@ impl Resolver {
                     .detail(format!("环境「{}」中有多个同名变量。", environment.name))
                     .hint(Hint::new("删除重复变量，或为变量改名后再发送")));
                 }
+            }
+            let host = environment.host.trim().trim_end_matches('/');
+            if !host.is_empty() {
+                values.insert("host".to_string(), host.to_string());
             }
         }
         Ok(Self { values })
@@ -241,6 +250,22 @@ impl Resolver {
     }
 }
 
+fn with_environment_host(url: &str, host: &str) -> String {
+    let url = url.trim();
+    let host = host.trim().trim_end_matches('/');
+    if url.is_empty()
+        || host.is_empty()
+        || url::Url::parse(url).is_ok()
+    {
+        return url.to_string();
+    }
+    if url.starts_with('/') {
+        format!("{host}{url}")
+    } else {
+        format!("{host}/{url}")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -250,6 +275,7 @@ mod tests {
         Environment {
             id: Uuid::new_v4(),
             name: "测试环境".into(),
+            host: String::new(),
             variables: variables
                 .iter()
                 .map(|(key, value)| EnvironmentVariable {
@@ -284,6 +310,7 @@ mod tests {
         let duplicate = Environment {
             id: Uuid::new_v4(),
             name: "重复".into(),
+            host: String::new(),
             variables: vec![
                 EnvironmentVariable { key: "x".into(), value: "1".into(), enabled: true },
                 EnvironmentVariable { key: "x".into(), value: "2".into(), enabled: true },
@@ -332,5 +359,50 @@ mod tests {
             other => panic!("unexpected resolved body: {other:?}"),
         }
         assert_eq!(resolved.headers[0].key, "{{missing}}");
+    }
+
+    #[test]
+    fn environment_host_resolves_builtin_and_relative_urls() {
+        let mut env = environment(&[]);
+        env.host = "https://api.example.test".into();
+
+        let mut relative = RequestSpec {
+            method: "GET".into(),
+            url: "/users".into(),
+            params: Vec::new(),
+            path_params: Vec::new(),
+            headers: Vec::new(),
+            body: Body::None,
+            auth: AuthConfig::None,
+            settings: Default::default(),
+        };
+        assert_eq!(
+            resolve_request(&relative, Some(&env)).unwrap().url,
+            "https://api.example.test/users"
+        );
+
+        relative.url = "{{host}}/teams".into();
+        assert_eq!(
+            resolve_request(&relative, Some(&env)).unwrap().url,
+            "https://api.example.test/teams"
+        );
+
+        relative.url = "https://override.example.test/status".into();
+        assert_eq!(
+            resolve_request(&relative, Some(&env)).unwrap().url,
+            "https://override.example.test/status"
+        );
+    }
+
+    #[test]
+    fn environment_without_host_field_remains_compatible() {
+        let environment: Environment = serde_json::from_value(serde_json::json!({
+            "id": Uuid::new_v4(),
+            "name": "旧环境",
+            "variables": []
+        }))
+        .unwrap();
+
+        assert!(environment.host.is_empty());
     }
 }

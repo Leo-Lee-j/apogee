@@ -1,4 +1,4 @@
-import { computed, ref, shallowRef } from 'vue'
+import { computed, reactive, ref, shallowRef } from 'vue'
 import { defineStore } from 'pinia'
 import {
   inTauri,
@@ -28,15 +28,20 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const sessionId = ref<string | null>(null)
   const environments = shallowRef<Environment[]>([])
   const activeEnvironmentId = ref<string | null>(null)
+  /** 尚未落盘的环境 id；发送前统一 flush，避免 Rust 从磁盘读到旧值。 */
+  const dirtyEnvironmentIds = reactive(new Set<string>())
   const activeEnvironment = computed(
     () => environments.value.find((environment) => environment.id === activeEnvironmentId.value) ?? null,
   )
-  /** 尚未落盘的环境 id；发送前统一 flush，避免 Rust 从磁盘读到旧值。 */
-  const dirtyEnvironmentIds = new Set<string>()
+  const activeEnvironmentDirty = computed(
+    () => activeEnvironmentId.value !== null && dirtyEnvironmentIds.has(activeEnvironmentId.value),
+  )
   const loading = ref(false)
   const ready = ref(false)
   const lastError = ref<AppError | null>(null)
   let loadingPromise: Promise<void> | null = null
+  const pendingStateSaves = new Set<Promise<boolean>>()
+  let stateSaveQueue = Promise.resolve(true)
 
   const available = computed(() => inTauri)
   const collections = computed(() => (nodes.value ?? []).filter((node) => node.kind === 'collection'))
@@ -63,9 +68,19 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   function acceptOpen(result: WorkspaceOpenResult) {
+    nodes.value = undefined
+    environments.value = []
+    activeEnvironmentId.value = null
+    dirtyEnvironmentIds.clear()
+    ready.value = false
+    lastError.value = null
     descriptor.value = result.descriptor
     sessionId.value = result.sessionId
     accept(result.snapshot)
+    activeEnvironmentId.value = result.state.activeEnvironmentId
+      && environments.value.some((environment) => environment.id === result.state.activeEnvironmentId)
+      ? result.state.activeEnvironmentId
+      : null
   }
 
   function report(error: unknown): AppError {
@@ -137,6 +152,34 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     activeEnvironmentId.value = id && environments.value.some((environment) => environment.id === id)
       ? id
       : null
+    void persistWorkspaceState()
+  }
+
+  function persistWorkspaceState(): Promise<boolean> {
+    if (!inTauri || !sessionId.value) return Promise.resolve(true)
+    const selectedId = activeEnvironmentId.value
+    const task = stateSaveQueue.then(() =>
+      ipc.workspaceSaveState(selectedId).then(
+        () => true,
+        (error) => {
+          report(error)
+          return false
+        },
+      ),
+    )
+    stateSaveQueue = task
+    pendingStateSaves.add(task)
+    void task.then(() => pendingStateSaves.delete(task))
+    return task
+  }
+
+  async function flushWorkspaceState(): Promise<boolean> {
+    let saved = true
+    while (pendingStateSaves.size > 0) {
+      const results = await Promise.all([...pendingStateSaves])
+      saved = results.every(Boolean) && saved
+    }
+    return saved
   }
 
   function updateEnvironment(id: string, delta: Partial<Environment>) {
@@ -210,10 +253,40 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       const environment = await ipc.workspaceCreateEnvironment(name)
       environments.value = [...environments.value, environment]
       activeEnvironmentId.value = environment.id
+      await persistWorkspaceState()
       return environment
     } catch (error) {
       report(error)
       return null
+    }
+  }
+
+  async function duplicateEnvironment(environmentId = activeEnvironmentId.value): Promise<Environment | null> {
+    const source = environments.value.find((environment) => environment.id === environmentId)
+    if (!source) return null
+    const created = await createEnvironment(`${source.name} 副本`)
+    if (!created) return null
+    updateEnvironment(created.id, {
+      host: source.host,
+      variables: source.variables.map((variable) => ({ ...variable })),
+    })
+    return (await saveEnvironment(created.id)) ? created : null
+  }
+
+  async function deleteEnvironment(environmentId = activeEnvironmentId.value): Promise<boolean> {
+    if (!environmentId || !inTauri) return false
+    try {
+      const snapshot = await ipc.workspaceDeleteEnvironment(environmentId)
+      dirtyEnvironmentIds.delete(environmentId)
+      accept(snapshot)
+      if (activeEnvironmentId.value === environmentId) {
+        activeEnvironmentId.value = environments.value[0]?.id ?? null
+      }
+      await persistWorkspaceState()
+      return true
+    } catch (error) {
+      report(error)
+      return false
     }
   }
 
@@ -309,6 +382,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     environments,
     activeEnvironmentId,
     activeEnvironment,
+    activeEnvironmentDirty,
     loading,
     ready,
     lastError,
@@ -318,6 +392,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     enter,
     reset,
     selectEnvironment,
+    persistWorkspaceState,
+    flushWorkspaceState,
     updateEnvironment,
     updateEnvironmentVariable,
     addEnvironmentVariable,
@@ -325,6 +401,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     saveEnvironment,
     saveDirtyEnvironments,
     createEnvironment,
+    duplicateEnvironment,
+    deleteEnvironment,
     openRequest,
     createCollection,
     createFolder,

@@ -121,6 +121,7 @@ export interface EnvironmentVariable {
 export interface Environment {
   id: string
   name: string
+  host: string
   variables: EnvironmentVariable[]
 }
 
@@ -129,6 +130,11 @@ export interface WorkspaceSnapshot {
   name: string
   nodes: WorkspaceNode[]
   environments: Environment[]
+}
+
+export interface WorkspaceState {
+  activeEnvironmentId: string | null
+  activeEnvironmentSet: boolean
 }
 
 export type WorkspaceStatus = 'available' | 'missing' | 'invalid'
@@ -151,6 +157,7 @@ export interface WorkspaceOpenResult {
   workspaceId: string
   sessionId: string
   snapshot: WorkspaceSnapshot
+  state: WorkspaceState
 }
 
 export interface WorkspaceRequest {
@@ -350,6 +357,17 @@ export const ipc = {
 
   workspaceSaveEnvironment(environment: Environment): Promise<Environment> {
     return call('workspace_save_environment', { ...sessionArgs(), environment })
+  },
+
+  workspaceDeleteEnvironment(environmentId: string): Promise<WorkspaceSnapshot> {
+    return call('workspace_delete_environment', { ...sessionArgs(), environmentId })
+  },
+
+  workspaceSaveState(activeEnvironmentId: string | null): Promise<void> {
+    return call('workspace_save_state', {
+      ...sessionArgs(),
+      workspaceState: { activeEnvironmentId, activeEnvironmentSet: true },
+    })
   },
 
   /** 读取一个请求的完整编辑模型。 */
