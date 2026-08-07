@@ -44,14 +44,14 @@ const paletteMounted = ref(false)
 watch(() => ui.historyOpen, (open) => { if (open) historyMounted.value = true }, { immediate: true })
 watch(() => ui.paletteOpen, (open) => { if (open) paletteMounted.value = true }, { immediate: true })
 
-/** 侧边栏延后到首帧之后再挂，避免和首屏抢主线程（03 文档 §4.1 分阶段启动）。 */
-const sidebarReady = ref(false)
+/**
+ * 侧边栏直接随 AppBody 挂载，不再延后双 rAF。
+ *
+ * 原来的延后是为了冷启动「首帧先出主内容」；现在首屏是 LauncherShell，AppBody
+ * 只在用户打开工作区后挂载（暖启动），延后反而会让侧边栏在 2 帧后弹出、主区
+ * 宽度整体闪一下。侧边栏仍是动态 import，不影响首屏 chunk。
+ */
 onMounted(() => {
-  requestAnimationFrame(() =>
-    requestAnimationFrame(() => {
-      sidebarReady.value = true
-    }),
-  )
   // S2 用构建期开关（历史原因，保留）
   if (import.meta.env.VITE_AUTORUN_S2 === '1') {
     ui.spikePanel = 's2'
@@ -326,7 +326,7 @@ function onKeydown(e: KeyboardEvent) {
   >
     <TitleBar />
     <div class="mid">
-      <template v-if="ui.sidebarVisible && sidebarReady">
+      <template v-if="ui.sidebarVisible">
         <Sidebar class="a-block" :style="sidebarStyle" :nodes="workspace.nodes" />
         <!--
           宽度分隔条。role=separator + tabindex 让它成为一个可聚焦的

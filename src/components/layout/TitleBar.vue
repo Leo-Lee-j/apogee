@@ -122,7 +122,13 @@ onBeforeUnmount(() => stopWatching?.())
 </script>
 
 <template>
-  <header class="titlebar" data-tauri-drag-region>
+  <!--
+    drag-region="deep"：Tauri 2.11+ 里裸 data-tauri-drag-region 只对「直接点中
+    该元素本身」生效，标题栏被 brand/按钮/spacer 填满，几乎永远点不中 header。
+    deep 让非交互子元素（品牌名、spacer、夹缝）都能拖动；button/a/input 仍会
+    拦截拖动、正常响应点击。
+  -->
+  <header class="titlebar" data-tauri-drag-region="deep">
     <span class="brand">Apogee</span>
 
     <AppDropdown

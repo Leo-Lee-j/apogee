@@ -46,12 +46,18 @@ const matches = computed(() => {
 })
 
 const inputAttrs = computed(() => {
-  const { class: _class, style: _style, onKeydown: _onKeydown, ...rest } = attrs
+  const { class: _class, style: _style, onKeydown: _onKeydown, onFocus: _onFocus, onBlur: _onBlur, onClick: _onClick, ...rest } = attrs
   return rest
 })
 
-function forwardKeydown(event: KeyboardEvent) {
-  const listener = attrs.onKeydown
+/**
+ * 父级经 attrs 传入的事件监听器不能走 v-bind：组件自身也绑了 @blur/@focus/@click，
+ * Vue 会把两边的 onX 合并成数组，而 naive-ui Popover 的 appendEvents 只认单个函数，
+ * 遇到数组会把数组本身当 handler 包装，失焦时抛「originalHandler is not a function」。
+ * 所以这些事件从 inputAttrs 里剥掉，统一在这里手动转发。
+ */
+function forwardHandler(name: string, event: unknown) {
+  const listener = (attrs as Record<string, unknown>)[name]
   if (Array.isArray(listener)) {
     for (const handler of listener) {
       if (typeof handler === 'function') handler(event)
@@ -118,7 +124,7 @@ function select(key: string) {
 
 function keydown(event: KeyboardEvent) {
   if (!open.value || matches.value.length === 0) {
-    forwardKeydown(event)
+    forwardHandler('onKeydown', event)
     return
   }
   if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
@@ -136,7 +142,7 @@ function keydown(event: KeyboardEvent) {
     event.stopPropagation()
     open.value = false
   } else {
-    forwardKeydown(event)
+    forwardHandler('onKeydown', event)
   }
 }
 
@@ -177,9 +183,10 @@ defineExpose({
         :type="multiline ? 'textarea' : 'text'"
         :size="size"
         @update:value="update"
-        @click="refresh()"
+        @click="refresh(); forwardHandler('onClick', $event)"
         @keydown="keydown"
-        @blur="open = false"
+        @focus="forwardHandler('onFocus', $event)"
+        @blur="open = false; forwardHandler('onBlur', $event)"
       />
     </template>
 

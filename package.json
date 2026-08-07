@@ -30,7 +30,7 @@
     "@codemirror/state": "6.7.1",
     "@codemirror/view": "6.43.6",
     "@tauri-apps/api": "2.11.1",
-    "@tauri-apps/plugin-dialog": "2.4.2",
+    "@tauri-apps/plugin-dialog": "2.7.2",
     "@vicons/ionicons5": "^0.13.0",
     "lucide-vue-next": "^1.0.0",
     "naive-ui": "2.44.1",

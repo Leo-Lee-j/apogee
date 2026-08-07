@@ -92,7 +92,9 @@ function statusText(status: string) {
 
 <template>
   <div class="launcher" tabindex="0" @keydown="onKeydown">
-    <header class="launcher-titlebar" data-tauri-drag-region>
+    <!-- 启动页标题栏没有 gap/padding，spacer 占满整个 header，裸 drag-region
+         只响应直接点击 header 本身，会完全拖不动；必须用 deep（见 TitleBar 注释）。 -->
+    <header class="launcher-titlebar" data-tauri-drag-region="deep">
       <div class="launcher-spacer" />
       <button class="title-icon" type="button" :title="ui.isDark ? '切换到亮色主题' : '切换到暗色主题'" :aria-label="ui.isDark ? '切换到亮色主题' : '切换到暗色主题'" @click="ui.themeMode = ui.isDark ? 'light' : 'dark'; ui.applyTheme()">
         <AppIcon :component="ui.isDark ? IconSun : IconMoon" :size="15" />

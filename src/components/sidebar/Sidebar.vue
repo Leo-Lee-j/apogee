@@ -659,7 +659,8 @@ defineExpose({
 .action-hint { margin: 0; color: var(--a-text-dim); font-size: 12px; line-height: 1.5; }
 .action-error { margin-bottom: 2px; }
 
-.scroller { flex: 1 1 auto; overflow-y: auto; min-height: 0; }
+/* scrollbar-gutter: stable —— 树加载/滚动条出现时内容区不会因 12px 滚动条而左右抖动。 */
+.scroller { flex: 1 1 auto; overflow-y: auto; overflow-x: hidden; min-height: 0; scrollbar-gutter: stable; }
 .spacer { position: relative; }
 .row {
   position: absolute; left: 0; right: 0; height: 22px;
