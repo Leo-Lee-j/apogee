@@ -34,7 +34,7 @@ struct InFlight {
 }
 
 pub struct AppState {
-    pub spool: Spool,
+    pub spool: RwLock<Spool>,
     pub store: ResponseStore,
     /// 只存元信息（体积、耗时），**不存 body**。
     pub(crate) meta: RwLock<Vec<(Uuid, u64, Timing, Option<String>)>>,
@@ -49,7 +49,7 @@ impl AppState {
     pub fn new() -> Result<Self> {
         let root = std::env::temp_dir().join("apogee-spool");
         Ok(Self {
-            spool: Spool::new(root)?,
+            spool: RwLock::new(Spool::new(root)?),
             store: ResponseStore::new(),
             meta: RwLock::new(Vec::new()),
             semantic_meta: RwLock::new(HashMap::new()),
@@ -58,13 +58,23 @@ impl AppState {
         })
     }
 
-    pub fn open_workspace(&self, repository: WorkspaceRepository) -> Result<(Uuid, Uuid)> {
+    pub fn open_workspace(
+        &self,
+        repository: WorkspaceRepository,
+        runtime_root: impl AsRef<std::path::Path>,
+    ) -> Result<(Uuid, Uuid)> {
         let workspace_id = repository.id()?;
         let session_id = Uuid::new_v4();
-        *self
+        let mut guard = self
             .workspace
             .write()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(WorkspaceSession {
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if guard.is_some() {
+            bail!("WORKSPACE_ALREADY_OPEN");
+        }
+        let spool = Spool::new(runtime_root.as_ref().join("responses"))?;
+        *self.spool.write().unwrap_or_else(|poisoned| poisoned.into_inner()) = spool;
+        *guard = Some(WorkspaceSession {
             id: session_id,
             workspace_id,
             repository,
@@ -103,7 +113,22 @@ impl AppState {
             bail!("WORKSPACE_SESSION_EXPIRED");
         }
         *guard = None;
+        drop(guard);
+        self.cancel_all_inflight();
         Ok(())
+    }
+
+    /// Invalidate every request when its workspace session closes. The frontend
+    /// may already have disposed the request store by the time cancellation
+    /// events arrive, so cancellation is best-effort and does not wait here.
+    fn cancel_all_inflight(&self) {
+        let mut guard = self
+            .in_flight
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        for (_, inflight) in guard.drain() {
+            let _ = inflight.cancel.send(());
+        }
     }
 
     /// 注册一个正在执行的请求，返回 receiver 给 execute() 当取消信号。
@@ -189,7 +214,8 @@ impl AppState {
             }))
             .chain(std::iter::once(tail.as_slice()));
 
-        let size = self.spool.write_stream(id, chunks)?;
+        let spool = self.spool.read().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
+        let size = spool.write_stream(id, chunks)?;
         let gen_ms = t0.elapsed().as_secs_f64() * 1000.0;
 
         let timing = Timing {
@@ -273,7 +299,8 @@ impl AppState {
         mut summary: ResponseSummary,
         body: &std::path::Path,
     ) -> Result<ResponseSummary> {
-        let target = self.spool.path_for(summary.id);
+        let spool = self.spool.read().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
+        let target = spool.path_for(summary.id);
         if !target.exists() {
             std::fs::copy(body, &target)
                 .with_context(|| format!("恢复历史响应体失败：{}", body.display()))?;
@@ -302,7 +329,8 @@ impl AppState {
     /// mmap 只建立虚拟地址映射，不把完整 body 复制到 Rust 堆；索引构建结束后立即解除映射，
     /// 常驻内存只剩固定 32 字节/节点的元数据和去重后的对象键。
     pub fn index_response(&self, id: Uuid) -> Result<ResponseSummary> {
-        let path = self.spool.path_for(id);
+        let spool = self.spool.read().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
+        let path = spool.path_for(id);
         let file = File::open(&path)
             .with_context(|| format!("打开响应 spool 失败：{}", path.display()))?;
         // SAFETY: spool 文件写完后通过原子 rename 发布，发布后只读且不会原地改写；
@@ -323,6 +351,7 @@ impl AppState {
         offset: usize,
         limit: usize,
     ) -> Result<Vec<TreeNode>> {
+        let spool = self.spool.read().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
         let index = self
             .store
             .index(id)
@@ -333,7 +362,7 @@ impl AppState {
             .map(|mut indexed| {
                 if let Some(span) = indexed.value_span {
                     let requested = span.len().min(PREVIEW_READ_BYTES);
-                    let bytes = self.spool.read_range(id, span.start, requested)?;
+                    let bytes = spool.read_range(id, span.start, requested)?;
                     let complete = bytes.len() as u64 == span.len();
                     indexed.node.preview =
                         Some(scalar_preview(indexed.node.kind, &bytes, complete));
@@ -386,7 +415,16 @@ mod tests {
         let state = AppState::new().unwrap();
 
         let first = WorkspaceRepository::create(&first_root, "First".into()).unwrap();
-        let (first_workspace, first_session) = state.open_workspace(first).unwrap();
+        let (first_workspace, first_session) = state
+            .open_workspace(first, root.join("runtime-first"))
+            .unwrap();
+        assert!(state
+            .spool
+            .read()
+            .unwrap()
+            .path_for(Uuid::new_v4())
+            .starts_with(root.join("runtime-first").join("responses")));
+        let mut cancellation = state.register_inflight(Uuid::new_v4(), None);
         state
             .with_workspace(first_workspace, first_session, |repository| {
                 repository.snapshot()
@@ -394,7 +432,22 @@ mod tests {
             .unwrap();
 
         let second = WorkspaceRepository::create(&second_root, "Second".into()).unwrap();
-        state.open_workspace(second).unwrap();
+        let error = state
+            .open_workspace(second, root.join("runtime-second"))
+            .unwrap_err();
+        assert_eq!(error.to_string(), "WORKSPACE_ALREADY_OPEN");
+        state.close_workspace(first_workspace, first_session).unwrap();
+        assert_eq!(cancellation.try_recv(), Ok(()));
+        let second = WorkspaceRepository::open(&second_root).unwrap();
+        state
+            .open_workspace(second, root.join("runtime-second"))
+            .unwrap();
+        assert!(state
+            .spool
+            .read()
+            .unwrap()
+            .path_for(Uuid::new_v4())
+            .starts_with(root.join("runtime-second").join("responses")));
         let error = state
             .with_workspace(first_workspace, first_session, |repository| {
                 repository.snapshot()

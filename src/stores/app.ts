@@ -96,8 +96,8 @@ export const useAppStore = defineStore('app', () => {
     shell.value = 'closing'
     const tabs = useTabsStore()
     const workspace = useWorkspaceStore()
-    await workspace.flushWorkspaceState()
-    if (!(await workspace.saveDirtyEnvironments()) || !(await tabs.flushAll())) {
+    const stateSaved = await workspace.flushWorkspaceState()
+    if (!stateSaved || !(await workspace.saveDirtyEnvironments()) || !(await tabs.flushAll())) {
       shell.value = 'workspace'
       lastError.value = workspace.lastError ?? normalizeError(new Error('保存工作区失败，已取消返回'))
       return false
@@ -122,18 +122,38 @@ export const useAppStore = defineStore('app', () => {
     const tabs = useTabsStore()
     busyWorkspaceId.value = workspaceId
     lastError.value = null
-    await workspace.flushWorkspaceState()
-    if (!(await workspace.saveDirtyEnvironments()) || !(await tabs.flushAll())) {
+    shell.value = 'closing'
+    const stateSaved = await workspace.flushWorkspaceState()
+    if (!stateSaved || !(await workspace.saveDirtyEnvironments()) || !(await tabs.flushAll())) {
+      shell.value = 'workspace'
       lastError.value = workspace.lastError ?? normalizeError(new Error('保存当前工作区失败，已取消切换'))
       busyWorkspaceId.value = null
       return false
     }
     try {
+      await ipc.workspaceClose()
+    } catch (error) {
+      shell.value = 'workspace'
+      lastError.value = normalizeError(error)
+      busyWorkspaceId.value = null
+      return false
+    }
+
+    // The old session is invalid before any state belonging to the next
+    // workspace can be installed in the frontend.
+    tabs.resetWorkspace()
+    workspace.reset()
+    shell.value = 'opening'
+    try {
       await acceptOpen(await ipc.workspaceOpen({ workspaceId }))
       return true
     } catch (error) {
       lastError.value = normalizeError(error)
+      tabs.resetWorkspace()
+      workspace.reset()
+      shell.value = 'launcher'
       busyWorkspaceId.value = null
+      await refresh()
       return false
     }
   }

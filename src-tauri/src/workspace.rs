@@ -60,6 +60,7 @@ pub struct HistoryRecord {
 
 pub struct WorkspaceRepository {
     root: PathBuf,
+    runtime_root: Option<PathBuf>,
 }
 
 struct LocatedNode {
@@ -118,7 +119,7 @@ impl WorkspaceRepository {
         if !root.join("apogee.yaml").is_file() {
             bail!("所选目录不是 Apogee 工作区：缺少 apogee.yaml");
         }
-        let repository = Self { root };
+        let repository = Self { root, runtime_root: None };
         repository.read_manifest()?;
         Ok(repository)
     }
@@ -130,14 +131,43 @@ impl WorkspaceRepository {
         }
         fs::create_dir_all(root.join("collections"))?;
         fs::create_dir_all(root.join(ENVIRONMENT_DIR))?;
-        fs::create_dir_all(root.join(HISTORY_DIR))?;
-        let repository = Self { root };
+        let repository = Self { root, runtime_root: None };
         repository.create_default_workspace(name)?;
         Ok(repository)
     }
 
     pub fn root(&self) -> &Path {
         &self.root
+    }
+
+    /// Bind history and other session data to the application-owned runtime
+    /// directory. Existing history from older workspace layouts is moved once.
+    pub fn with_runtime_root(mut self, runtime_root: impl Into<PathBuf>) -> Result<Self> {
+        let runtime_root = runtime_root.into();
+        let target = runtime_root.join(HISTORY_DIR);
+        fs::create_dir_all(&runtime_root)?;
+        let legacy = self.root.join(HISTORY_DIR);
+        if legacy.is_dir() && !target.exists() {
+            fs::rename(&legacy, &target).or_else(|_| {
+                fs::create_dir_all(&target)?;
+                for entry in fs::read_dir(&legacy)? {
+                    let entry = entry?;
+                    fs::rename(entry.path(), target.join(entry.file_name()))?;
+                }
+                fs::remove_dir(&legacy)
+            })?;
+        } else {
+            fs::create_dir_all(&target)?;
+        }
+        self.runtime_root = Some(runtime_root);
+        Ok(self)
+    }
+
+    fn history_directory(&self) -> PathBuf {
+        self.runtime_root
+            .as_ref()
+            .map(|root| root.join(HISTORY_DIR))
+            .unwrap_or_else(|| self.root.join(HISTORY_DIR))
     }
 
     pub fn id(&self) -> Result<Uuid> {
@@ -193,7 +223,7 @@ impl WorkspaceRepository {
         body_source: &Path,
     ) -> Result<()> {
         let id = response.id;
-        let directory = self.root.join(HISTORY_DIR);
+        let directory = self.history_directory();
         fs::create_dir_all(&directory)?;
         let body_target = directory.join(format!("{id}.body"));
         let body_temp = directory.join(format!(".{id}.body.tmp"));
@@ -232,7 +262,7 @@ impl WorkspaceRepository {
     }
 
     pub fn read_history(&self, id: Uuid) -> Result<(HistoryRecord, PathBuf)> {
-        let directory = self.root.join(HISTORY_DIR);
+        let directory = self.history_directory();
         let record: HistoryRecord = read_yaml(&directory.join(format!("{id}.yaml")))?;
         if record.id != id {
             bail!("历史记录 id 不一致：{id}");
@@ -245,7 +275,7 @@ impl WorkspaceRepository {
     }
 
     pub fn clear_history(&self) -> Result<()> {
-        let directory = self.root.join(HISTORY_DIR);
+        let directory = self.history_directory();
         if directory.exists() {
             fs::remove_dir_all(&directory)?;
         }
@@ -254,7 +284,7 @@ impl WorkspaceRepository {
     }
 
     fn read_history_records(&self) -> Result<Vec<HistoryRecord>> {
-        let directory = self.root.join(HISTORY_DIR);
+        let directory = self.history_directory();
         let mut records = Vec::new();
         for entry in fs::read_dir(directory)? {
             let path = entry?.path();
@@ -272,7 +302,7 @@ impl WorkspaceRepository {
         let mut records = self.read_history_records()?;
         records.sort_by_key(|record| std::cmp::Reverse(record.created_at_ms));
         for record in records.into_iter().skip(HISTORY_LIMIT) {
-            let directory = self.root.join(HISTORY_DIR);
+            let directory = self.history_directory();
             for extension in ["yaml", "body"] {
                 let path = directory.join(format!("{}.{}", record.id, extension));
                 if path.exists() {
@@ -894,6 +924,33 @@ mod tests {
         assert!(requests.iter().any(|r| matches!(r.spec.auth, AuthConfig::Bearer { .. })));
         assert!(requests.iter().any(|r| matches!(r.spec.auth, AuthConfig::ApiKey { .. })));
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn legacy_history_moves_to_application_runtime_directory() {
+        let root = std::env::temp_dir().join(format!("apogee-history-migration-{}", Uuid::new_v4()));
+        let runtime = std::env::temp_dir().join(format!("apogee-runtime-migration-{}", Uuid::new_v4()));
+        let repository = WorkspaceRepository::create(&root, "测试工作区".into()).unwrap();
+        let response_id = Uuid::new_v4();
+        let source = root.join("source.body");
+        fs::write(&source, b"runtime-history").unwrap();
+        repository
+            .record_history(
+                1234,
+                default_request_spec(),
+                ResponseSummary::without_http(response_id, 15, Timing::default()),
+                &source,
+            )
+            .unwrap();
+
+        let repository = repository.with_runtime_root(&runtime).unwrap();
+
+        assert!(!root.join(HISTORY_DIR).exists());
+        assert!(runtime.join(HISTORY_DIR).is_dir());
+        assert_eq!(repository.list_history().unwrap().len(), 1);
+        assert_eq!(fs::read(repository.read_history(response_id).unwrap().1).unwrap(), b"runtime-history");
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(runtime).unwrap();
     }
 }
 

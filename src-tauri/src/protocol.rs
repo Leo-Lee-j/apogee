@@ -34,7 +34,12 @@ pub fn handle(state: &AppState, request: &Request<Vec<u8>>) -> Response<Vec<u8>>
         return err(StatusCode::BAD_REQUEST, "非法的响应 id");
     };
 
-    let total = match state.spool.size_of(id) {
+    let spool = state
+        .spool
+        .read()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone();
+    let total = match spool.size_of(id) {
         Ok(n) => n,
         Err(_) => return err(StatusCode::NOT_FOUND, "响应体不存在或已被缓存淘汰"),
     };
@@ -48,7 +53,7 @@ pub fn handle(state: &AppState, request: &Request<Vec<u8>>) -> Response<Vec<u8>>
     match range {
         Some((start, end)) => {
             let len = (end - start + 1).min(MAX_CHUNK);
-            match state.spool.read_range(id, start, len) {
+            match spool.read_range(id, start, len) {
                 Ok(buf) => {
                     let real_end = start + buf.len() as u64 - 1;
                     Response::builder()
@@ -79,7 +84,7 @@ pub fn handle(state: &AppState, request: &Request<Vec<u8>>) -> Response<Vec<u8>>
             // 产品代码里不应该走到这里。所以加了硬上限，防止误用把 100MB
             // 一次性塞进 WebView。
             let len = total.min(MAX_CHUNK);
-            match state.spool.read_range(id, 0, len) {
+            match spool.read_range(id, 0, len) {
                 Ok(buf) => {
                     let truncated = total > len;
                     let mut b = Response::builder()

@@ -301,8 +301,12 @@ mod commands {
         }) {
             workspace_state.active_environment_id = None;
         }
+        let runtime_root = data_dir.join("runtime").join(snapshot.id.to_string());
+        let repository = repository
+            .with_runtime_root(&runtime_root)
+            .map_err(|error| error.to_string())?;
         let (workspace_id, session_id) = state
-            .open_workspace(repository)
+            .open_workspace(repository, &runtime_root)
             .map_err(|error| error.to_string())?;
         Ok(WorkspaceOpenResult {
             descriptor,
@@ -488,7 +492,11 @@ mod commands {
         let tab_id = ctx.as_ref().and_then(|item| item.tab_id.clone());
         let cancel_rx = state.register_inflight(id, tab_id);
 
-        let spool = state.spool.clone();
+        let spool = state
+            .spool
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
         let state2 = state.inner().clone();
         let app2 = app.clone();
 
@@ -673,7 +681,11 @@ mod commands {
         spec: apogee_core::request::RequestSpec,
         response: ResponseSummary,
     ) -> Result<(), String> {
-        let body = state.spool.path_for(response.id);
+        let body = state
+            .spool
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .path_for(response.id);
         let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
         state
             .with_workspace(workspace_id, session_id, |repository| {
