@@ -17,6 +17,7 @@
 
 use anyhow::{bail, Context, Result};
 use apogee_core::request::{AuthConfig, Body, RequestSettings, RequestSpec};
+use apogee_core::model::KeyValue;
 use apogee_core::response::ResponseSummary;
 use apogee_core::vars::Environment;
 use apogee_core::workspace::{
@@ -67,18 +68,84 @@ struct LocatedNode {
 }
 
 impl WorkspaceRepository {
+    pub fn create_example(root: impl Into<PathBuf>) -> Result<Self> {
+        let repository = Self::create(root, "示例工作区".to_string())?;
+        let snapshot = repository.create_collection("示例 API 集合".to_string())?;
+        let collection = snapshot.nodes.iter().find(|n| matches!(n.kind, WorkspaceNodeKind::Collection)).map(|n| n.id).context("示例集合创建失败")?;
+        let folder_snapshot = repository.create_folder(collection, "请求类型示例".to_string())?;
+        let folder = folder_snapshot.nodes.iter().find(|n| n.name == "请求类型示例").map(|n| n.id).context("示例文件夹创建失败")?;
+        let methods = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
+        for method in methods {
+            let request = repository.create_request(folder, format!("{method} 请求"))?;
+            let mut spec = request.spec;
+            spec.method = method.to_string();
+            spec.url = "https://httpbin.org/anything".to_string();
+            repository.save_request(request.id, request.name, spec)?;
+        }
+        let bodies = [
+            ("JSON 请求体", Body::Json { content: "{\"hello\":\"world\"}".to_string() }),
+            ("文本请求体", Body::Text { content: "hello".to_string(), content_type: "text/plain".to_string() }),
+            ("表单请求体", Body::FormData { rows: vec![KeyValue { enabled: true, key: "name".to_string(), value: "Apogee".to_string(), description: None, kind: apogee_core::model::ValueKind::Text }] }),
+            ("URL 编码请求体", Body::UrlEncoded { rows: vec![KeyValue { enabled: true, key: "name".to_string(), value: "Apogee".to_string(), description: None, kind: apogee_core::model::ValueKind::Text }] }),
+            ("GraphQL 请求体", Body::GraphQl { query: "query { anything }".to_string(), variables: "{}".to_string(), operation_name: None }),
+            ("二进制请求体模板", Body::Binary { path: PathBuf::new() }),
+        ];
+        for (name, body) in bodies {
+            let request = repository.create_request(folder, name.to_string())?;
+            let mut spec = request.spec;
+            spec.method = "POST".to_string();
+            spec.url = "https://httpbin.org/anything".to_string();
+            spec.body = body;
+            repository.save_request(request.id, request.name, spec)?;
+        }
+        let auths = [
+            ("Basic 认证", AuthConfig::Basic { username: "demo".to_string(), password: "password".to_string() }),
+            ("Bearer 认证", AuthConfig::Bearer { token: "demo-token".to_string() }),
+            ("API Key 认证", AuthConfig::ApiKey { key: "X-API-Key".to_string(), value: "demo-key".to_string(), location: apogee_core::request::ApiKeyIn::Header }),
+        ];
+        for (name, auth) in auths {
+            let request = repository.create_request(folder, name.to_string())?;
+            let mut spec = request.spec;
+            spec.method = "GET".to_string();
+            spec.url = "https://httpbin.org/anything".to_string();
+            spec.auth = auth;
+            repository.save_request(request.id, request.name, spec)?;
+        }
+        Ok(repository)
+    }
     pub fn open(root: impl Into<PathBuf>) -> Result<Self> {
         let root = root.into();
+        if !root.join("apogee.yaml").is_file() {
+            bail!("所选目录不是 Apogee 工作区：缺少 apogee.yaml");
+        }
+        let repository = Self { root };
+        repository.read_manifest()?;
+        Ok(repository)
+    }
+
+    pub fn create(root: impl Into<PathBuf>, name: String) -> Result<Self> {
+        let root = root.into();
+        if root.exists() && fs::read_dir(&root)?.next().is_some() {
+            bail!("新工作区必须使用空目录");
+        }
         fs::create_dir_all(root.join("collections"))?;
         fs::create_dir_all(root.join(ENVIRONMENT_DIR))?;
         fs::create_dir_all(root.join(HISTORY_DIR))?;
         let repository = Self { root };
-        if repository.manifest_path().exists() {
-            repository.read_manifest()?;
-        } else {
-            repository.create_default_workspace()?;
-        }
+        repository.create_default_workspace(name)?;
         Ok(repository)
+    }
+
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    pub fn id(&self) -> Result<Uuid> {
+        Ok(self.read_manifest()?.id)
+    }
+
+    pub fn name(&self) -> Result<String> {
+        Ok(self.read_manifest()?.name)
     }
 
     pub fn snapshot(&self) -> Result<WorkspaceSnapshot> {
@@ -430,7 +497,8 @@ impl WorkspaceRepository {
         self.snapshot()
     }
 
-    fn create_default_workspace(&self) -> Result<()> {
+    fn create_default_workspace(&self, name: String) -> Result<()> {
+        let name = required_name(&name)?;
         let workspace_id = Uuid::new_v4();
         let collection_id = Uuid::new_v4();
         let environment_id = Uuid::new_v4();
@@ -458,7 +526,7 @@ impl WorkspaceRepository {
             &WorkspaceManifest {
                 apogee: WORKSPACE_FORMAT_VERSION,
                 id: workspace_id,
-                name: "我的工作区".to_string(),
+                name,
                 collections: vec![CollectionEntry {
                     id: collection_id,
                     name: "我的集合".to_string(),
@@ -689,9 +757,18 @@ mod tests {
     use apogee_core::model::Timing;
 
     #[test]
+    fn opening_plain_directory_does_not_initialize_it() {
+        let root = std::env::temp_dir().join(format!("apogee-open-test-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        assert!(WorkspaceRepository::open(&root).is_err());
+        assert!(!root.join("apogee.yaml").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn history_round_trip_preserves_request_response_and_body() {
         let root = std::env::temp_dir().join(format!("apogee-history-test-{}", Uuid::new_v4()));
-        let repository = WorkspaceRepository::open(&root).unwrap();
+        let repository = WorkspaceRepository::create(&root, "测试工作区".into()).unwrap();
         let response_id = Uuid::new_v4();
         let source = root.join("source.body");
         fs::write(&source, br#"{"ok":true}"#).unwrap();
@@ -718,6 +795,33 @@ mod tests {
 
         repository.clear_history().unwrap();
         assert!(repository.list_history().unwrap().is_empty());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn example_workspace_covers_supported_methods_bodies_and_auth() {
+        let root = std::env::temp_dir().join(format!("apogee-example-test-{}", Uuid::new_v4()));
+        let repository = WorkspaceRepository::create_example(&root).unwrap();
+        let requests: Vec<_> = repository
+            .snapshot()
+            .unwrap()
+            .nodes
+            .into_iter()
+            .filter(|node| matches!(node.kind, WorkspaceNodeKind::Request))
+            .map(|node| repository.read_request(node.id).unwrap())
+            .collect();
+        for method in ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"] {
+            assert!(requests.iter().any(|request| request.spec.method == method));
+        }
+        assert!(requests.iter().any(|r| matches!(r.spec.body, Body::Json { .. })));
+        assert!(requests.iter().any(|r| matches!(r.spec.body, Body::Text { .. })));
+        assert!(requests.iter().any(|r| matches!(r.spec.body, Body::FormData { .. })));
+        assert!(requests.iter().any(|r| matches!(r.spec.body, Body::UrlEncoded { .. })));
+        assert!(requests.iter().any(|r| matches!(r.spec.body, Body::Binary { .. })));
+        assert!(requests.iter().any(|r| matches!(r.spec.body, Body::GraphQl { .. })));
+        assert!(requests.iter().any(|r| matches!(r.spec.auth, AuthConfig::Basic { .. })));
+        assert!(requests.iter().any(|r| matches!(r.spec.auth, AuthConfig::Bearer { .. })));
+        assert!(requests.iter().any(|r| matches!(r.spec.auth, AuthConfig::ApiKey { .. })));
         fs::remove_dir_all(root).unwrap();
     }
 }

@@ -103,6 +103,19 @@ export default defineConfig({
     strictPort: true,
   },
 
+  // CodeMirror is loaded on demand in the response viewer. Explicitly prebundle
+  // every dynamically imported package so WebView never receives a missing
+  // /node_modules/.vite/deps asset after a dependency cache refresh.
+  optimizeDeps: {
+    include: [
+      '@codemirror/state',
+      '@codemirror/view',
+      '@codemirror/language',
+      '@codemirror/search',
+      '@codemirror/lang-json',
+    ],
+  },
+
   build: {
     // WebView2 / WKWebView 都是较新的内核，不需要为老浏览器降级，
     // 降级会显著增大产物（决策 D2 只支持 Windows + macOS，这里能吃到红利）

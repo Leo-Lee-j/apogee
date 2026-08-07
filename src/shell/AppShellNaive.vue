@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { NConfigProvider, NMessageProvider, NDialogProvider, darkTheme, lightTheme } from 'naive-ui'
-import AppBody from './AppBody.vue'
+import RootShell from './RootShell.vue'
 import { useUiStore } from '@/stores/ui'
 import { darkThemeOverrides, lightThemeOverrides } from '@/theme'
 
@@ -27,7 +27,7 @@ const overrides = computed(() => (ui.isDark ? darkThemeOverrides : lightThemeOve
   <NConfigProvider :theme="theme" :theme-overrides="overrides" abstract>
     <NDialogProvider>
       <NMessageProvider>
-        <AppBody />
+        <RootShell />
       </NMessageProvider>
     </NDialogProvider>
   </NConfigProvider>

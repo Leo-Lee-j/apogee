@@ -300,6 +300,23 @@ export const useTabsStore = defineStore('tabs', () => {
     return true
   }
 
+  async function flushAll(): Promise<boolean> {
+    for (const timer of persistTimers.values()) clearTimeout(timer)
+    persistTimers.clear()
+    for (const tab of tabs.value) {
+      if (tab.nodeId && !(await persist(tab))) return false
+    }
+    return true
+  }
+
+  function resetWorkspace() {
+    for (const timer of persistTimers.values()) clearTimeout(timer)
+    persistTimers.clear()
+    tabs.value = []
+    activeId.value = null
+    mru.value = []
+  }
+
   /** URL 改变时同步路径参数行，保留用户已经填写的值。 */
   function syncPathParams(id: string, url: string) {
     const t = tabs.value.find((x) => x.id === id)
@@ -341,6 +358,8 @@ export const useTabsStore = defineStore('tabs', () => {
     close,
     patch,
     save,
+    flushAll,
+    resetWorkspace,
     syncPathParams,
   }
 })

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import AppBody from './AppBody.vue'
+import RootShell from './RootShell.vue'
 
 /**
  * Spike S5 变体 B —— 对照方案：首屏**零 naive-ui**。
@@ -22,5 +22,5 @@ import AppBody from './AppBody.vue'
 </script>
 
 <template>
-  <AppBody />
+  <RootShell />
 </template>

@@ -1,0 +1,20 @@
+stateDiagram-v2
+  [*] --> Launcher : Application started
+
+  state Launcher {
+    [*] --> Listing
+    Listing --> Listing : Create, relocate, or forget entry
+  }
+
+  Launcher --> Opening : Workspace row selected
+  Opening --> Launcher : Inspection or loading failed
+  Opening --> Workspace : Session created and snapshot loaded
+
+  state Workspace {
+    [*] --> Active
+    Active --> Active : Read, edit, send, save
+  }
+
+  Workspace --> Closing : Return to workspace list
+  Closing --> Workspace : Flush or close failed
+  Closing --> Launcher : Saved, session closed, stores disposed

@@ -41,6 +41,7 @@ memmap2 = "=0.9.11"
 # assetProtocol.enable 保持一致，否则 build script 直接报错。
 # 从安全角度也不该开 —— 少一个能读本地文件的协议就少一个攻击面（PRD §10.2 能力最小化）。
 tauri = { version = "2", default-features = false, features = ["wry", "common-controls-v6"] }
+tauri-plugin-dialog = "2.4.2"
 
 # 读进程内存，供 PRD §5.2 的「性能自检」面板与性能基准使用。
 # 只开 ProcessStatus + Threading 两个 feature，避免拖进整个 Windows API 绑定。

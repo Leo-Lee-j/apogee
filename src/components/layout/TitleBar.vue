@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, h, onBeforeUnmount, onMounted, ref } from 'vue'
+import type { DropdownOption } from 'naive-ui'
 import { useUiStore } from '@/stores/ui'
 import { useTabsStore } from '@/stores/tabs'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { windowControls, type Unlisten } from '@/ipc'
-import { AppIcon } from '@/components/ui'
-import { IconDocument, IconHistory, IconMoon, IconSettings } from '@/components/ui/icons'
+import { AppDropdown, AppIcon } from '@/components/ui'
+import { IconChevronDown, IconDocument, IconHistory, IconMoon, IconSettings } from '@/components/ui/icons'
+import { useAppStore } from '@/stores/app'
 
 /**
  * 顶栏，36px（02 文档 §3.2）。
@@ -18,9 +20,62 @@ import { IconDocument, IconHistory, IconMoon, IconSettings } from '@/components/
 const ui = useUiStore()
 const tabs = useTabsStore()
 const workspace = useWorkspaceStore()
+const app = useAppStore()
 const workspaceLabel = computed(() =>
   workspace.workspaceName || (workspace.loading ? '加载中…' : '本地草稿'),
 )
+const workspaceOptions = computed<DropdownOption[]>(() => app.workspaces
+  .filter((item) => item.status === 'available')
+  .map((item) => ({
+    key: item.id,
+    label: item.name,
+    disabled: item.id === workspace.workspaceId || app.busyWorkspaceId !== null,
+    workspacePath: item.path,
+  })))
+
+function renderWorkspaceLabel(option: DropdownOption) {
+  const current = option.key === workspace.workspaceId
+  return h('div', {
+    style: {
+      display: 'grid',
+      gridTemplateColumns: 'minmax(100px, auto) minmax(140px, 1fr)',
+      alignItems: 'center',
+      columnGap: '16px',
+      width: 'min(420px, calc(100vw - 48px))',
+      minWidth: '260px',
+      height: '24px',
+      overflow: 'hidden',
+    },
+  }, [
+    h('span', {
+      style: {
+        overflow: 'hidden',
+        color: 'var(--a-text)',
+        fontSize: '13px',
+        lineHeight: '24px',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+      },
+    }, `${current ? '✓  ' : ''}${String(option.label ?? '')}`),
+    h('span', {
+      title: String(option.workspacePath ?? ''),
+      style: {
+        display: 'block',
+        overflow: 'hidden',
+        color: 'var(--a-text-dim)',
+        fontSize: '11px',
+        lineHeight: '24px',
+        textAlign: 'right',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+      },
+    }, String(option.workspacePath ?? '')),
+  ])
+}
+
+function selectWorkspace(key: string | number) {
+  void app.switchWorkspace(String(key))
+}
 
 /** 最大化状态只用来决定中间那个按钮画「最大化」还是「还原」。 */
 const maximized = ref(false)
@@ -43,9 +98,18 @@ onBeforeUnmount(() => stopWatching?.())
   <header class="titlebar" data-tauri-drag-region>
     <span class="brand">Apogee</span>
 
-    <button class="chip" type="button" aria-label="当前工作区">
-      工作区: {{ workspaceLabel }} <span class="caret">▾</span>
-    </button>
+    <AppDropdown
+      trigger="click"
+      placement="bottom-start"
+      :options="workspaceOptions"
+      :render-label="renderWorkspaceLabel"
+      @select="selectWorkspace"
+    >
+      <button class="chip" type="button" aria-label="切换工作区" title="切换工作区" @click.stop>
+        <span>工作区: {{ workspaceLabel }}</span>
+        <AppIcon class="caret" :component="IconChevronDown" :size="13" />
+      </button>
+    </AppDropdown>
     <button class="palette" type="button" @click="ui.paletteOpen = true">
       <span>搜索或输入命令</span>
       <kbd>Ctrl</kbd><kbd>K</kbd>
@@ -133,9 +197,9 @@ onBeforeUnmount(() => stopWatching?.())
   cursor: pointer;
   transition: background var(--a-dur) var(--a-ease);
 }
-.chip { padding: 0 8px; }
+.chip { display: inline-flex; align-items: center; gap: 5px; padding: 0 8px; }
 .chip:hover, .icon:hover, .palette:hover { background: var(--a-hover); color: var(--a-text); }
-.caret { opacity: 0.6; }
+.caret { flex: 0 0 auto; opacity: 0.7; }
 .palette {
   display: flex; align-items: center; gap: 6px;
   border-color: var(--a-border);

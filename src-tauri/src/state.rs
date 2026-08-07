@@ -1,7 +1,7 @@
 //! 应用状态：响应体 spool + JSON SpanIndex 缓存 + 请求中注册表。
 
 use crate::workspace::WorkspaceRepository;
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use apogee_core::model::{ResponseMeta, Timing};
 use apogee_core::response::{
     scalar_preview, synth_json_payload, ResponseStore, ResponseSummary, SpanIndex, Spool, TreeNode,
@@ -15,6 +15,12 @@ use std::sync::RwLock;
 use std::time::Instant;
 use tokio::sync::oneshot;
 use uuid::Uuid;
+
+pub struct WorkspaceSession {
+    pub id: Uuid,
+    pub workspace_id: Uuid,
+    pub repository: WorkspaceRepository,
+}
 
 /// 正在飞行的请求。
 ///
@@ -33,8 +39,8 @@ pub struct AppState {
     /// 只存元信息（体积、耗时），**不存 body**。
     pub(crate) meta: RwLock<Vec<(Uuid, u64, Timing, Option<String>)>>,
     semantic_meta: RwLock<HashMap<Uuid, ResponseSummary>>,
-    /// 工作区文件仓库。启动时由 Tauri setup 根据 app data 目录初始化。
-    pub workspace: RwLock<Option<WorkspaceRepository>>,
+    /// 当前窗口绑定的工作区会话。启动入口阶段为 None。
+    pub workspace: RwLock<Option<WorkspaceSession>>,
     /// 请求中注册表。key 是 ExecHandle.id（= 响应 id）。
     in_flight: RwLock<HashMap<Uuid, InFlight>>,
 }
@@ -52,29 +58,52 @@ impl AppState {
         })
     }
 
-    /// 在 Tauri 完成 app data 路径解析后初始化本地工作区。
-    pub fn initialize_workspace(&self, root: PathBuf) -> Result<()> {
-        let repository = WorkspaceRepository::open(root)?;
+    pub fn open_workspace(&self, repository: WorkspaceRepository) -> Result<(Uuid, Uuid)> {
+        let workspace_id = repository.id()?;
+        let session_id = Uuid::new_v4();
         *self
             .workspace
             .write()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(repository);
-        Ok(())
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(WorkspaceSession {
+            id: session_id,
+            workspace_id,
+            repository,
+        });
+        Ok((workspace_id, session_id))
     }
 
-    /// 对工作区仓库执行一次读写操作，统一处理「尚未初始化」错误。
     pub fn with_workspace<T>(
         &self,
+        workspace_id: Uuid,
+        session_id: Uuid,
         operation: impl FnOnce(&WorkspaceRepository) -> Result<T>,
     ) -> Result<T> {
         let guard = self
             .workspace
             .read()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let repository = guard
+        let session = guard
             .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("工作区尚未初始化"))?;
-        operation(repository)
+            .ok_or_else(|| anyhow::anyhow!("当前没有打开的工作区"))?;
+        if session.workspace_id != workspace_id || session.id != session_id {
+            bail!("WORKSPACE_SESSION_EXPIRED");
+        }
+        operation(&session.repository)
+    }
+
+    pub fn close_workspace(&self, workspace_id: Uuid, session_id: Uuid) -> Result<()> {
+        let mut guard = self
+            .workspace
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let session = guard
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("当前没有打开的工作区"))?;
+        if session.workspace_id != workspace_id || session.id != session_id {
+            bail!("WORKSPACE_SESSION_EXPIRED");
+        }
+        *guard = None;
+        Ok(())
     }
 
     /// 注册一个正在执行的请求，返回 receiver 给 execute() 当取消信号。
@@ -343,4 +372,36 @@ pub fn spike_results_dir() -> PathBuf {
         }
     }
     cwd.join("spike-results")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn expired_workspace_session_cannot_access_new_workspace() {
+        let root = std::env::temp_dir().join(format!("apogee-session-test-{}", Uuid::new_v4()));
+        let first_root = root.join("first");
+        let second_root = root.join("second");
+        let state = AppState::new().unwrap();
+
+        let first = WorkspaceRepository::create(&first_root, "First".into()).unwrap();
+        let (first_workspace, first_session) = state.open_workspace(first).unwrap();
+        state
+            .with_workspace(first_workspace, first_session, |repository| {
+                repository.snapshot()
+            })
+            .unwrap();
+
+        let second = WorkspaceRepository::create(&second_root, "Second".into()).unwrap();
+        state.open_workspace(second).unwrap();
+        let error = state
+            .with_workspace(first_workspace, first_session, |repository| {
+                repository.snapshot()
+            })
+            .unwrap_err();
+        assert_eq!(error.to_string(), "WORKSPACE_SESSION_EXPIRED");
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }

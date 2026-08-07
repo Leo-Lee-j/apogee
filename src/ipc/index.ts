@@ -131,6 +131,28 @@ export interface WorkspaceSnapshot {
   environments: Environment[]
 }
 
+export type WorkspaceStatus = 'available' | 'missing' | 'invalid'
+
+export interface WorkspaceDescriptor {
+  id: string
+  name: string
+  path: string
+  lastOpenedAt: number
+  status: WorkspaceStatus
+}
+
+export interface AppSettings {
+  defaultWorkspaceRoot: string
+  openLastWorkspaceOnStart: boolean
+}
+
+export interface WorkspaceOpenResult {
+  descriptor: WorkspaceDescriptor
+  workspaceId: string
+  sessionId: string
+  snapshot: WorkspaceSnapshot
+}
+
 export interface WorkspaceRequest {
   id: string
   name: string
@@ -212,11 +234,29 @@ async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> 
   }
 }
 
+let workspaceSession: { workspaceId: string; sessionId: string } | null = null
+
+function sessionArgs() {
+  if (!workspaceSession) throw new Error('当前没有打开的工作区')
+  return workspaceSession
+}
+
+export function setWorkspaceSession(session: { workspaceId: string; sessionId: string } | null) {
+  workspaceSession = session
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // 命令（03 文档 §3.2）
 // ─────────────────────────────────────────────────────────────────────
 
 export const ipc = {
+  appSettingsLoad(): Promise<AppSettings> {
+    return call('app_settings_load')
+  },
+
+  appSettingsSave(settings: AppSettings): Promise<AppSettings> {
+    return call('app_settings_save', { settings })
+  },
   /** 生成一个用于压测的合成响应体（Spike S2 用，不是产品功能）。 */
   spikeMakeResponse(targetBytes: number): Promise<ResponseSummary> {
     return call('spike_make_response', { targetBytes })
@@ -273,54 +313,80 @@ export const ipc = {
 
   // ── 工作区持久化（03 文档 §3.2 / §6）─────────────────────────────
 
+  workspaceList(): Promise<WorkspaceDescriptor[]> {
+    return call('workspace_list')
+  },
+
+  async workspaceCreate(path: string | undefined, name: string): Promise<WorkspaceOpenResult> {
+    const result = await call<WorkspaceOpenResult>('workspace_create', { path, name })
+    setWorkspaceSession(result)
+    return result
+  },
+
+  async workspaceOpen(input: { workspaceId?: string; path?: string }): Promise<WorkspaceOpenResult> {
+    const result = await call<WorkspaceOpenResult>('workspace_open', input)
+    setWorkspaceSession(result)
+    return result
+  },
+
+  async workspaceClose(): Promise<void> {
+    const session = sessionArgs()
+    await call('workspace_close', session)
+    setWorkspaceSession(null)
+  },
+
+  workspaceForget(workspaceId: string): Promise<void> {
+    return call('workspace_forget', { workspaceId })
+  },
+
   /** 读取 Rust 侧已经扁平化的集合树。 */
   workspaceLoad(): Promise<WorkspaceSnapshot> {
-    return call('workspace_load')
+    return call('workspace_load', sessionArgs())
   },
 
   workspaceCreateEnvironment(name: string): Promise<Environment> {
-    return call('workspace_create_environment', { name })
+    return call('workspace_create_environment', { ...sessionArgs(), name })
   },
 
   workspaceSaveEnvironment(environment: Environment): Promise<Environment> {
-    return call('workspace_save_environment', { environment })
+    return call('workspace_save_environment', { ...sessionArgs(), environment })
   },
 
   /** 读取一个请求的完整编辑模型。 */
   workspaceReadRequest(requestId: string): Promise<WorkspaceRequest> {
-    return call('workspace_read_request', { requestId })
+    return call('workspace_read_request', { ...sessionArgs(), requestId })
   },
 
   /** 保存请求的持久化字段；请求体和大响应体都不通过额外的前端缓存传递。 */
   workspaceSaveRequest(requestId: string, name: string, spec: RequestSpec): Promise<void> {
-    return call('workspace_save_request', { requestId, name, spec })
+    return call('workspace_save_request', { ...sessionArgs(), requestId, name, spec })
   },
 
   workspaceCreateCollection(name: string): Promise<WorkspaceSnapshot> {
-    return call('workspace_create_collection', { name })
+    return call('workspace_create_collection', { ...sessionArgs(), name })
   },
 
   workspaceCreateFolder(parentId: string, name: string): Promise<WorkspaceSnapshot> {
-    return call('workspace_create_folder', { parentId, name })
+    return call('workspace_create_folder', { ...sessionArgs(), parentId, name })
   },
 
   workspaceCreateRequest(parentId: string, name: string): Promise<WorkspaceRequest> {
-    return call('workspace_create_request', { parentId, name })
+    return call('workspace_create_request', { ...sessionArgs(), parentId, name })
   },
 
   workspaceRenameNode(nodeId: string, name: string): Promise<WorkspaceSnapshot> {
-    return call('workspace_rename_node', { nodeId, name })
+    return call('workspace_rename_node', { ...sessionArgs(), nodeId, name })
   },
 
   workspaceDeleteNode(nodeId: string): Promise<WorkspaceSnapshot> {
-    return call('workspace_delete_node', { nodeId })
+    return call('workspace_delete_node', { ...sessionArgs(), nodeId })
   },
 
   // ── 请求执行（03 文档 §3.2 / §4.5）─────────────────────────────────
 
   /** 发送一个 HTTP 请求。立即返回 ExecHandle，不等网络。 */
   sendRequest(spec: RequestSpec, ctx?: ExecContext): Promise<ExecHandle> {
-    return call('send_request', { spec, ctx })
+    return call('send_request', { ...sessionArgs(), spec, ctx })
   },
 
   /** 取消一个正在执行的请求。返回 false 表示请求已结束或不存在。 */
@@ -329,19 +395,19 @@ export const ipc = {
   },
 
   historyRecord(createdAtMs: number, spec: RequestSpec, response: ResponseSummary): Promise<void> {
-    return call('history_record', { createdAtMs, spec, response })
+    return call('history_record', { ...sessionArgs(), createdAtMs, spec, response })
   },
 
   historyList(): Promise<HistoryEntry[]> {
-    return call('history_list')
+    return call('history_list', sessionArgs())
   },
 
   historyRead(historyId: string): Promise<HistoryRecord> {
-    return call('history_read', { historyId })
+    return call('history_read', { ...sessionArgs(), historyId })
   },
 
   historyClear(): Promise<void> {
-    return call('history_clear')
+    return call('history_clear', sessionArgs())
   },
 
   curlImport(command: string): Promise<{ spec: RequestSpec; warnings: string[] }> {

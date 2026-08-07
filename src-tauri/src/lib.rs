@@ -12,9 +12,11 @@
 //!    避免白屏闪烁。带兜底超时，防止前端异常导致窗口永远不出现。
 
 mod mem;
+mod app_settings;
 mod protocol;
 mod state;
 mod workspace;
+mod workspace_registry;
 
 use state::AppState;
 use std::sync::Arc;
@@ -33,9 +35,9 @@ pub fn run() {
 
     let state = Arc::new(AppState::new().expect("初始化应用状态失败"));
     let proto_state = state.clone();
-    let workspace_state = state.clone();
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .manage(state)
         // 注册 apogee:// 协议。异步版本很重要：同步 handler 会阻塞 WebView 线程，
         // 100MB 文件的 IO 卡在那里就等于界面卡死。
@@ -52,6 +54,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::app_ready,
+            commands::app_settings_load,
+            commands::app_settings_save,
             commands::spike_make_response,
             commands::get_response_meta,
             commands::index_response,
@@ -61,6 +65,11 @@ pub fn run() {
             commands::spike_autorun,
             commands::send_request,
             commands::cancel_request,
+            commands::workspace_list,
+            commands::workspace_create,
+            commands::workspace_open,
+            commands::workspace_close,
+            commands::workspace_forget,
             commands::workspace_load,
             commands::workspace_read_request,
             commands::workspace_save_request,
@@ -82,9 +91,22 @@ pub fn run() {
                 .path()
                 .app_data_dir()
                 .map_err(|error| std::io::Error::other(error.to_string()))?;
-            workspace_state
-                .initialize_workspace(data_dir.join("workspace"))
-                .map_err(|error| std::io::Error::other(error.to_string()))?;
+            std::fs::create_dir_all(&data_dir)?;
+
+            let settings = app_settings::AppSettingsRepository::new(&data_dir).load()?;
+            let registry = workspace_registry::WorkspaceRegistry::new(&data_dir);
+            if registry.list()?.is_empty() {
+                let legacy_root = data_dir.join("workspace");
+                if legacy_root.join("apogee.yaml").is_file() {
+                    let legacy = workspace::WorkspaceRepository::open(&legacy_root)?;
+                    registry.register(&legacy)?;
+                }
+                let example_root = std::path::PathBuf::from(&settings.default_workspace_root).join("example-workspace");
+                if !example_root.exists() {
+                    let example = workspace::WorkspaceRepository::create_example(example_root)?;
+                    registry.register(&example)?;
+                }
+            }
 
             // 兜底：无论前端是否报告就绪，3 秒后强制显示窗口。
             // 没有这层兜底，一个前端异常就会变成「双击图标什么都不出现」，
@@ -122,8 +144,11 @@ fn install_panic_hook() {
 }
 
 mod commands {
+    use crate::app_settings::{AppSettings, AppSettingsRepository};
     use super::state::AppState;
+    use crate::workspace::WorkspaceRepository;
     use crate::workspace::{HistoryEntry, HistoryRecord};
+    use crate::workspace_registry::{WorkspaceDescriptor, WorkspaceRegistry};
     use apogee_core::error::AppError;
     use apogee_core::request::RequestSpec;
     use apogee_core::response::{ResponseSummary, TreeNode};
@@ -142,6 +167,133 @@ mod commands {
         mount_ms: f64,
         ready_ms: f64,
         first_paint_ms: f64,
+    }
+
+    #[derive(Debug, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct WorkspaceOpenResult {
+        descriptor: WorkspaceDescriptor,
+        workspace_id: Uuid,
+        session_id: Uuid,
+        snapshot: WorkspaceSnapshot,
+    }
+
+    #[tauri::command]
+    pub fn app_settings_load(app: tauri::AppHandle) -> Result<AppSettings, String> {
+        let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+        AppSettingsRepository::new(&dir).load().map_err(|e| e.to_string())
+    }
+
+    #[tauri::command]
+    pub fn app_settings_save(app: tauri::AppHandle, settings: AppSettings) -> Result<AppSettings, String> {
+        let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+        let repo = AppSettingsRepository::new(&dir);
+        repo.save(&settings).map_err(|e| e.to_string())?;
+        repo.load().map_err(|e| e.to_string())
+    }
+
+    #[tauri::command]
+    pub fn workspace_list(app: tauri::AppHandle) -> Result<Vec<WorkspaceDescriptor>, String> {
+        registry(&app)?.list().map_err(|error| error.to_string())
+    }
+
+    #[tauri::command]
+    pub fn workspace_create(
+        app: tauri::AppHandle,
+        state: State<'_, Arc<AppState>>,
+        path: Option<String>,
+        name: String,
+    ) -> Result<WorkspaceOpenResult, String> {
+        let root = match path.filter(|value| !value.trim().is_empty()) {
+            Some(path) => PathBuf::from(path),
+            None => {
+                let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+                let settings = AppSettingsRepository::new(&data_dir).load().map_err(|e| e.to_string())?;
+                let slug: String = name.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).collect();
+                let slug = if slug.trim_matches('_').is_empty() { "workspace".to_string() } else { slug.trim_matches('_').to_string() };
+                let base = slug;
+                let mut candidate = PathBuf::from(&settings.default_workspace_root).join(&base);
+                let mut suffix = 2;
+                while candidate.exists() {
+                    candidate = PathBuf::from(&settings.default_workspace_root).join(format!("{base}-{suffix}"));
+                    suffix += 1;
+                }
+                candidate
+            }
+        };
+        let repository = WorkspaceRepository::create(root, name)
+            .map_err(|error| error.to_string())?;
+        open_repository(&app, &state, repository)
+    }
+
+    #[tauri::command]
+    pub fn workspace_open(
+        app: tauri::AppHandle,
+        state: State<'_, Arc<AppState>>,
+        workspace_id: Option<String>,
+        path: Option<String>,
+    ) -> Result<WorkspaceOpenResult, String> {
+        let root = match (path, workspace_id) {
+            (Some(path), _) => PathBuf::from(path),
+            (None, Some(id)) => {
+                let id = parse_id(&id)?;
+                PathBuf::from(
+                    registry(&app)?
+                        .find(id)
+                        .map_err(|error| error.to_string())?
+                        .path,
+                )
+            }
+            (None, None) => return Err("必须提供工作区 id 或路径".into()),
+        };
+        let repository = WorkspaceRepository::open(root).map_err(|error| error.to_string())?;
+        open_repository(&app, &state, repository)
+    }
+
+    #[tauri::command]
+    pub fn workspace_close(
+        state: State<'_, Arc<AppState>>,
+        workspace_id: String,
+        session_id: String,
+    ) -> Result<(), String> {
+        state
+            .close_workspace(parse_id(&workspace_id)?, parse_id(&session_id)?)
+            .map_err(|error| error.to_string())
+    }
+
+    #[tauri::command]
+    pub fn workspace_forget(app: tauri::AppHandle, workspace_id: String) -> Result<(), String> {
+        registry(&app)?
+            .forget(parse_id(&workspace_id)?)
+            .map_err(|error| error.to_string())
+    }
+
+    fn open_repository(
+        app: &tauri::AppHandle,
+        state: &State<'_, Arc<AppState>>,
+        repository: WorkspaceRepository,
+    ) -> Result<WorkspaceOpenResult, String> {
+        let snapshot = repository.snapshot().map_err(|error| error.to_string())?;
+        let descriptor = registry(app)?
+            .register(&repository)
+            .map_err(|error| error.to_string())?;
+        let (workspace_id, session_id) = state
+            .open_workspace(repository)
+            .map_err(|error| error.to_string())?;
+        Ok(WorkspaceOpenResult {
+            descriptor,
+            workspace_id,
+            session_id,
+            snapshot,
+        })
+    }
+
+    fn registry(app: &tauri::AppHandle) -> Result<WorkspaceRegistry, String> {
+        let data_dir = app
+            .path()
+            .app_data_dir()
+            .map_err(|error| error.to_string())?;
+        Ok(WorkspaceRegistry::new(&data_dir))
     }
 
     /// 前端首帧就绪 → 显示窗口（03 文档 §4.1 分阶段启动）。
@@ -285,14 +437,22 @@ mod commands {
         state: State<'_, Arc<AppState>>,
         spec: apogee_core::request::RequestSpec,
         ctx: Option<apogee_core::request::ExecContext>,
+        workspace_id: String,
+        session_id: String,
     ) -> Result<apogee_core::request::ExecHandle, String> {
+        let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
+        state
+            .with_workspace(workspace_id, session_id, |_| Ok(()))
+            .map_err(|error| error.to_string())?;
         let environment = match ctx.as_ref().and_then(|item| item.environment_id.as_deref()) {
             Some(raw_id) => {
                 let environment_id =
                     Uuid::parse_str(raw_id).map_err(|_| format!("非法的环境 id：{raw_id}"))?;
                 Some(
                     state
-                        .with_workspace(|repository| repository.read_environment(environment_id))
+                        .with_workspace(workspace_id, session_id, |repository| {
+                            repository.read_environment(environment_id)
+                        })
                         .map_err(|error| error.to_string())?,
                 )
             }
@@ -482,33 +642,48 @@ mod commands {
     #[tauri::command]
     pub fn history_record(
         state: State<'_, Arc<AppState>>,
+        workspace_id: String,
+        session_id: String,
         created_at_ms: u64,
         spec: apogee_core::request::RequestSpec,
         response: ResponseSummary,
     ) -> Result<(), String> {
         let body = state.spool.path_for(response.id);
+        let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
         state
-            .with_workspace(|repository| {
+            .with_workspace(workspace_id, session_id, |repository| {
                 repository.record_history(created_at_ms, spec, response, &body)
             })
             .map_err(|error| error.to_string())
     }
 
     #[tauri::command]
-    pub fn history_list(state: State<'_, Arc<AppState>>) -> Result<Vec<HistoryEntry>, String> {
+    pub fn history_list(
+        state: State<'_, Arc<AppState>>,
+        workspace_id: String,
+        session_id: String,
+    ) -> Result<Vec<HistoryEntry>, String> {
+        let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
         state
-            .with_workspace(|repository| repository.list_history())
+            .with_workspace(workspace_id, session_id, |repository| {
+                repository.list_history()
+            })
             .map_err(|error| error.to_string())
     }
 
     #[tauri::command]
     pub fn history_read(
         state: State<'_, Arc<AppState>>,
+        workspace_id: String,
+        session_id: String,
         history_id: String,
     ) -> Result<HistoryRecord, String> {
         let id = parse_id(&history_id)?;
+        let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
         let (mut record, body) = state
-            .with_workspace(|repository| repository.read_history(id))
+            .with_workspace(workspace_id, session_id, |repository| {
+                repository.read_history(id)
+            })
             .map_err(|error| error.to_string())?;
         record.response = state
             .restore_history_response(record.response, &body)
@@ -517,9 +692,16 @@ mod commands {
     }
 
     #[tauri::command]
-    pub fn history_clear(state: State<'_, Arc<AppState>>) -> Result<(), String> {
+    pub fn history_clear(
+        state: State<'_, Arc<AppState>>,
+        workspace_id: String,
+        session_id: String,
+    ) -> Result<(), String> {
+        let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
         state
-            .with_workspace(|repository| repository.clear_history())
+            .with_workspace(workspace_id, session_id, |repository| {
+                repository.clear_history()
+            })
             .map_err(|error| error.to_string())
     }
 
@@ -530,9 +712,14 @@ mod commands {
 
     /// 读取当前工作区的扁平树。
     #[tauri::command]
-    pub fn workspace_load(state: State<'_, Arc<AppState>>) -> Result<WorkspaceSnapshot, String> {
+    pub fn workspace_load(
+        state: State<'_, Arc<AppState>>,
+        workspace_id: String,
+        session_id: String,
+    ) -> Result<WorkspaceSnapshot, String> {
+        let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
         state
-            .with_workspace(|repository| repository.snapshot())
+            .with_workspace(workspace_id, session_id, |repository| repository.snapshot())
             .map_err(|error| error.to_string())
     }
 
@@ -540,11 +727,16 @@ mod commands {
     #[tauri::command]
     pub fn workspace_read_request(
         state: State<'_, Arc<AppState>>,
+        workspace_id: String,
+        session_id: String,
         request_id: String,
     ) -> Result<WorkspaceRequest, String> {
         let id = parse_id(&request_id)?;
+        let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
         state
-            .with_workspace(|repository| repository.read_request(id))
+            .with_workspace(workspace_id, session_id, |repository| {
+                repository.read_request(id)
+            })
             .map_err(|error| error.to_string())
     }
 
@@ -552,13 +744,18 @@ mod commands {
     #[tauri::command]
     pub fn workspace_save_request(
         state: State<'_, Arc<AppState>>,
+        workspace_id: String,
+        session_id: String,
         request_id: String,
         name: String,
         spec: RequestSpec,
     ) -> Result<(), String> {
         let id = parse_id(&request_id)?;
+        let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
         state
-            .with_workspace(|repository| repository.save_request(id, name, spec))
+            .with_workspace(workspace_id, session_id, |repository| {
+                repository.save_request(id, name, spec)
+            })
             .map_err(|error| error.to_string())
     }
 
@@ -566,10 +763,15 @@ mod commands {
     #[tauri::command]
     pub fn workspace_create_environment(
         state: State<'_, Arc<AppState>>,
+        workspace_id: String,
+        session_id: String,
         name: String,
     ) -> Result<Environment, String> {
+        let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
         state
-            .with_workspace(|repository| repository.create_environment(name))
+            .with_workspace(workspace_id, session_id, |repository| {
+                repository.create_environment(name)
+            })
             .map_err(|error| error.to_string())
     }
 
@@ -577,10 +779,15 @@ mod commands {
     #[tauri::command]
     pub fn workspace_save_environment(
         state: State<'_, Arc<AppState>>,
+        workspace_id: String,
+        session_id: String,
         environment: Environment,
     ) -> Result<Environment, String> {
+        let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
         state
-            .with_workspace(|repository| repository.save_environment(environment))
+            .with_workspace(workspace_id, session_id, |repository| {
+                repository.save_environment(environment)
+            })
             .map_err(|error| error.to_string())
     }
 
@@ -588,10 +795,15 @@ mod commands {
     #[tauri::command]
     pub fn workspace_create_collection(
         state: State<'_, Arc<AppState>>,
+        workspace_id: String,
+        session_id: String,
         name: String,
     ) -> Result<WorkspaceSnapshot, String> {
+        let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
         state
-            .with_workspace(|repository| repository.create_collection(name))
+            .with_workspace(workspace_id, session_id, |repository| {
+                repository.create_collection(name)
+            })
             .map_err(|error| error.to_string())
     }
 
@@ -599,12 +811,17 @@ mod commands {
     #[tauri::command]
     pub fn workspace_create_folder(
         state: State<'_, Arc<AppState>>,
+        workspace_id: String,
+        session_id: String,
         parent_id: String,
         name: String,
     ) -> Result<WorkspaceSnapshot, String> {
         let parent = parse_id(&parent_id)?;
+        let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
         state
-            .with_workspace(|repository| repository.create_folder(parent, name))
+            .with_workspace(workspace_id, session_id, |repository| {
+                repository.create_folder(parent, name)
+            })
             .map_err(|error| error.to_string())
     }
 
@@ -612,12 +829,17 @@ mod commands {
     #[tauri::command]
     pub fn workspace_create_request(
         state: State<'_, Arc<AppState>>,
+        workspace_id: String,
+        session_id: String,
         parent_id: String,
         name: String,
     ) -> Result<WorkspaceRequest, String> {
         let parent = parse_id(&parent_id)?;
+        let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
         state
-            .with_workspace(|repository| repository.create_request(parent, name))
+            .with_workspace(workspace_id, session_id, |repository| {
+                repository.create_request(parent, name)
+            })
             .map_err(|error| error.to_string())
     }
 
@@ -625,12 +847,17 @@ mod commands {
     #[tauri::command]
     pub fn workspace_rename_node(
         state: State<'_, Arc<AppState>>,
+        workspace_id: String,
+        session_id: String,
         node_id: String,
         name: String,
     ) -> Result<WorkspaceSnapshot, String> {
         let id = parse_id(&node_id)?;
+        let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
         state
-            .with_workspace(|repository| repository.rename_node(id, name))
+            .with_workspace(workspace_id, session_id, |repository| {
+                repository.rename_node(id, name)
+            })
             .map_err(|error| error.to_string())
     }
 
@@ -638,15 +865,24 @@ mod commands {
     #[tauri::command]
     pub fn workspace_delete_node(
         state: State<'_, Arc<AppState>>,
+        workspace_id: String,
+        session_id: String,
         node_id: String,
     ) -> Result<WorkspaceSnapshot, String> {
         let id = parse_id(&node_id)?;
+        let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
         state
-            .with_workspace(|repository| repository.delete_node(id))
+            .with_workspace(workspace_id, session_id, |repository| {
+                repository.delete_node(id)
+            })
             .map_err(|error| error.to_string())
     }
 
     fn parse_id(s: &str) -> Result<Uuid, String> {
         Uuid::parse_str(s).map_err(|_| format!("非法的响应 id：{s}"))
+    }
+
+    fn parse_session(workspace_id: &str, session_id: &str) -> Result<(Uuid, Uuid), String> {
+        Ok((parse_id(workspace_id)?, parse_id(session_id)?))
     }
 }

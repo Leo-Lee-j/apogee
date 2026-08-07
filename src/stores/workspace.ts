@@ -8,6 +8,8 @@ import {
   type Environment,
   type EnvironmentVariable,
   type WorkspaceNode,
+  type WorkspaceDescriptor,
+  type WorkspaceOpenResult,
   type WorkspaceRequest,
   type WorkspaceSnapshot,
 } from '@/ipc'
@@ -22,6 +24,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const nodes = shallowRef<WorkspaceNode[] | undefined>(undefined)
   const workspaceId = ref<string | null>(null)
   const workspaceName = ref('')
+  const descriptor = shallowRef<WorkspaceDescriptor | null>(null)
+  const sessionId = ref<string | null>(null)
   const environments = shallowRef<Environment[]>([])
   const activeEnvironmentId = ref<string | null>(null)
   const activeEnvironment = computed(
@@ -58,6 +62,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     lastError.value = null
   }
 
+  function acceptOpen(result: WorkspaceOpenResult) {
+    descriptor.value = result.descriptor
+    sessionId.value = result.sessionId
+    accept(result.snapshot)
+  }
+
   function report(error: unknown): AppError {
     const appError = normalizeError(error)
     lastError.value = appError
@@ -66,7 +76,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   async function load() {
-    if (!inTauri) return
+    if (!inTauri || !sessionId.value) return
     if (loadingPromise) return loadingPromise
 
     loading.value = true
@@ -81,6 +91,30 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         loadingPromise = null
       })
     return loadingPromise
+  }
+
+  async function enter(result: WorkspaceOpenResult) {
+    loading.value = true
+    try {
+      acceptOpen(result)
+    } finally {
+      loading.value = false
+    }
+  }
+
+  function reset() {
+    nodes.value = undefined
+    workspaceId.value = null
+    workspaceName.value = ''
+    descriptor.value = null
+    sessionId.value = null
+    environments.value = []
+    activeEnvironmentId.value = null
+    dirtyEnvironmentIds.clear()
+    ready.value = false
+    loading.value = false
+    lastError.value = null
+    loadingPromise = null
   }
 
   async function applySnapshot(task: Promise<WorkspaceSnapshot>): Promise<boolean> {
@@ -270,6 +304,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     nodes,
     workspaceId,
     workspaceName,
+    descriptor,
+    sessionId,
     environments,
     activeEnvironmentId,
     activeEnvironment,
@@ -279,6 +315,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     available,
     collections,
     load,
+    enter,
+    reset,
     selectEnvironment,
     updateEnvironment,
     updateEnvironmentVariable,

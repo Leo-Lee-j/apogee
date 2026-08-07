@@ -6,15 +6,18 @@ import {
   AppForm,
   AppFormItem,
   AppInputNumber,
+  AppInput,
   AppSelect,
   AppSwitch,
 } from '@/components/ui'
 import NaiveThemeScope from '@/components/NaiveThemeScope.vue'
 import { useUiStore } from '@/stores/ui'
+import { useAppStore } from '@/stores/app'
 
 type SettingsSection = 'appearance' | 'network' | 'privacy'
 
 const ui = useUiStore()
+const app = useAppStore()
 const activeSection = ref<SettingsSection>('appearance')
 const proxyMode = ref('system')
 const timeout = ref(30000)
@@ -40,6 +43,18 @@ const layoutOptions = [
   { label: '左右分栏', value: 'side-by-side' },
   { label: '专注模式', value: 'focus' },
 ]
+
+async function chooseWorkspaceRoot() {
+  const { open } = await import('@tauri-apps/plugin-dialog')
+  const selected = await open({ directory: true, multiple: false })
+  if (typeof selected === 'string') {
+    await app.saveSettings({ ...app.settings, defaultWorkspaceRoot: selected })
+  }
+}
+
+async function setAutoOpen(value: boolean) {
+  await app.saveSettings({ ...app.settings, openLastWorkspaceOnStart: value })
+}
 </script>
 
 <template>
@@ -96,6 +111,32 @@ const layoutOptions = [
                 <p>恢复工作区导航栏的默认宽度。</p>
               </div>
               <AppButton size="small" @click="ui.resetSidebarWidth()">恢复默认宽度</AppButton>
+            </section>
+
+            <section class="settings-group">
+              <div class="group-heading">
+                <h2>启动</h2>
+                <p>控制 Apogee 启动后首先显示的界面。</p>
+              </div>
+              <AppForm label-placement="left" label-width="190" size="small">
+                <AppFormItem label="启动时打开上次使用的工作区">
+                  <AppSwitch
+                    :value="app.settings.openLastWorkspaceOnStart"
+                    @update:value="setAutoOpen"
+                  />
+                </AppFormItem>
+              </AppForm>
+            </section>
+
+            <section class="settings-group">
+              <div class="group-heading">
+                <h2>工作区</h2>
+                <p>新建工作区默认保存到此目录，已有工作区不会被移动。</p>
+              </div>
+              <div class="workspace-root-control">
+                <AppInput :value="app.settings.defaultWorkspaceRoot" readonly />
+                <AppButton size="small" @click="chooseWorkspaceRoot">更改位置</AppButton>
+              </div>
             </section>
           </template>
 
@@ -209,6 +250,8 @@ const layoutOptions = [
 .group-heading h2 { margin: 0 0 4px; color: var(--a-text); font-size: 14px; line-height: 20px; }
 .group-heading p { margin: 0; color: var(--a-text-dim); font-size: 12px; line-height: 18px; }
 .control { width: min(320px, 100%); }
+.workspace-root-control { display: flex; align-items: center; gap: 10px; max-width: 680px; }
+.workspace-root-control :deep(.n-input) { min-width: 0; flex: 1; }
 .unit { margin-left: 8px; color: var(--a-text-faint); font: var(--a-fs-xs) var(--a-font-mono); }
 
 @media (max-width: 760px) {

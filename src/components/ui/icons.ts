@@ -4,6 +4,7 @@ export {
   ClipboardOutline as IconClipboard,
   CloseOutline as IconClose,
   CloudUploadOutline as IconCloudUpload,
+  ChevronDownOutline as IconChevronDown,
   ContractOutline as IconRestore,
   CopyOutline as IconCopy,
   CodeSlashOutline as IconCode,
