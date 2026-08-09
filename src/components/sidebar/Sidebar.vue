@@ -12,7 +12,7 @@ import {
   AppPopconfirm,
   AppSpace,
 } from '@/components/ui'
-import { IconAdd, IconDelete, IconEdit, IconLocate, IconSort, IconFolder, IconFolderOpen, IconRequest } from '@/components/ui/icons'
+import { IconAdd, IconApi, IconDelete, IconEdit, IconLocate, IconSort, IconFolder, IconFolderOpen } from '@/components/ui/icons'
 import NaiveThemeScope from '@/components/NaiveThemeScope.vue'
 import {
   ROW_H,
@@ -564,7 +564,7 @@ defineExpose({
                 :class="{ selected: node.id === actionParentId }"
                 role="option"
                 :aria-selected="node.id === actionParentId"
-                :style="{ paddingLeft: `${8 + node.depth * 14}px` }"
+                :style="{ paddingLeft: `${8 + node.depth * 18}px` }"
                 @click="actionParentId = node.id"
               >
                 <span class="action-target-icon">
@@ -608,13 +608,13 @@ defineExpose({
           :aria-current="n.id === activeNodeId ? 'true' : undefined"
           :style="{
             transform: `translateY(${(startIdx + i) * ROW_H}px)`,
-            paddingLeft: `${8 + n.depth * 14}px`,
+            paddingLeft: `${8 + n.depth * 18}px`,
           }"
           @click="toggle(n)"
           @dblclick="pinOpen(n)"
         >
           <span class="node-icon" :class="{ folder: n.isFolder }">
-            <AppIcon :component="n.isFolder ? (n.expanded ? IconFolderOpen : IconFolder) : IconRequest" :size="15" />
+            <AppIcon :component="n.isFolder ? (n.expanded ? IconFolderOpen : IconFolder) : IconApi" :size="15" />
           </span>
           <span v-if="!n.isFolder" class="m" :style="{ color: methodColor[n.method!] ?? 'var(--a-head)' }">{{ n.method }}</span>
           <span class="name">{{ n.name }}</span>
@@ -752,7 +752,7 @@ defineExpose({
 }
 .row:hover { background: var(--a-hover); color: var(--a-text); }
 .row.selected:not(.active) { box-shadow: inset 2px 0 0 var(--a-border-strong); }
-.row.folder { color: var(--a-text); }
+.row.folder { color: var(--a-text); font-weight: 600; }
 /*
  * 当前打开的接口（02 文档 §4.5 的「← 当前打开（高亮）」）。
  *
@@ -762,15 +762,13 @@ defineExpose({
  * 用 box-shadow 画色条而不是 border-left，免得改变 padding 算出来的缩进。
  */
 .row.active {
-  background: #111827;
-  color: #ffffff;
+  background: transparent;
+  color: var(--a-text);
+  border: 1px solid var(--a-primary);
   border-radius: var(--a-radius-md);
-  margin: 0 8px;
-  right: 8px;
-  box-shadow: none;
 }
-.row.active:hover { background: #111827; }
-.row.active .node-icon, .row.active .m { color: #ffffff !important; }
+.row.active:hover { background: var(--a-hover); }
+.row.active .node-icon { color: var(--a-primary) !important; }
 .node-icon {
   display: flex;
   align-items: center;
