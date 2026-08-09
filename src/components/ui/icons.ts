@@ -11,5 +11,5 @@ export {
   ArrowUpDown as IconSort, History as IconHistory, Clock3 as IconTime, Trash2 as IconDelete,
   Palette as IconPalette, Network as IconNetwork, ShieldCheck as IconShield, Sun as IconSun,
   RotateCcw as IconReset, MoreHorizontal as IconMore, ExternalLink as IconExternalLink, Send as IconSend,
-  Save as IconSave, BarChart3 as IconStats,
+  Save as IconSave, BarChart3 as IconStats, ArrowLeft as IconArrowLeft,
 } from 'lucide-vue-next'

@@ -1,13 +1,14 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { NTabPane, NTabs } from 'naive-ui'
 import { AppAlert, AppButton, AppTag } from '@/components/ui'
 import { AppIcon } from '@/components/ui'
-import { IconClipboard, IconClose, IconCloudUpload, IconDocument, IconFlash } from '@/components/ui/icons'
+import { IconArrowLeft, IconClipboard, IconClose, IconCloudUpload, IconDocument, IconFlash } from '@/components/ui/icons'
 import NaiveThemeScope from '@/components/NaiveThemeScope.vue'
 import { useTabsStore } from '@/stores/tabs'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { importCurl } from '@/features/curl'
-import { ipc, inTauri } from '@/ipc'
+import { ipc, inTauri, type RequestSpec } from '@/ipc'
 
 /**
  * 新建请求标签里的选项面板。
@@ -25,6 +26,73 @@ const actionBusy = ref(false)
 const curlMode = ref(false)
 const curlCommand = ref('')
 const importWarnings = ref<string[]>([])
+const previewSpec = ref<RequestSpec | null>(null)
+const previewError = ref('')
+const previewLoading = ref(false)
+const previewTab = ref<'json' | 'visual'>('json')
+let previewTimer: ReturnType<typeof setTimeout> | undefined
+let previewSequence = 0
+
+const previewText = computed(() => previewSpec.value ? JSON.stringify(previewSpec.value, null, 2) : '')
+const visualHeaders = computed(() => (previewSpec.value?.headers ?? []).filter((item) => item.enabled && item.key))
+const visualParams = computed(() => (previewSpec.value?.params ?? []).filter((item) => item.enabled && item.key))
+const visualAuth = computed(() => {
+  const auth = previewSpec.value?.auth
+  if (!auth || auth.type === 'none') return '无鉴权'
+  if (auth.type === 'basic') return `Basic Auth (${auth.username})`
+  if (auth.type === 'bearer') return 'Bearer Token'
+  if (auth.type === 'apiKey') return `API Key (${auth.key}, ${auth.location})`
+  return '继承'
+})
+const visualBody = computed(() => {
+  const body = previewSpec.value?.body
+  if (!body || body.type === 'none') return '无请求体'
+  if ('content' in body) return body.type === 'json' ? `JSON\n${body.content}` : body.content
+  if (body.type === 'binary') return `文件：${body.path}`
+  if (body.type === 'graphQl') return `GraphQL\n${body.query}`
+  return body.rows.filter((item) => item.enabled && item.key).map((item) => `${item.key}: ${item.value}`).join('\n') || '空'
+})
+
+async function updateCurlPreview(command: string) {
+  const sequence = ++previewSequence
+  const value = command.trim()
+  previewSpec.value = null
+  previewError.value = ''
+  if (!value) {
+    previewLoading.value = false
+    return
+  }
+  previewLoading.value = true
+  try {
+    const result = await importCurl(value)
+    if (sequence !== previewSequence) return
+    previewSpec.value = result.spec
+    importWarnings.value = result.warnings
+  } catch (error) {
+    if (sequence !== previewSequence) return
+    previewError.value = error instanceof Error ? error.message : '无法解析这条 cURL 命令。'
+    importWarnings.value = []
+  } finally {
+    if (sequence === previewSequence) previewLoading.value = false
+  }
+}
+
+watch([curlCommand, curlMode], ([command, mode]) => {
+  if (previewTimer) clearTimeout(previewTimer)
+  if (!mode) {
+    previewSequence += 1
+    previewSpec.value = null
+    previewError.value = ''
+    previewLoading.value = false
+    return
+  }
+  previewTimer = setTimeout(() => { void updateCurlPreview(command) }, 220)
+})
+
+onBeforeUnmount(() => {
+  if (previewTimer) clearTimeout(previewTimer)
+  previewSequence += 1
+})
 
 const targetNode = computed(() => {
   const parentId = tabs.active?.newRequestParentId
@@ -271,14 +339,61 @@ onMounted(async () => {
       </AppAlert>
 
       <div v-if="curlMode" class="curl-form">
-        <label for="curl-command">cURL 命令</label>
-        <textarea id="curl-command" v-model="curlCommand" class="curl-input" spellcheck="false" placeholder="curl 'https://api.example.com/users' --header 'Accept: application/json'" />
+        <div class="curl-workspace">
+          <section class="curl-column">
+            <label for="curl-command">cURL 命令</label>
+            <textarea id="curl-command" v-model="curlCommand" class="curl-input" spellcheck="false" placeholder="curl 'https://api.example.com/users' --header 'Accept: application/json'" />
+          </section>
+          <section class="curl-column preview-column" aria-live="polite">
+            <div class="preview-label">
+              <span>解析预览</span>
+              <span v-if="previewLoading" class="preview-state">解析中…</span>
+            </div>
+            <NTabs v-if="previewSpec" v-model:value="previewTab" class="preview-tabs" type="line" size="small">
+              <NTabPane name="json" tab="JSON 参数">
+                <pre class="curl-preview">{{ previewText }}</pre>
+              </NTabPane>
+              <NTabPane name="visual" tab="可视化预览">
+                <div class="visual-preview">
+                  <div class="visual-row visual-request">
+                    <span :class="['visual-method', `method-${previewSpec.method.toLowerCase()}`]">{{ previewSpec.method }}</span>
+                    <code>{{ previewSpec.url }}</code>
+                  </div>
+                  <div class="visual-section">
+                    <h4>Query 参数</h4>
+                    <div v-if="visualParams.length" class="visual-list">
+                      <div v-for="item in visualParams" :key="`param-${item.key}`" class="visual-item"><code>{{ item.key }}</code><span>{{ item.value }}</span></div>
+                    </div>
+                    <p v-else class="visual-muted">无</p>
+                  </div>
+                  <div class="visual-section">
+                    <h4>Headers</h4>
+                    <div v-if="visualHeaders.length" class="visual-list">
+                      <div v-for="item in visualHeaders" :key="`header-${item.key}`" class="visual-item"><code>{{ item.key }}</code><span>{{ item.value }}</span></div>
+                    </div>
+                    <p v-else class="visual-muted">无</p>
+                  </div>
+                  <div class="visual-section"><h4>鉴权</h4><p class="visual-value">{{ visualAuth }}</p></div>
+                  <div class="visual-section"><h4>请求体</h4><pre class="visual-body">{{ visualBody }}</pre></div>
+                </div>
+              </NTabPane>
+            </NTabs>
+            <div v-else-if="previewError" class="preview-empty error">{{ previewError }}</div>
+            <div v-else class="preview-empty">{{ curlCommand.trim() ? '等待解析…' : '粘贴 cURL 命令后实时显示解析结果' }}</div>
+          </section>
+        </div>
         <AppAlert v-if="importWarnings.length" type="warning" :show-icon="false">
           {{ importWarnings.join('；') }}
         </AppAlert>
         <div class="curl-actions">
-          <AppButton secondary :disabled="actionBusy" @click="curlMode = false">返回</AppButton>
-          <AppButton type="primary" :loading="actionBusy" @click="applyCurlImport">导入请求</AppButton>
+          <AppButton secondary :disabled="actionBusy" @click="curlMode = false">
+            <template #icon><AppIcon :component="IconArrowLeft" :size="15" /></template>
+            返回
+          </AppButton>
+          <AppButton type="primary" :loading="actionBusy" @click="applyCurlImport">
+            <template #icon><AppIcon :component="IconCloudUpload" :size="15" /></template>
+            导入请求
+          </AppButton>
         </div>
       </div>
 
@@ -393,10 +508,38 @@ onMounted(async () => {
   padding: 0 16px 4px;
 }
 .curl-form { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 8px; padding: 8px 16px 16px; }
-.curl-form > label { color: var(--a-text-dim); font: var(--a-fw-medium) var(--a-fs-sm) var(--a-font-ui); }
+.curl-workspace { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+.curl-column { min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 6px; }
+.curl-column > label, .preview-label { color: var(--a-text-dim); font: var(--a-fw-medium) var(--a-fs-sm) var(--a-font-ui); }
+.preview-label { display: flex; justify-content: space-between; align-items: center; }
+.preview-state { color: var(--a-primary); font-size: var(--a-fs-xs); font-weight: var(--a-fw-normal); }
 .curl-input { flex: 1 1 auto; min-height: 180px; resize: none; box-sizing: border-box; background: var(--a-bg-3); border: 1px solid var(--a-border); border-radius: var(--a-radius-md); color: var(--a-text); padding: 10px; font: var(--a-fs-sm)/1.6 var(--a-font-mono); }
 .curl-input:focus { outline: 2px solid var(--a-focus); outline-offset: -2px; }
+.preview-tabs { flex: 1 1 auto; min-height: 180px; display: flex; flex-direction: column; }
+.preview-tabs :deep(.n-tabs-nav) { flex: 0 0 auto; margin-bottom: 6px; }
+.preview-tabs :deep(.n-tabs-pane-wrapper), .preview-tabs :deep(.n-tab-pane) { flex: 1 1 auto; min-height: 0; }
+.curl-preview { height: 100%; min-height: 180px; overflow: auto; box-sizing: border-box; margin: 0; padding: 10px; border: 1px solid var(--a-border); border-radius: var(--a-radius-md); background: var(--a-bg-3); color: var(--a-text); font: var(--a-fs-sm)/1.6 var(--a-font-mono); white-space: pre-wrap; word-break: break-word; }
+.visual-preview { height: 100%; min-height: 180px; overflow: auto; box-sizing: border-box; padding: 10px; border: 1px solid var(--a-border); border-radius: var(--a-radius-md); background: var(--a-bg-3); }
+.visual-request { display: flex; align-items: flex-start; gap: 8px; padding-bottom: 10px; border-bottom: 1px solid var(--a-border); }
+.visual-method { flex: 0 0 auto; padding: 2px 6px; border-radius: var(--a-radius-sm); background: var(--a-get-bg); color: var(--a-get); font: var(--a-fw-semibold) var(--a-fs-xs)/1.4 var(--a-font-mono); }
+.visual-method.method-post { background: var(--a-post-bg); color: var(--a-post); }
+.visual-method.method-put { background: var(--a-put-bg); color: var(--a-put); }
+.visual-method.method-patch { background: var(--a-patch-bg); color: var(--a-patch); }
+.visual-method.method-delete { background: var(--a-delete-bg); color: var(--a-delete); }
+.visual-request code { min-width: 0; color: var(--a-text); font: var(--a-fs-sm)/1.5 var(--a-font-mono); overflow-wrap: anywhere; }
+.visual-section { padding-top: 10px; }
+.visual-section h4 { margin: 0 0 5px; color: var(--a-text-dim); font: var(--a-fw-medium) var(--a-fs-xs)/1.4 var(--a-font-ui); }
+.visual-list { display: grid; gap: 4px; }
+.visual-item { display: grid; grid-template-columns: minmax(90px, 36%) minmax(0, 1fr); gap: 8px; font: var(--a-fs-xs)/1.5 var(--a-font-mono); }
+.visual-item code { overflow-wrap: anywhere; color: var(--a-primary-hover); }
+.visual-item span { overflow-wrap: anywhere; color: var(--a-text-soft); }
+.visual-muted, .visual-value { margin: 0; color: var(--a-text-faint); font: var(--a-fs-sm)/1.5 var(--a-font-ui); }
+.visual-value { color: var(--a-text-soft); }
+.visual-body { max-height: 180px; overflow: auto; margin: 0; padding: 7px; border-radius: var(--a-radius-sm); background: var(--a-bg-2); color: var(--a-text-soft); font: var(--a-fs-xs)/1.5 var(--a-font-mono); white-space: pre-wrap; word-break: break-word; }
+.preview-empty { flex: 1 1 auto; min-height: 180px; display: flex; align-items: center; justify-content: center; box-sizing: border-box; padding: 16px; border: 1px solid var(--a-border); border-radius: var(--a-radius-md); color: var(--a-text-faint); font: var(--a-fs-sm)/1.5 var(--a-font-ui); text-align: center; }
+.preview-empty.error { color: var(--a-danger); align-items: flex-start; justify-content: flex-start; text-align: left; white-space: pre-wrap; }
 .curl-actions { display: flex; justify-content: flex-end; gap: 8px; }
+@media (max-width: 720px) { .curl-workspace { grid-template-columns: minmax(0, 1fr); } }
 .gt {
   margin: 8px 0 6px;
   font: var(--a-fw-medium) var(--a-fs-xs) / 1 var(--a-font-ui);
