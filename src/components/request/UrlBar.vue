@@ -199,7 +199,7 @@ defineExpose({ focus: () => inputEl.value?.select() })
     <div class="request-input-group">
       <div class="request-editor" :class="{ focused: urlFocused }">
         <AppSelect
-          class="method-select"
+          :class="['method-select', `method-${String(tab?.method ?? 'GET').toLowerCase()}`]"
           :value="tab?.method ?? 'GET'"
           :options="METHODS.map((value) => ({ label: value, value }))"
           :render-label="renderMethodLabel"
@@ -314,8 +314,14 @@ defineExpose({ focus: () => inputEl.value?.select() })
   height: var(--url-inner-height);
   min-height: var(--url-inner-height);
   border: 0;
-  border-radius: var(--url-inner-radius);
-  background: color-mix(in srgb, var(--a-bg-2) 82%, var(--a-bg-3));
+  border-radius: var(--url-radius);
+  --n-border: transparent !important;
+  --n-border-hover: transparent !important;
+  --n-border-focus: transparent !important;
+  --n-box-shadow-hover: none !important;
+  --n-box-shadow-focus: none !important;
+  --n-box-shadow-active: none !important;
+  background: color-mix(in srgb, var(--a-primary) 14%, var(--a-bg-2));
   font-family: var(--a-font-mono);
   font-weight: var(--a-fw-semibold);
 }
@@ -325,9 +331,27 @@ defineExpose({ focus: () => inputEl.value?.select() })
   justify-content: center;
   height: 100%;
   border-radius: inherit;
-  background: transparent;
+  background: color-mix(in srgb, var(--a-primary) 14%, var(--a-bg-2));
   padding-right: 18px;
 }
+.method-select :deep(.n-base-selection:hover),
+.method-select :deep(.n-base-selection:focus),
+.method-select :deep(.n-base-selection--active),
+.method-select:focus-within :deep(.n-base-selection) {
+  border-color: transparent !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+.method-select.method-get :deep(.n-base-selection),
+.method-select.method-get :deep(.n-base-selection-label) { background: var(--a-get-bg); }
+.method-select.method-post :deep(.n-base-selection),
+.method-select.method-post :deep(.n-base-selection-label) { background: var(--a-post-bg); }
+.method-select.method-put :deep(.n-base-selection),
+.method-select.method-put :deep(.n-base-selection-label) { background: var(--a-put-bg); }
+.method-select.method-patch :deep(.n-base-selection),
+.method-select.method-patch :deep(.n-base-selection-label) { background: var(--a-patch-bg); }
+.method-select.method-delete :deep(.n-base-selection),
+.method-select.method-delete :deep(.n-base-selection-label) { background: var(--a-delete-bg); }
 .method-select :deep(.n-base-selection-label__render-label) {
   display: flex;
   align-items: center;
@@ -336,7 +360,19 @@ defineExpose({ focus: () => inputEl.value?.select() })
   line-height: 1;
   overflow: hidden;
 }
-.method-select :deep(.n-base-selection__arrow) { right: 5px; width: 16px; }
+.method-select :deep(.n-base-selection__arrow),
+.method-select :deep(.n-base-selection__arrow .n-icon),
+.method-select :deep(.n-base-selection__arrow svg) { right: 5px; width: 16px; color: currentColor !important; fill: currentColor; opacity: 1 !important; }
+.method-select.method-get :deep(.n-base-selection__arrow) { color: var(--a-get); }
+.method-select.method-post :deep(.n-base-selection__arrow) { color: var(--a-post); }
+.method-select.method-put :deep(.n-base-selection__arrow) { color: var(--a-put); }
+.method-select.method-patch :deep(.n-base-selection__arrow) { color: var(--a-patch); }
+.method-select.method-delete :deep(.n-base-selection__arrow) { color: var(--a-delete); }
+.method-select.method-get :deep(.n-base-selection), .method-select.method-get :deep(.n-base-suffix__arrow) { --n-arrow-color: var(--a-get) !important; }
+.method-select.method-post :deep(.n-base-selection), .method-select.method-post :deep(.n-base-suffix__arrow) { --n-arrow-color: var(--a-post) !important; }
+.method-select.method-put :deep(.n-base-selection), .method-select.method-put :deep(.n-base-suffix__arrow) { --n-arrow-color: var(--a-put) !important; }
+.method-select.method-patch :deep(.n-base-selection), .method-select.method-patch :deep(.n-base-suffix__arrow) { --n-arrow-color: var(--a-patch) !important; }
+.method-select.method-delete :deep(.n-base-selection), .method-select.method-delete :deep(.n-base-suffix__arrow) { --n-arrow-color: var(--a-delete) !important; }
 .method-select :deep(.n-base-suffix) { right: 4px; width: 18px; justify-content: center; }
 .environment-prefix {
   display: flex;
@@ -358,7 +394,7 @@ defineExpose({ focus: () => inputEl.value?.select() })
   color: var(--a-text-dim);
   cursor: pointer;
 }
-.environment-tag:hover { border-color: var(--a-primary); color: var(--a-text); }
+.environment-tag:hover { color: var(--a-text); }
 .environment-tag.active {
   background: color-mix(in srgb, var(--a-primary) 9%, var(--a-bg-2));
   color: var(--a-primary-hover);

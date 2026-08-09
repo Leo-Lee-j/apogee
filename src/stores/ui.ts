@@ -13,8 +13,8 @@ export type ThemeMode = 'dark' | 'light' | 'system'
  * 打开一个坏掉的布局。180 是「GET + 一个中等长度接口名」不省略号的下界。
  */
 export const SIDEBAR_MIN_W = 180
-export const SIDEBAR_MAX_W = 480
-export const SIDEBAR_DEFAULT_W = 296
+export const SIDEBAR_MAX_W = 360
+export const SIDEBAR_DEFAULT_W = 310
 
 /**
  * 请求区 / 响应区的比例边界。
@@ -24,7 +24,7 @@ export const SIDEBAR_DEFAULT_W = 296
  */
 export const SPLIT_MIN_RATIO = 1 / 3
 export const SPLIT_MAX_RATIO = 2 / 3
-export const SPLIT_DEFAULT_RATIO = 0.5
+export const SPLIT_DEFAULT_RATIO = 0.4
 
 /**
  * 主区的最小可用宽度。窗口窄到放不下「侧边栏上限 + 这个值」时，上限按窗口收紧。

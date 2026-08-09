@@ -407,6 +407,9 @@ async function copyText(text: string, success = '已复制') {
 .icon-button:hover { background: var(--a-hover); color: var(--a-text); }
 .pane { flex: 1 1 auto; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
 .error-state, .empty, .summary, .todo { padding: 16px; color: var(--a-text-dim); font-size: 12px; }
+.empty { flex: 1; display: grid; place-content: center; justify-items: center; gap: 4px; text-align: center; background: color-mix(in srgb, var(--a-bg-1) 72%, transparent); }
+.empty::before { content: '↗'; display: grid; place-items: center; width: 34px; height: 34px; margin-bottom: 8px; border: 1px solid var(--a-border); border-radius: 10px; color: var(--a-primary); font: 18px/1 var(--a-font-mono); background: var(--a-bg-2); }
+.empty p { margin: 0; }
 .error-state { overflow: auto; }
 .error-state h3 { margin: 0 0 8px; color: var(--a-error); font-size: 14px; }
 .error-message { margin: 0 0 6px; color: var(--a-text); font-size: 13px; }

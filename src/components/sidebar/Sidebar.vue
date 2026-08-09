@@ -17,7 +17,6 @@ import NaiveThemeScope from '@/components/NaiveThemeScope.vue'
 import {
   ROW_H,
   OVERSCAN,
-  methodColor,
   synthTree,
   visibleNodes,
   sortVisible,
@@ -616,7 +615,7 @@ defineExpose({
           <span class="node-icon" :class="{ folder: n.isFolder }">
             <AppIcon :component="n.isFolder ? (n.expanded ? IconFolderOpen : IconFolder) : IconApi" :size="15" />
           </span>
-          <span v-if="!n.isFolder" class="m" :style="{ color: methodColor[n.method!] ?? 'var(--a-head)' }">{{ n.method }}</span>
+          <span v-if="!n.isFolder" class="m method-badge" :class="`method-${String(n.method ?? 'GET').toLowerCase()}`">{{ n.method }}</span>
           <span class="name">{{ n.name }}</span>
         </div>
       </div>
@@ -750,7 +749,7 @@ defineExpose({
   font: 12px/normal var(--a-font-ui); color: var(--a-text-dim);
   white-space: nowrap; cursor: pointer;
 }
-.row:hover { background: var(--a-hover); color: var(--a-text); }
+.row:hover { background: var(--a-hover); color: var(--a-text); border-radius: 6px; }
 .row.selected:not(.active) { box-shadow: inset 2px 0 0 var(--a-border-strong); }
 .row.folder { color: var(--a-text); font-weight: 600; }
 /*
@@ -761,12 +760,7 @@ defineExpose({
  * 而「定位」按钮的全部意义就是让人一眼扫到它。
  * 用 box-shadow 画色条而不是 border-left，免得改变 padding 算出来的缩进。
  */
-.row.active {
-  background: transparent;
-  color: var(--a-text);
-  border: 1px solid var(--a-primary);
-  border-radius: var(--a-radius-md);
-}
+.row.active { background: var(--a-selected); color: var(--a-text); border: 0; border-radius: 6px; box-shadow: inset 2px 0 0 var(--a-primary); }
 .row.active:hover { background: var(--a-hover); }
 .row.active .node-icon { color: var(--a-primary) !important; }
 .node-icon {
@@ -778,6 +772,12 @@ defineExpose({
   color: var(--a-text-faint);
 }
 .node-icon.folder { color: var(--a-text-dim); }
+.m.method-badge { width: 40px; min-width: 40px; flex: 0 0 40px; height: 18px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 1px solid color-mix(in srgb, currentColor 22%, transparent); border-radius: 5px; font: 700 10px/18px var(--a-font-mono); letter-spacing: .02em; }
+.method-get { color: var(--a-get); background: var(--a-get-bg); }
+.method-post { color: var(--a-post); background: var(--a-post-bg); }
+.method-put { color: var(--a-put); background: var(--a-put-bg); }
+.method-patch { color: var(--a-patch); background: var(--a-patch-bg); }
+.method-delete { color: var(--a-delete); background: var(--a-delete-bg); }
 .m,
 .name {
   display: block;
@@ -785,7 +785,7 @@ defineExpose({
   height: auto;
   line-height: normal;
 }
-.m { font: 600 10px/normal var(--a-font-mono); width: 42px; }
+.m { font: 700 10px/normal var(--a-font-mono); width: 40px; }
 .name {
   flex: 1 1 auto;
   min-width: 0;

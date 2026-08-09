@@ -482,7 +482,7 @@ function patchAuth(delta: Record<string, string>) {
   font: inherit; height: 24px; padding: 0 8px; border-radius: 4px; cursor: pointer;
 }
 .tabs button:hover { background: var(--a-hover); color: var(--a-text); }
-.tabs button.on { color: var(--a-text); box-shadow: inset 0 -2px 0 var(--a-primary); border-radius: 0; }
+.tabs button.on { color: var(--a-primary); background: var(--a-selected); box-shadow: none; border-radius: 6px; }
 .tab-item { display: inline-flex; align-items: center; height: 100%; }
 .badge {
   font-size: var(--a-fs-xs); color: var(--a-text-faint);

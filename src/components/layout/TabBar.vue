@@ -14,6 +14,15 @@ const methodColor: Record<string, string> = {
   PATCH: 'var(--a-patch)',
   DELETE: 'var(--a-delete)',
 }
+
+function tabLabel(t: { title: string; url?: string; method?: string; kind: string; newPanel?: boolean }) {
+  if (t.kind !== 'request' || t.newPanel) return t.title
+  const path = (t.url || '').trim()
+  if (path) {
+    try { return `${t.method} ${new URL(path).pathname || '/'}` } catch { return `${t.method} ${path}` }
+  }
+  return `${t.method} ${t.title}`
+}
 </script>
 
 <template>
@@ -39,7 +48,7 @@ const methodColor: Record<string, string> = {
           :style="{ color: methodColor[t.method] ?? 'var(--a-head)' }"
         >{{ t.method }}</span>
         <span v-else class="page-icon" aria-hidden="true"><AppIcon :component="IconDocument" :size="13" /></span>
-        <span class="t">{{ t.title }}</span>
+        <span class="t">{{ tabLabel(t) }}</span>
         <span v-if="t.dirty" class="dot" aria-label="未保存">•</span>
         <span class="x" role="button" aria-label="关闭标签" @click.stop="tabs.close(t.id)"><AppIcon :component="IconClose" :size="13" /></span>
       </button>
@@ -85,7 +94,7 @@ const methodColor: Record<string, string> = {
   max-width: 220px;
   background: transparent;
   border: none;
-  border-right: 1px solid var(--a-border);
+  border-right: 0;
   color: var(--a-text-dim);
   font: inherit;
   cursor: pointer;
