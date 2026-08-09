@@ -7,6 +7,7 @@ import {
   AppButton,
   AppIcon,
   AppInput,
+  AppInputNumber,
   AppRadioGroup,
   AppSelect,
   AppTooltip,
@@ -15,6 +16,7 @@ import { IconFolderOpen } from '@/components/ui/icons'
 import NaiveThemeScope from '@/components/NaiveThemeScope.vue'
 import ParameterEditor from './ParameterEditor.vue'
 import VariableInput from './VariableInput.vue'
+import { booleanSetting, httpVersionSetting, numberSetting, settingBooleanValue } from '@/features/requestSettings'
 
 /**
  * 请求编辑区 —— v0.1 先落地 Params、Headers、Body 三条发送主链。
@@ -22,7 +24,7 @@ import VariableInput from './VariableInput.vue'
  * Tab store 使用 shallowRef + markRaw，不允许在这里直接 v-model 修改行对象；
  * 所有编辑都复制数组后通过 tabs.patch 整体替换，保证界面和发送状态同步。
  */
-const TABS = ['Params', 'Headers', 'Body', 'Auth', 'Scripts', 'Settings'] as const
+const TABS = ['Params', 'Headers', 'Body', 'Auth', 'Settings'] as const
 type PanelTab = (typeof TABS)[number]
 type RowField = 'params' | 'pathParams' | 'headers'
 type BodyType = Body['type']
@@ -324,6 +326,18 @@ function setAuthType(type: AuthType) {
 function patchAuth(delta: Record<string, string>) {
   patchTab({ auth: { ...auth.value, ...delta } as AuthConfig })
 }
+
+function patchBooleanSetting(field: 'followRedirects' | 'verifyTls', value: string | number | null) {
+  patchTab({ settings: { ...tab.value?.settings, [field]: booleanSetting(value) } })
+}
+
+function patchNumberSetting(field: 'timeoutMs' | 'maxRedirects', value: number | null) {
+  patchTab({ settings: { ...tab.value?.settings, [field]: numberSetting(value) } })
+}
+
+function patchVersion(value: string | number | null) {
+  patchTab({ settings: { ...tab.value?.settings, httpVersion: httpVersionSetting(value) } })
+}
 </script>
 
 <template>
@@ -365,16 +379,19 @@ function patchAuth(delta: Record<string, string>) {
           <p class="bulk-hint">每行一个参数；`key: value`，以 `//` 开头的行应用后禁用该参数。</p>
         </section>
         <template v-else>
-          <section v-for="section in editorSections" :key="section.kind" class="parameter-table">
-            <ParameterEditor
-              :rows="section.rows"
-              :allow-create="section.kind !== 'pathParams'"
-              @update-field="(index, field, value) => updateParameterField(section.kind, index, field, value)"
-              @update-enabled="(index, enabled) => updateRow(section.kind, index, { enabled })"
-              @set-all-enabled="setAllRowsEnabled(section.kind, $event)"
-              @remove="removeRow(section.kind, $event)"
-              @reorder="(from, to) => reorderRows(section.kind, from, to)"
-            />
+          <section v-for="section in editorSections" :key="section.kind" class="parameter-group">
+            <header class="section-head"><strong>{{ section.label }}</strong><span>{{ section.rows.length }} 项</span></header>
+            <div class="parameter-table">
+              <ParameterEditor
+                :rows="section.rows"
+                :allow-create="section.kind !== 'pathParams'"
+                @update-field="(index, field, value) => updateParameterField(section.kind, index, field, value)"
+                @update-enabled="(index, enabled) => updateRow(section.kind, index, { enabled })"
+                @set-all-enabled="setAllRowsEnabled(section.kind, $event)"
+                @remove="removeRow(section.kind, $event)"
+                @reorder="(from, to) => reorderRows(section.kind, from, to)"
+              />
+            </div>
           </section>
         </template>
       </template>
@@ -462,6 +479,32 @@ function patchAuth(delta: Record<string, string>) {
         </template>
       </section>
 
+      <section v-else-if="current === 'Settings'" class="config-block request-settings">
+        <header class="section-head"><strong>请求设置</strong><span>未设置的项目继承上级默认值</span></header>
+        <div class="settings-grid">
+          <label class="field-stack">
+            <span>超时（毫秒）</span>
+            <AppInputNumber :value="tab.settings.timeoutMs ?? null" :min="0" :step="1000" placeholder="继承" @update:value="patchNumberSetting('timeoutMs', $event)" />
+          </label>
+          <label class="field-stack">
+            <span>最大重定向次数</span>
+            <AppInputNumber :value="tab.settings.maxRedirects ?? null" :min="0" :max="20" :step="1" placeholder="继承" @update:value="patchNumberSetting('maxRedirects', $event)" />
+          </label>
+          <label class="field-stack">
+            <span>跟随重定向</span>
+            <AppSelect :value="settingBooleanValue(tab.settings.followRedirects)" :options="[{ label: '继承', value: 'inherit' }, { label: '开启', value: 'true' }, { label: '关闭', value: 'false' }]" @update:value="patchBooleanSetting('followRedirects', $event)" />
+          </label>
+          <label class="field-stack">
+            <span>TLS 证书校验</span>
+            <AppSelect :value="settingBooleanValue(tab.settings.verifyTls)" :options="[{ label: '继承', value: 'inherit' }, { label: '校验', value: 'true' }, { label: '忽略（不安全）', value: 'false' }]" @update:value="patchBooleanSetting('verifyTls', $event)" />
+          </label>
+          <label class="field-stack">
+            <span>HTTP 版本</span>
+            <AppSelect :value="tab.settings.httpVersion ?? 'inherit'" :options="[{ label: '继承', value: 'inherit' }, { label: 'HTTP/1.1', value: 'http1' }, { label: 'HTTP/2', value: 'http2' }]" @update:value="patchVersion($event)" />
+          </label>
+        </div>
+      </section>
+
       <p v-else class="todo">
         {{ current }} —— 当前切片暂未接入。
       </p>
@@ -510,8 +553,10 @@ function patchAuth(delta: Record<string, string>) {
   background: var(--a-bg-2);
 }
 .config-block + .config-block { margin-top: 8px; }
+.parameter-group { overflow: hidden; border: 1px solid var(--a-border); border-radius: var(--a-radius-md); background: var(--a-bg-2); }
+.parameter-group + .parameter-group { margin-top: 8px; }
+.parameter-group > .section-head span { margin-left: auto; color: var(--a-text-faint); font-size: 11px; font-weight: 400; }
 .parameter-table { min-width: 0; overflow-x: auto; padding: 8px; }
-.parameter-table + .parameter-table { margin-top: 8px; }
 .config-head, .section-head {
   display: flex; align-items: center; gap: 8px;
   min-height: 34px; padding: 0 10px;
@@ -589,9 +634,14 @@ function patchAuth(delta: Record<string, string>) {
 .auth-editor > .auth-kind { margin: -12px -12px 0; padding: 12px; border-bottom: 1px solid var(--a-border); }
 .auth-kind { grid-column: 1 / -1; max-width: 280px; }
 .auth-editor .editor-empty { padding: 0; grid-column: 1 / -1; }
+.request-settings { overflow: hidden; }
+.request-settings .section-head span { margin-left: auto; color: var(--a-text-faint); font-size: 11px; font-weight: 400; }
+.settings-grid { display: grid; grid-template-columns: repeat(2, minmax(180px, 1fr)); gap: 14px; padding: 12px; align-content: start; }
+.settings-grid :deep(.n-input-number), .settings-grid :deep(.n-select) { width: 100%; }
 .todo { padding: 12px; color: var(--a-text-dim); font-size: 12px; }
 @media (max-width: 720px) {
-  .graphql-grid, .auth-editor { grid-template-columns: 1fr; }
+  .graphql-grid, .auth-editor, .settings-grid { grid-template-columns: 1fr; }
   .graphql-grid label:last-child, .auth-kind { grid-column: 1; }
+  .request-settings .section-head span { display: none; }
 }
 </style>

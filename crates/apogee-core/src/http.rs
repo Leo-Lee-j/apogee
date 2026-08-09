@@ -58,8 +58,10 @@ pub fn build_url(spec: &RequestSpec) -> Result<String, AppError> {
         if param.key.is_empty() {
             continue;
         }
-        let placeholder = format!(":{}", param.key);
-        url = url.replace(&placeholder, &urlencoding_path(&param.value));
+        let encoded = urlencoding_path(&param.value);
+        url = url.replace(&format!("{{{{{}}}}}", param.key), &encoded);
+        url = url.replace(&format!(":{}", param.key), &encoded);
+        url = url.replace(&format!("{{{}}}", param.key), &encoded);
     }
 
     // query 参数
@@ -331,6 +333,13 @@ mod tests {
             build_url(&s).unwrap(),
             "https://a.test/users/42/repos/org/repo"
         );
+    }
+
+    #[test]
+    fn double_brace_path_params_are_not_environment_variables() {
+        let mut s = spec("https://a.test/users/{{id}}");
+        s.path_params = vec![kv("id", "42", true)];
+        assert_eq!(build_url(&s).unwrap(), "https://a.test/users/42");
     }
 
     #[test]

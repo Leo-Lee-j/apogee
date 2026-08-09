@@ -12,6 +12,7 @@
     "build:nocheck": "vite build",
     "preview": "vite preview",
     "typecheck": "vue-tsc --noEmit",
+    "test": "vitest run",
     "tauri": "tauri",
     "spike:s1": "pwsh -NoProfile -File scripts/measure-s1-windows.ps1 -Runs 20",
     "spike:s1:nobuild": "pwsh -NoProfile -File scripts/measure-s1-windows.ps1 -Runs 20 -SkipBuild",
@@ -48,6 +49,7 @@
     "unplugin-auto-import": "21.1.0",
     "unplugin-vue-components": "32.1.0",
     "vite": "8.1.5",
+    "vitest": "^4.1.10",
     "vue-tsc": "3.3.8"
   }
 }

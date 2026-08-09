@@ -2,15 +2,18 @@
 import { computed, nextTick, ref, useAttrs, watch } from 'vue'
 import { NInput, NPopover, type InputInst } from 'naive-ui'
 import { useWorkspaceStore } from '@/stores/workspace'
+import { resolveVariablePreview } from '@/features/variablePreview'
 
 defineOptions({ inheritAttrs: false })
 
 const props = withDefaults(defineProps<{
   value: string
   multiline?: boolean
+  variables?: boolean
   size?: 'small' | 'medium' | 'large'
 }>(), {
   multiline: false,
+  variables: true,
   size: 'medium',
 })
 
@@ -29,12 +32,15 @@ const query = ref('')
 const currentValue = ref(props.value)
 
 const variables = computed(() => {
+  if (!props.variables) return []
   const environment = workspace.activeEnvironment
   if (!environment) return []
 
-  return environment.variables
+  const items = environment.variables
     .filter((variable) => variable.enabled && variable.key.trim())
     .map((variable) => ({ key: variable.key.trim(), value: variable.value }))
+  if (environment.host.trim()) items.unshift({ key: 'host', value: environment.host.trim() })
+  return items.map((variable) => ({ ...variable, preview: resolveVariablePreview(variable.key, items) }))
 })
 
 const matches = computed(() => {
@@ -203,7 +209,9 @@ defineExpose({
         @mousedown.prevent="select(variable.key)"
       >
         <span class="variable-name">{{ variable.key }}</span>
-        <span class="variable-value">{{ variable.value || '空值' }}</span>
+        <span class="variable-value" :class="{ invalid: variable.preview.error }" :title="variable.preview.error || variable.preview.value">
+          {{ variable.preview.error || variable.preview.value || '空值' }}
+        </span>
       </button>
     </div>
   </NPopover>
@@ -260,4 +268,5 @@ defineExpose({
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.variable-value.invalid { color: var(--a-error); }
 </style>

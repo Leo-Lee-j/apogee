@@ -248,6 +248,7 @@ defineExpose({
           :bordered="false"
           placeholder="输入 URL，或粘贴 cURL 命令"
           :value="tab?.url ?? ''"
+          :variables="false"
           :input-props="{ spellcheck: false, autocomplete: 'off', 'aria-label': '请求地址' }"
           @update:value="onUrl"
           @keydown="onKeydown"

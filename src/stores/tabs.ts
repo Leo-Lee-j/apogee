@@ -79,9 +79,9 @@ function pathParamNames(url: string): string[] {
   const path = url.split(/[?#]/, 1)[0] ?? ''
   const names: string[] = []
   const seen = new Set<string>()
-  const pattern = /:([A-Za-z_][A-Za-z0-9_-]*)|(?<!\{)\{([A-Za-z_][A-Za-z0-9_-]*)\}(?!\})/g
+  const pattern = /\{\{([A-Za-z_][A-Za-z0-9_-]*)\}\}|:([A-Za-z_][A-Za-z0-9_-]*)|(?<!\{)\{([A-Za-z_][A-Za-z0-9_-]*)\}(?!\})/g
   for (const match of path.matchAll(pattern)) {
-    const name = match[1] ?? match[2]
+    const name = match[1] ?? match[2] ?? match[3]
     if (name && !seen.has(name)) {
       seen.add(name)
       names.push(name)

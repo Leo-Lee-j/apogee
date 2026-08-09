@@ -52,7 +52,9 @@ pub fn resolve_request(
     let resolver = Resolver::from_environment(environment)?;
     let mut resolved = spec.clone();
 
-    resolved.url = resolver.resolve_text(&spec.url)?;
+    // URL 中的 {{name}} 是路径参数语法，不是环境变量；其值由 path_params
+    // 在 HTTP 构造阶段替换。环境变量仍继续解析 Query/Header/Body/Auth。
+    resolved.url = spec.url.clone();
     if let Some(environment) = environment {
         resolved.url = with_environment_host(&resolved.url, &environment.host);
     }
@@ -324,7 +326,7 @@ mod tests {
         let env = environment(&[("host", "https://example.test"), ("token", "secret")]);
         let spec = RequestSpec {
             method: "POST".into(),
-            url: "{{host}}/:id".into(),
+            url: "{{host}}/{{id}}".into(),
             params: vec![KeyValue {
                 enabled: true,
                 key: "q".into(),
@@ -352,7 +354,7 @@ mod tests {
         };
 
         let resolved = resolve_request(&spec, Some(&env)).unwrap();
-        assert_eq!(resolved.url, "https://example.test/:id");
+        assert_eq!(resolved.url, "{{host}}/{{id}}");
         assert_eq!(resolved.params[0].value, "secret");
         match resolved.body {
             Body::Json { content } => assert_eq!(content, "{\"token\":\"secret\"}"),
@@ -384,7 +386,7 @@ mod tests {
         relative.url = "{{host}}/teams".into();
         assert_eq!(
             resolve_request(&relative, Some(&env)).unwrap().url,
-            "https://api.example.test/teams"
+            "https://api.example.test/{{host}}/teams"
         );
 
         relative.url = "https://override.example.test/status".into();
