@@ -22,6 +22,7 @@ const tabs = useTabsStore()
 const workspace = useWorkspaceStore()
 const panel = ref<HTMLElement | null>(null)
 const actionError = ref('')
+const actionNotice = ref('')
 const actionBusy = ref(false)
 const curlMode = ref(false)
 const curlCommand = ref('')
@@ -179,12 +180,10 @@ async function openPostmanImport() {
   const { open } = await import('@tauri-apps/plugin-dialog')
   const selected = await open({ multiple: false, filters: [{ name: 'Postman Collection', extensions: ['json'] }] })
   if (typeof selected !== 'string') return
-  const result = await ipc.postmanImportFile(selected)
-  if (!result.requests.length) { actionError.value = result.warnings.join('；'); return }
-  const first = result.requests[0]
-  const current = tabs.active
-  if (!current?.newPanel) return
-  tabs.patch(current.id, { title: first.name, method: first.spec.method, url: first.spec.url, params: first.spec.params, pathParams: first.spec.pathParams, headers: first.spec.headers, body: first.spec.body, auth: first.spec.auth, settings: first.spec.settings, newPanel: false, newRequestParentId: undefined, dirty: true })
+  const result = await ipc.postmanImportWorkspace(selected)
+  await workspace.load()
+  actionNotice.value = `已导入 ${result.importedRequests} 个请求和 ${result.importedFolders} 个文件夹`
+  if (result.warnings.length) actionNotice.value += `；${result.warnings.join('；')}`
 }
 
 const GROUPS: { title: string; items: NewOption[] }[] = [
@@ -225,7 +224,7 @@ const GROUPS: { title: string; items: NewOption[] }[] = [
         icon: 'import',
         run: openPostmanImport,
         badge: 'v0.2',
-        reason: '导入器排在 v0.2，先保证 MVP 请求链路完整。',
+        reason: '导入 Postman Collection 并保留文件夹层级。',
       },
     ],
   },
@@ -326,6 +325,10 @@ onMounted(async () => {
       </header>
 
       <p class="target" aria-live="polite">{{ targetHint }}</p>
+
+      <AppAlert v-if="actionNotice" type="success" class="action-notice" :show-icon="false" closable @close="actionNotice = ''">
+        {{ actionNotice }}
+      </AppAlert>
 
       <AppAlert
         v-if="actionError"

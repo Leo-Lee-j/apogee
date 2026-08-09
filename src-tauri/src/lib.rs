@@ -92,6 +92,7 @@ pub fn run() {
             commands::curl_import,
             commands::postman_import,
             commands::postman_import_file,
+            commands::postman_import_workspace,
         ])
         .setup(move |app| {
             let data_dir = app
@@ -834,6 +835,96 @@ mod commands {
                 .detail(e.to_string())
         })?;
         apogee_core::postman::import_json(&json)
+    }
+
+    #[derive(Debug, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct PostmanWorkspaceImportResult {
+        pub collection_id: Uuid,
+        pub imported_requests: usize,
+        pub imported_folders: usize,
+        pub warnings: Vec<String>,
+    }
+
+    /// Imports a Postman collection into the active workspace, preserving folder paths.
+    #[tauri::command]
+    pub fn postman_import_workspace(
+        state: State<'_, Arc<AppState>>,
+        workspace_id: String,
+        session_id: String,
+        path: String,
+    ) -> Result<PostmanWorkspaceImportResult, String> {
+        let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
+        let json = std::fs::read_to_string(&path)
+            .map_err(|error| format!("无法读取 Postman 文件: {error}"))?;
+        let imported =
+            apogee_core::postman::import_json(&json).map_err(|error| error.to_string())?;
+        if imported.requests.is_empty() {
+            return Err(imported
+                .warnings
+                .first()
+                .cloned()
+                .unwrap_or_else(|| "Postman 集合中没有可导入的请求".into()));
+        }
+        state
+            .with_workspace(workspace_id, session_id, |repository| {
+                use apogee_core::workspace::WorkspaceNodeKind;
+                use std::collections::HashMap;
+
+                let collection_snapshot = repository.create_collection(imported.name.clone())?;
+                let collection = collection_snapshot
+                    .nodes
+                    .iter()
+                    .rev()
+                    .find(|node| {
+                        matches!(node.kind, WorkspaceNodeKind::Collection)
+                            && node.name == imported.name
+                    })
+                    .ok_or_else(|| anyhow::anyhow!("导入集合创建后无法定位节点"))?;
+                let collection_id = collection.id;
+                let mut folders = HashMap::<String, Uuid>::new();
+                let mut imported_folders = 0;
+                let mut imported_requests = 0;
+
+                for item in &imported.requests {
+                    let mut parent_id = collection_id;
+                    let mut path_key = String::new();
+                    for folder_name in &item.folder {
+                        if !path_key.is_empty() {
+                            path_key.push('/');
+                        }
+                        path_key.push_str(folder_name);
+                        if let Some(id) = folders.get(&path_key) {
+                            parent_id = *id;
+                            continue;
+                        }
+                        let snapshot = repository.create_folder(parent_id, folder_name.clone())?;
+                        let folder = snapshot
+                            .nodes
+                            .iter()
+                            .rev()
+                            .find(|node| {
+                                node.parent_id == Some(parent_id)
+                                    && matches!(node.kind, WorkspaceNodeKind::Folder)
+                                    && node.name == *folder_name
+                            })
+                            .ok_or_else(|| anyhow::anyhow!("导入文件夹创建后无法定位节点"))?;
+                        folders.insert(path_key.clone(), folder.id);
+                        parent_id = folder.id;
+                        imported_folders += 1;
+                    }
+                    let request = repository.create_request(parent_id, item.name.clone())?;
+                    repository.save_request(request.id, item.name.clone(), item.spec.clone())?;
+                    imported_requests += 1;
+                }
+                Ok(PostmanWorkspaceImportResult {
+                    collection_id,
+                    imported_requests,
+                    imported_folders,
+                    warnings: imported.warnings.clone(),
+                })
+            })
+            .map_err(|error| error.to_string())
     }
 
     /// 读取当前工作区的扁平树。
