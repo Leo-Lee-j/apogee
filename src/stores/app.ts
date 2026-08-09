@@ -12,7 +12,7 @@ export const useAppStore = defineStore('app', () => {
   const busyWorkspaceId = ref<string | null>(null)
   const lastError = ref<AppError | null>(null)
   const createDialogOpen = ref(false)
-  const settings = ref<AppSettings>({ defaultWorkspaceRoot: '', openLastWorkspaceOnStart: false, showMemoryMonitor: true })
+  const settings = ref<AppSettings>({ defaultWorkspaceRoot: '', openLastWorkspaceOnStart: false, showMemoryMonitor: true, lowMemoryMode: false })
   let initialized = false
 
   async function refresh() {

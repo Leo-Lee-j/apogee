@@ -77,6 +77,105 @@ pub fn current() -> MemInfo {
 }
 
 #[cfg(windows)]
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct UnicodeString {
+    length: u16,
+    maximum_length: u16,
+    buffer: *const u16,
+}
+
+#[cfg(windows)]
+#[link(name = "ntdll")]
+unsafe extern "system" {
+    fn NtQueryInformationProcess(
+        process_handle: *mut std::ffi::c_void,
+        process_information_class: u32,
+        process_information: *mut std::ffi::c_void,
+        process_information_length: u32,
+        return_length: *mut u32,
+    ) -> i32;
+}
+
+/// Chromium 把子进程职责写进命令行的 `--type=`。ToolHelp 只提供 exe 名，
+/// 因此读取 PEB 中的 CommandLine；读取失败时保守归到 other。
+#[cfg(windows)]
+unsafe fn process_command_line(handle: *mut std::ffi::c_void) -> Option<String> {
+    use windows_sys::Win32::System::Diagnostics::Debug::ReadProcessMemory;
+
+    const PROCESS_BASIC_INFORMATION: u32 = 0;
+    const PEB_PROCESS_PARAMETERS_OFFSET: usize = if cfg!(target_pointer_width = "64") {
+        0x20
+    } else {
+        0x10
+    };
+    const COMMAND_LINE_OFFSET: usize = if cfg!(target_pointer_width = "64") {
+        0x70
+    } else {
+        0x40
+    };
+
+    unsafe fn read<T: Copy>(
+        handle: *mut std::ffi::c_void,
+        address: *const std::ffi::c_void,
+    ) -> Option<T> {
+        let mut value = std::mem::MaybeUninit::<T>::uninit();
+        if ReadProcessMemory(
+            handle,
+            address,
+            value.as_mut_ptr() as *mut _,
+            std::mem::size_of::<T>(),
+            std::ptr::null_mut(),
+        ) == 0
+        {
+            return None;
+        }
+        Some(value.assume_init())
+    }
+
+    let mut basic = [0usize; 6];
+    if NtQueryInformationProcess(
+        handle,
+        PROCESS_BASIC_INFORMATION,
+        basic.as_mut_ptr() as *mut _,
+        std::mem::size_of_val(&basic) as u32,
+        std::ptr::null_mut(),
+    ) < 0
+    {
+        return None;
+    }
+    let peb = basic[1] as *const u8;
+    let parameters: *const u8 = read(handle, peb.add(PEB_PROCESS_PARAMETERS_OFFSET) as *const _)?;
+    let command: UnicodeString = read(handle, parameters.add(COMMAND_LINE_OFFSET) as *const _)?;
+    if command.length == 0 || command.length > 32_768 || command.buffer.is_null() {
+        return None;
+    }
+    let mut chars = vec![0u16; command.length as usize / 2];
+    if ReadProcessMemory(
+        handle,
+        command.buffer as *const _,
+        chars.as_mut_ptr() as *mut _,
+        command.length as usize,
+        std::ptr::null_mut(),
+    ) == 0
+    {
+        return None;
+    }
+    Some(String::from_utf16_lossy(&chars))
+}
+
+#[cfg(windows)]
+fn webview_part(command_line: Option<&str>) -> usize {
+    match command_line {
+        Some(line) if line.contains("--type=renderer") => 2,
+        Some(line) if line.contains("--type=gpu-process") => 3,
+        Some(line) if line.contains("--type=utility") => 4,
+        Some(line) if !line.contains("--type=") => 1,
+        _ => 5,
+    }
+}
+
+#[cfg(windows)]
 pub fn current_app() -> AppMemInfo {
     use std::collections::{HashMap, HashSet};
     use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
@@ -141,7 +240,25 @@ pub fn current_app() -> AppMemInfo {
             private_bytes: 0,
         },
         AppMemoryPart {
-            kind: "webview",
+            kind: "browser",
+            process_count: 0,
+            working_set_bytes: 0,
+            private_bytes: 0,
+        },
+        AppMemoryPart {
+            kind: "renderer",
+            process_count: 0,
+            working_set_bytes: 0,
+            private_bytes: 0,
+        },
+        AppMemoryPart {
+            kind: "gpu",
+            process_count: 0,
+            working_set_bytes: 0,
+            private_bytes: 0,
+        },
+        AppMemoryPart {
+            kind: "utility",
             process_count: 0,
             working_set_bytes: 0,
             private_bytes: 0,
@@ -157,19 +274,21 @@ pub fn current_app() -> AppMemInfo {
         let Some((_, name)) = parents.get(&pid) else {
             continue;
         };
+        let handle = unsafe { OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, 0, pid) };
+        if handle.is_null() {
+            continue;
+        }
         let index = if pid == root {
             0
         } else if name.to_ascii_lowercase().contains("webview")
             || name.to_ascii_lowercase().contains("msedge")
         {
-            1
+            // WebView2 的 browser / renderer / GPU / utility 都共享同一个 exe 名，
+            // 只能通过命令行的 `--type` 继续区分。
+            webview_part(unsafe { process_command_line(handle) }.as_deref())
         } else {
-            2
+            5
         };
-        let handle = unsafe { OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, 0, pid) };
-        if handle.is_null() {
-            continue;
-        }
         let mut counters = unsafe { std::mem::zeroed::<PROCESS_MEMORY_COUNTERS_EX>() };
         let ok = unsafe {
             GetProcessMemoryInfo(

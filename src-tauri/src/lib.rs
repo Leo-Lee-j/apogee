@@ -34,6 +34,9 @@ pub fn run() {
         )
         .init();
 
+    let mut context = tauri::generate_context!();
+    apply_webview_runtime_settings(&mut context);
+
     let state = Arc::new(AppState::new().expect("初始化应用状态失败"));
     let proto_state = state.clone();
 
@@ -57,6 +60,7 @@ pub fn run() {
             commands::app_ready,
             commands::app_settings_load,
             commands::app_settings_save,
+            commands::app_restart,
             commands::spike_make_response,
             commands::get_response_meta,
             commands::index_response,
@@ -136,8 +140,40 @@ pub fn run() {
             });
             Ok(())
         })
-        .run(tauri::generate_context!())
+        .run(context)
         .expect("Tauri 应用启动失败");
+}
+
+/// Wry 在创建 WebView2 环境时将该配置直接交给 Runtime，故必须在 Tauri
+/// 创建窗口前写入 Context；进程环境变量不会可靠地覆盖这条路径。
+fn apply_webview_runtime_settings(context: &mut tauri::Context<tauri::Wry>) {
+    #[cfg(windows)]
+    {
+        // 性能量测台显式控制 GPU 开关，不能被用户偏好污染。
+        if std::env::var_os("APOGEE_SPIKE_AUTORUN").is_some() {
+            return;
+        }
+        let Some(app_data) = std::env::var_os("APPDATA") else {
+            return;
+        };
+        let settings_path = std::path::PathBuf::from(app_data)
+            .join(&context.config().identifier)
+            .join("settings.json");
+        let Ok(contents) = std::fs::read(&settings_path) else {
+            return;
+        };
+        let Ok(settings) = serde_json::from_slice::<app_settings::AppSettings>(&contents) else {
+            return;
+        };
+        if settings.low_memory_mode {
+            // 自定义 additionalBrowserArgs 会替代 Wry 默认参数，因此须保留默认
+            // 禁用项与自动播放策略，再追加低内存标志。
+            const LOW_MEMORY_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required --disable-gpu --disable-gpu-compositing";
+            for window in &mut context.config_mut().app.windows {
+                window.additional_browser_args = Some(LOW_MEMORY_ARGS.to_string());
+            }
+        }
+    }
 }
 
 /// 把 panic 信息打到 stderr + tracing。
@@ -453,6 +489,12 @@ mod commands {
         state
             .make_synthetic(target_bytes)
             .map_err(|e| e.to_string())
+    }
+
+    #[tauri::command]
+    pub fn app_restart(app: tauri::AppHandle) -> Result<(), String> {
+        app.request_restart();
+        Ok(())
     }
 
     #[tauri::command]

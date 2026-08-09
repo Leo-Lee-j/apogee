@@ -13,7 +13,10 @@ let timer: ReturnType<typeof setInterval> | null = null
 
 const partLabels: Record<AppMemoryPartKind, string> = {
   main: 'Apogee 主进程',
-  webview: 'WebView 渲染进程',
+  browser: 'WebView 浏览器进程',
+  renderer: 'WebView 渲染进程',
+  gpu: 'WebView GPU 进程',
+  utility: 'WebView 工具进程',
   other: '其他子进程',
 }
 
@@ -76,6 +79,7 @@ onBeforeUnmount(stopSampling)
       <p v-if="memory?.available" class="memory-caption">
         私有内存 · {{ memory.processCount }} 个进程
       </p>
+      <p v-if="app.settings.lowMemoryMode" class="memory-mode">低内存模式已开启</p>
       <div v-if="memory?.available" class="memory-parts">
         <div v-for="part in memory.parts" :key="part.kind" class="memory-part">
           <span>{{ partLabels[part.kind] }}<em v-if="part.processCount > 1"> ×{{ part.processCount }}</em></span>
@@ -129,6 +133,7 @@ onBeforeUnmount(stopSampling)
 .memory-heading { font-size: 13px; font-weight: var(--a-fw-semibold); }
 .memory-heading strong, .memory-part strong { font-family: var(--a-font-mono); font-variant-numeric: tabular-nums; }
 .memory-caption { margin: 5px 0 8px; color: var(--a-text-faint); line-height: 18px; }
+.memory-mode { margin: -2px 0 8px; color: var(--a-ok); font-size: 12px; line-height: 18px; }
 .memory-parts { display: grid; gap: 5px; padding-top: 8px; border-top: 1px solid var(--a-border); }
 .memory-part { color: var(--a-text-dim); }
 .memory-part strong { color: var(--a-text); font-weight: var(--a-fw-medium); }

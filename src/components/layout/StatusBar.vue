@@ -13,6 +13,7 @@ const tabs = useTabsStore()
 const ui = useUiStore()
 const app = useAppStore()
 const dirtyCount = computed(() => tabs.tabs.filter((t) => t.dirty).length)
+const layoutEnabled = computed(() => tabs.active?.kind === 'request' && !tabs.active.newPanel)
 const layoutLabel = computed(() => ({
   stacked: '上下分栏',
   'side-by-side': '左右分栏',
@@ -40,8 +41,9 @@ const layoutLabel = computed(() => ({
       quaternary
       circle
       size="small"
+      :disabled="!layoutEnabled"
       :aria-label="`切换内容区布局，当前：${layoutLabel}`"
-      :title="`${layoutLabel}，点击切换布局`"
+      :title="layoutEnabled ? `${layoutLabel}，点击切换布局` : '仅接口标签可用布局控制'"
       @click="ui.cycleLayout"
     >
       <template #icon>
@@ -77,4 +79,6 @@ const layoutLabel = computed(() => ({
   color: var(--a-text-faint);
 }
 .layout-toggle:hover { color: var(--a-text); }
+.layout-toggle:disabled { color: var(--a-text-ghost); cursor: not-allowed; opacity: 0.55; }
+.layout-toggle:disabled:hover { background: transparent; color: var(--a-text-ghost); }
 </style>

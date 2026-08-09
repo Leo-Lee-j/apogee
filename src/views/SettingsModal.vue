@@ -7,12 +7,14 @@ import {
   AppFormItem,
   AppInputNumber,
   AppInput,
+  AppPopconfirm,
   AppSelect,
   AppSwitch,
 } from '@/components/ui'
 import NaiveThemeScope from '@/components/NaiveThemeScope.vue'
 import { AppIcon } from '@/components/ui'
-import { IconFolderOpen, IconNetwork, IconPalette, IconReset, IconShield } from '@/components/ui/icons'
+import { IconFolderOpen, IconNetwork, IconPalette, IconReset, IconRestart, IconShield } from '@/components/ui/icons'
+import { ipc } from '@/ipc'
 import { useUiStore } from '@/stores/ui'
 import { useAppStore } from '@/stores/app'
 
@@ -57,6 +59,14 @@ async function setAutoOpen(value: boolean) {
 
 async function setMemoryMonitorVisible(value: boolean) {
   await app.saveSettings({ ...app.settings, showMemoryMonitor: value })
+}
+
+async function setLowMemoryMode(value: boolean) {
+  await app.saveSettings({ ...app.settings, lowMemoryMode: value })
+}
+
+async function restartApp() {
+  await ipc.appRestart()
 }
 </script>
 
@@ -112,6 +122,28 @@ async function setMemoryMonitorVisible(value: boolean) {
                     :value="app.settings.showMemoryMonitor"
                     @update:value="setMemoryMonitorVisible"
                   />
+                </AppFormItem>
+                <AppFormItem label="低内存模式">
+                  <div class="setting-switch">
+                    <AppSwitch
+                      :value="app.settings.lowMemoryMode"
+                      @update:value="setLowMemoryMode"
+                    />
+                    <span>关闭 GPU 硬件加速，将在下次启动后生效</span>
+                    <AppPopconfirm
+                      positive-text="重启"
+                      negative-text="取消"
+                      @positive-click="restartApp"
+                    >
+                      <template #trigger>
+                        <AppButton secondary size="small">
+                          <template #icon><AppIcon :component="IconRestart" :size="14" /></template>
+                          重启应用
+                        </AppButton>
+                      </template>
+                      重启将应用已保存的设置，未保存的请求编辑可能丢失。
+                    </AppPopconfirm>
+                  </div>
                 </AppFormItem>
               </AppForm>
             </section>
@@ -299,6 +331,7 @@ async function setMemoryMonitorVisible(value: boolean) {
   color: var(--a-text-dim);
 }
 .unit { margin-left: 8px; color: var(--a-text-faint); font: var(--a-fs-xs) var(--a-font-mono); }
+.setting-switch { display: flex; align-items: center; gap: 8px; color: var(--a-text-faint); font-size: 12px; line-height: 18px; }
 .settings-group :deep(.n-form-item:last-child) { margin-bottom: 0; }
 .settings-group :deep(.n-form-item-label) { color: var(--a-text-soft); font-weight: var(--a-fw-medium); }
 .settings-group :deep(.n-base-selection),

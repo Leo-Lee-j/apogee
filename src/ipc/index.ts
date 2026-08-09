@@ -92,7 +92,7 @@ export interface MemInfo {
   available: boolean
 }
 
-export type AppMemoryPartKind = 'main' | 'webview' | 'other'
+export type AppMemoryPartKind = 'main' | 'browser' | 'renderer' | 'gpu' | 'utility' | 'other'
 
 export interface AppMemoryPart {
   kind: AppMemoryPartKind
@@ -166,6 +166,7 @@ export interface AppSettings {
   defaultWorkspaceRoot: string
   openLastWorkspaceOnStart: boolean
   showMemoryMonitor: boolean
+  lowMemoryMode: boolean
 }
 
 export interface WorkspaceOpenResult {
@@ -279,6 +280,10 @@ export const ipc = {
 
   appSettingsSave(settings: AppSettings): Promise<AppSettings> {
     return call('app_settings_save', { settings })
+  },
+
+  appRestart(): Promise<void> {
+    return call('app_restart')
   },
   /** 生成一个用于压测的合成响应体（Spike S2 用，不是产品功能）。 */
   spikeMakeResponse(targetBytes: number): Promise<ResponseSummary> {
