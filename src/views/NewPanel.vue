@@ -23,6 +23,11 @@ const workspace = useWorkspaceStore()
 const panel = ref<HTMLElement | null>(null)
 const actionError = ref('')
 const actionNotice = ref('')
+const importAlert = ref<{
+  title: string
+  type: 'success' | 'warning' | 'error'
+  message: string
+} | null>(null)
 const actionBusy = ref(false)
 const curlMode = ref(false)
 const curlCommand = ref('')
@@ -116,6 +121,22 @@ interface NewOption {
   run?: () => void | Promise<void>
 }
 
+function actionErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error) return error.message
+  if (typeof error === 'string') return error
+  if (error && typeof error === 'object') {
+    const message = Reflect.get(error, 'message')
+    if (typeof message === 'string') return message
+    try {
+      const detail = JSON.stringify(error)
+      if (detail && detail !== '{}') return detail
+    } catch {
+      // A non-serializable IPC error should still leave a useful fallback.
+    }
+  }
+  return fallback
+}
+
 /** 选择快捷请求：把当前独立面板标签转换为空白请求编辑标签。 */
 function quickRequest() {
   tabs.resolveNewPanel()
@@ -176,25 +197,57 @@ async function applyCurlImport() {
 }
 
 async function openPostmanImport() {
+  actionError.value = ''
+  importAlert.value = null
+  try {
   if (!inTauri) { actionError.value = '请从 Apogee 桌面应用导入文件'; return }
   const { open } = await import('@tauri-apps/plugin-dialog')
   const selected = await open({ multiple: false, filters: [{ name: 'Postman Collection', extensions: ['json'] }] })
   if (typeof selected !== 'string') return
   const result = await ipc.postmanImportWorkspace(selected)
   await workspace.load()
+  const warningText = result.warnings.join('；')
+  importAlert.value = {
+    title: result.warnings.length ? '存在异常' : '导入成功',
+    type: result.warnings.length ? 'warning' : 'success',
+    message: `已导入 ${result.importedRequests} 个请求和 ${result.importedFolders} 个文件夹${warningText ? `；${warningText}` : ''}`,
+  }
   actionNotice.value = `已导入 ${result.importedRequests} 个请求和 ${result.importedFolders} 个文件夹`
   if (result.warnings.length) actionNotice.value += `；${result.warnings.join('；')}`
+  } catch (error) {
+    importAlert.value = {
+      title: '导入失败',
+      type: 'error',
+      message: actionErrorMessage(error, 'Import failed'),
+    }
+  }
 }
 
 async function openPostmanEnvironmentImport() {
+  actionError.value = ''
+  importAlert.value = null
+  try {
   if (!inTauri) { actionError.value = '请从 Apogee 桌面应用导入文件'; return }
   const { open } = await import('@tauri-apps/plugin-dialog')
   const selected = await open({ multiple: false, filters: [{ name: 'Postman Environment', extensions: ['json'] }] })
   if (typeof selected !== 'string') return
   const result = await ipc.postmanImportEnvironmentWorkspace(selected)
   await workspace.load()
+  const warningText = result.warnings.join('；')
+  importAlert.value = {
+    title: result.warnings.length ? '存在异常' : '导入成功',
+    type: result.warnings.length ? 'warning' : 'success',
+    message: `已导入环境“${result.environment.name}”及 ${result.environment.variables.length} 个变量${warningText ? `；${warningText}` : ''}`,
+  }
   actionNotice.value = `已导入环境“${result.environment.name}”及 ${result.environment.variables.length} 个变量`
   if (result.warnings.length) actionNotice.value += `；${result.warnings.join('；')}`
+  } catch (error) {
+    importAlert.value = {
+      title: '导入失败',
+      type: 'error',
+      message: actionErrorMessage(error, 'Import failed'),
+    }
+  }
 }
 
 const GROUPS: { title: string; items: NewOption[] }[] = [
@@ -346,10 +399,6 @@ onMounted(async () => {
 
       <p class="target" aria-live="polite">{{ targetHint }}</p>
 
-      <AppAlert v-if="actionNotice" type="success" class="action-notice" :show-icon="false" closable @close="actionNotice = ''">
-        {{ actionNotice }}
-      </AppAlert>
-
       <AppAlert
         v-if="actionError"
         class="action-error"
@@ -460,6 +509,18 @@ onMounted(async () => {
           </div>
         </section>
       </div>
+
+      <AppAlert
+        v-if="importAlert"
+        class="action-notice"
+        :title="importAlert.title"
+        :type="importAlert.type"
+        :show-icon="false"
+        closable
+        @close="importAlert = null"
+      >
+        {{ importAlert.message }}
+      </AppAlert>
 
       <footer class="ft">
         <span><kbd>Ctrl</kbd>+<kbd>T</kbd> 直接创建空白请求标签</span>
@@ -600,6 +661,7 @@ onMounted(async () => {
   font: var(--a-fw-medium) var(--a-fs-xs) / 16px var(--a-font-ui);
   white-space: nowrap;
 }
+.action-notice { flex: 0 0 auto; min-height: 36px; margin: 0 16px 4px; box-sizing: border-box; }
 .action-error { flex: 0 0 auto; margin: 0 16px 4px; }
 kbd {
   padding: 0 4px;

@@ -239,4 +239,73 @@ mod tests {
         assert!(!imported.environment.variables[1].enabled);
         assert_eq!(imported.warnings.len(), 1);
     }
+
+    #[test]
+    fn imports_nested_object_urls_and_skips_requests_without_a_url() {
+        let imported = import_json(
+            r#"{
+              "info": { "name": "blog-user" },
+              "item": [
+                {
+                  "name": "user",
+                  "item": [
+                    {
+                      "name": "login",
+                      "request": {
+                        "method": "POST",
+                        "url": { "raw": "http://127.0.0.1:8088/oauth/login" },
+                        "body": { "mode": "raw", "raw": "{\"username\":\"demo\"}" }
+                      }
+                    },
+                    {
+                      "name": "missing-url",
+                      "request": { "method": "GET" }
+                    }
+                  ]
+                },
+                {
+                  "name": "Security Oauth2",
+                  "item": [
+                    {
+                      "name": "授权码模式",
+                      "request": {
+                        "method": "POST",
+                        "url": { "raw": "http://localhost:8088/oauth/token" }
+                      }
+                    },
+                    {
+                      "name": "授权码模式",
+                      "request": {
+                        "method": "POST",
+                        "url": { "raw": "http://localhost:8088/oauth/token?grant_type=authorization_code" }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(imported.name, "blog-user");
+        assert_eq!(imported.requests.len(), 3);
+        assert_eq!(imported.requests[0].folder, vec!["user"]);
+        assert_eq!(imported.requests[0].spec.url, "http://127.0.0.1:8088/oauth/login");
+        assert!(matches!(
+            imported.requests[0].spec.body,
+            Body::Json { ref content } if content == "{\"username\":\"demo\"}"
+        ));
+        assert_eq!(
+            imported
+                .requests
+                .iter()
+                .filter(|request| request.name == "授权码模式")
+                .count(),
+            2
+        );
+        assert!(imported
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("missing-url")));
+    }
 }
