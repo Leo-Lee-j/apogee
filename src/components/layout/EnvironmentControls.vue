@@ -10,7 +10,7 @@ import {
   AppModal,
   AppPopconfirm,
 } from '@/components/ui'
-import { IconAdd, IconCopy, IconDelete } from '@/components/ui/icons'
+import { IconAdd, IconCopy, IconDelete, IconSettings } from '@/components/ui/icons'
 import NaiveThemeScope from '@/components/NaiveThemeScope.vue'
 
 const workspace = useWorkspaceStore()
@@ -131,6 +131,7 @@ async function finish() {
       :aria-expanded="open"
       @click="open = true"
     >
+      <template #icon><AppIcon :component="IconSettings" :size="15" /></template>
       环境配置
       <span v-if="workspace.activeEnvironmentDirty" class="dirty-dot" aria-label="有未保存修改" />
     </AppButton>

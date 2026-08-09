@@ -38,6 +38,7 @@ const S3Panel = defineAsyncComponent(() => import('@/spike/S3Panel.vue'))
 const ui = useUiStore()
 const tabs = useTabsStore()
 const workspace = useWorkspaceStore()
+const urlBar = ref<{ send: () => void } | null>(null)
 const historyMounted = ref(false)
 const paletteMounted = ref(false)
 
@@ -300,10 +301,15 @@ watch(
 )
 
 function onKeydown(e: KeyboardEvent) {
+  if (e.defaultPrevented) return
   const mod = e.ctrlKey || e.metaKey
   if (!mod) return
   const k = e.key.toLowerCase()
-  if (k === 'b') { e.preventDefault(); ui.sidebarVisible = !ui.sidebarVisible }
+  if (k === 'enter') {
+    if (tabs.active?.kind !== 'request' || ui.paletteOpen || ui.historyOpen || ui.saveAsOpen) return
+    e.preventDefault()
+    urlBar.value?.send()
+  } else if (k === 'b') { e.preventDefault(); ui.sidebarVisible = !ui.sidebarVisible }
   // Ctrl+T 是 1 步操作（02 文档 §1 第 3 条），直接创建并激活“新建请求”标签。
   else if (k === 't') { e.preventDefault(); tabs.openQuick() }
   else if (k === 'k') { e.preventDefault(); ui.paletteOpen = true }
@@ -355,7 +361,7 @@ function onKeydown(e: KeyboardEvent) {
       </template>
       <WorkspaceArea>
         <template #toolbar>
-          <UrlBar v-if="!ui.spikeOpen && activeKind === 'request' && !activeNewPanel" />
+          <UrlBar ref="urlBar" v-if="!ui.spikeOpen && activeKind === 'request' && !activeNewPanel" />
         </template>
 
         <div v-if="ui.spikeOpen" class="a-block spike">

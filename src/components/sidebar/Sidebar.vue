@@ -743,7 +743,7 @@ defineExpose({
 .scroller { flex: 1 1 auto; overflow-y: auto; overflow-x: hidden; min-height: 0; scrollbar-gutter: stable; }
 .spacer { position: relative; }
 .row {
-  position: absolute; left: 0; right: 0; height: 22px;
+  position: absolute; left: 0; right: 0; height: 25px;
   display: flex; align-items: center; gap: 5px;
   /* transform only positions the virtual row; the row owns vertical alignment. */
   font: 12px/normal var(--a-font-ui); color: var(--a-text-dim);

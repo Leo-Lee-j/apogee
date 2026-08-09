@@ -6,7 +6,7 @@ import { useTabsStore } from '@/stores/tabs'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { windowControls, type Unlisten } from '@/ipc'
 import { AppDropdown, AppIcon } from '@/components/ui'
-import { IconAdd, IconChevronDown, IconDocument, IconHistory, IconMoon, IconSettings, IconSun } from '@/components/ui/icons'
+import { IconAdd, IconChevronDown, IconDocument, IconFolder, IconHistory, IconMoon, IconSettings, IconSun } from '@/components/ui/icons'
 import { useAppStore } from '@/stores/app'
 
 /**
@@ -25,7 +25,13 @@ const CREATE_WORKSPACE_KEY = '__create_workspace__'
 const workspaceLabel = computed(() =>
   workspace.workspaceName || (workspace.loading ? '加载中…' : '本地草稿'),
 )
-const workspaceOptions = computed<DropdownOption[]>(() => [
+const workspaceOptions = computed(() => [
+  {
+    key: CREATE_WORKSPACE_KEY,
+    label: '新增工作区',
+    disabled: app.busyWorkspaceId !== null,
+  },
+  { type: 'divider', key: '__workspace_divider__' },
   ...app.workspaces
     .filter((item) => item.status === 'available')
     .map((item) => ({
@@ -34,11 +40,6 @@ const workspaceOptions = computed<DropdownOption[]>(() => [
       disabled: item.id === workspace.workspaceId || app.busyWorkspaceId !== null,
       workspacePath: item.path,
     })),
-  {
-    key: CREATE_WORKSPACE_KEY,
-    label: '新增工作区',
-    disabled: app.busyWorkspaceId !== null,
-  },
 ])
 
 function renderWorkspaceLabel(option: DropdownOption) {
@@ -139,7 +140,8 @@ onBeforeUnmount(() => stopWatching?.())
       @select="selectWorkspace"
     >
       <button class="chip" type="button" aria-label="切换工作区" title="切换工作区" @click.stop>
-        <span>工作区: {{ workspaceLabel }}</span>
+        <AppIcon :component="IconFolder" :size="14" />
+        <span>{{ workspaceLabel }}</span>
         <AppIcon class="caret" :component="IconChevronDown" :size="13" />
       </button>
     </AppDropdown>

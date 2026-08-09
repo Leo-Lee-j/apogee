@@ -12,7 +12,7 @@ import { useUiStore } from '@/stores/ui'
 import { useRequest } from '@/stores/request'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { AppButton, AppDropdown, AppIcon, AppSelect } from '@/components/ui'
-import { IconLink } from '@/components/ui/icons'
+import { IconLink, IconSave, IconSend } from '@/components/ui/icons'
 import NaiveThemeScope from '@/components/NaiveThemeScope.vue'
 import { saveCurrentRequest } from '@/features/saveRequest'
 import SaveToPicker from './SaveToPicker.vue'
@@ -155,6 +155,10 @@ function save() {
   void saveCurrentRequest()
 }
 
+function triggerSend() {
+  if (!sending.value) void send()
+}
+
 /** URL 中出现 :id / {id} 时自动创建对应的路径参数行。 */
 watch(
   () => tab.value?.url,
@@ -169,7 +173,7 @@ watch(
 function onKeydown(e: KeyboardEvent) {
   if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
     e.preventDefault()
-    if (!sending.value) send()
+    triggerSend()
   }
 }
 
@@ -190,7 +194,10 @@ watch(
   },
 )
 
-defineExpose({ focus: () => inputEl.value?.select() })
+defineExpose({
+  focus: () => inputEl.value?.select(),
+  send: triggerSend,
+})
 </script>
 
 <template>
@@ -254,12 +261,17 @@ defineExpose({ focus: () => inputEl.value?.select() })
       class="send"
       type="primary"
       size="medium"
+      :loading="sending"
       :disabled="sending"
-      @click="send"
+      @click="triggerSend"
     >
-      {{ sending ? '等待中…' : '发送' }}
+      <template #icon><AppIcon :component="IconSend" :size="16" /></template>
+      发送
     </AppButton>
-    <AppButton class="save" secondary size="medium" @click="save">保存</AppButton>
+    <AppButton class="save" secondary size="medium" @click="save">
+      <template #icon><AppIcon :component="IconSave" :size="16" /></template>
+      保存
+    </AppButton>
 
     <!-- 草稿保存：位置选择器（保存按钮与 Ctrl+S 共用，状态在 ui store） -->
     <SaveToPicker v-model:show="ui.saveAsOpen" />
