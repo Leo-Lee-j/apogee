@@ -93,6 +93,7 @@ pub fn run() {
             commands::postman_import,
             commands::postman_import_file,
             commands::postman_import_workspace,
+            commands::postman_import_environment_workspace,
         ])
         .setup(move |app| {
             let data_dir = app
@@ -921,6 +922,33 @@ mod commands {
                     collection_id,
                     imported_requests,
                     imported_folders,
+                    warnings: imported.warnings.clone(),
+                })
+            })
+            .map_err(|error| error.to_string())
+    }
+
+    /// Imports a Postman Environment export into the active workspace.
+    #[tauri::command]
+    pub fn postman_import_environment_workspace(
+        state: State<'_, Arc<AppState>>,
+        workspace_id: String,
+        session_id: String,
+        path: String,
+    ) -> Result<apogee_core::postman::PostmanEnvironmentImportResult, String> {
+        let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
+        let json = std::fs::read_to_string(&path)
+            .map_err(|error| format!("无法读取 Postman 文件: {error}"))?;
+        let imported = apogee_core::postman::import_environment_json(&json)
+            .map_err(|error| error.to_string())?;
+        state
+            .with_workspace(workspace_id, session_id, |repository| {
+                let created = repository.create_environment(imported.environment.name.clone())?;
+                let mut environment = imported.environment.clone();
+                environment.id = created.id;
+                let environment = repository.save_environment(environment)?;
+                Ok(apogee_core::postman::PostmanEnvironmentImportResult {
+                    environment,
                     warnings: imported.warnings.clone(),
                 })
             })

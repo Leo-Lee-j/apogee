@@ -186,6 +186,17 @@ async function openPostmanImport() {
   if (result.warnings.length) actionNotice.value += `；${result.warnings.join('；')}`
 }
 
+async function openPostmanEnvironmentImport() {
+  if (!inTauri) { actionError.value = '请从 Apogee 桌面应用导入文件'; return }
+  const { open } = await import('@tauri-apps/plugin-dialog')
+  const selected = await open({ multiple: false, filters: [{ name: 'Postman Environment', extensions: ['json'] }] })
+  if (typeof selected !== 'string') return
+  const result = await ipc.postmanImportEnvironmentWorkspace(selected)
+  await workspace.load()
+  actionNotice.value = `已导入环境“${result.environment.name}”及 ${result.environment.variables.length} 个变量`
+  if (result.warnings.length) actionNotice.value += `；${result.warnings.join('；')}`
+}
+
 const GROUPS: { title: string; items: NewOption[] }[] = [
   {
     title: '请求',
@@ -219,12 +230,21 @@ const GROUPS: { title: string; items: NewOption[] }[] = [
       },
       {
         id: 'file',
-        title: '从其他工具导入',
-        desc: 'Postman / OpenAPI / Insomnia / HAR',
+        title: '导入 Postman 集合',
+        desc: '保留集合、文件夹和请求层级',
         icon: 'import',
         run: openPostmanImport,
         badge: 'v0.2',
         reason: '导入 Postman Collection 并保留文件夹层级。',
+      },
+      {
+        id: 'environment',
+        title: '导入 Postman 环境',
+        desc: '导入环境名称、变量值和启用状态',
+        icon: 'import',
+        run: openPostmanEnvironmentImport,
+        badge: 'v0.2',
+        reason: '导入 Postman Environment，不猜测或改变 Host 语义。',
       },
     ],
   },

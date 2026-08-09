@@ -449,6 +449,9 @@ export const ipc = {
   postmanImportWorkspace(path: string): Promise<{ collectionId: string; importedRequests: number; importedFolders: number; warnings: string[] }> {
     return call('postman_import_workspace', { ...sessionArgs(), path })
   },
+  postmanImportEnvironmentWorkspace(path: string): Promise<{ environment: Environment; warnings: string[] }> {
+    return call('postman_import_environment_workspace', { ...sessionArgs(), path })
+  },
 }
 
 // ─────────────────────────────────────────────────────────────────────

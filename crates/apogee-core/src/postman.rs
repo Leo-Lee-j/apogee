@@ -1,6 +1,8 @@
 use crate::model::KeyValue;
 use crate::request::{AuthConfig, Body, RequestSpec};
+use crate::vars::{Environment, EnvironmentVariable};
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -15,6 +17,82 @@ pub struct PostmanImportResult {
     pub name: String,
     pub requests: Vec<ImportedRequest>,
     pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PostmanEnvironmentImportResult {
+    pub environment: Environment,
+    pub warnings: Vec<String>,
+}
+
+/// Imports the portable Postman Environment export format into an Apogee environment.
+///
+/// Postman's `initial` and `current` values can differ. Exported collections use the
+/// current value at runtime, so that is the only value we preserve. We intentionally do
+/// not infer a `host`: any key may be used as a URL fragment and guessing would change it.
+pub fn import_environment_json(
+    input: &str,
+) -> Result<PostmanEnvironmentImportResult, crate::error::AppError> {
+    let root: serde_json::Value = serde_json::from_str(input).map_err(|error| {
+        crate::error::AppError::new(
+            crate::error::ErrorKind::Parse,
+            "Postman Environment JSON 无效",
+        )
+        .detail(error.to_string())
+    })?;
+    let name = root
+        .get("name")
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("Imported Environment")
+        .to_string();
+    let values = root
+        .get("values")
+        .and_then(|value| value.as_array())
+        .ok_or_else(|| {
+            crate::error::AppError::new(
+                crate::error::ErrorKind::Parse,
+                "这不是 Postman Environment 导出文件",
+            )
+            .hint(crate::error::Hint::new(
+                "请选择包含 values 数组的 Postman Environment JSON 文件",
+            ))
+        })?;
+    let mut warnings = Vec::new();
+    let mut variables = Vec::new();
+    for value in values {
+        let Some(key) = value.get("key").and_then(|item| item.as_str()) else {
+            warnings.push("跳过了缺少 key 的环境变量".into());
+            continue;
+        };
+        if key.trim().is_empty() {
+            warnings.push("跳过了空名称的环境变量".into());
+            continue;
+        }
+        let current = value
+            .get("value")
+            .or_else(|| value.get("current"))
+            .and_then(|item| item.as_str())
+            .unwrap_or_default();
+        variables.push(EnvironmentVariable {
+            key: key.to_string(),
+            value: current.to_string(),
+            enabled: value
+                .get("enabled")
+                .and_then(|item| item.as_bool())
+                .unwrap_or(true),
+        });
+    }
+    Ok(PostmanEnvironmentImportResult {
+        environment: Environment {
+            id: Uuid::new_v4(),
+            name,
+            host: String::new(),
+            variables,
+        },
+        warnings,
+    })
 }
 
 pub fn import_json(input: &str) -> Result<PostmanImportResult, crate::error::AppError> {
@@ -132,4 +210,33 @@ fn rows(value: Option<&serde_json::Value>) -> Vec<KeyValue> {
             })
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn imports_postman_environment_current_values() {
+        let imported = import_environment_json(
+            r#"{
+          "name": "Staging",
+          "values": [
+            {"key": "baseUrl", "value": "https://staging.example.test", "enabled": true},
+            {"key": "token", "current": "abc", "enabled": false},
+            {"value": "ignored"}
+          ]
+        }"#,
+        )
+        .unwrap();
+
+        assert_eq!(imported.environment.name, "Staging");
+        assert_eq!(imported.environment.variables.len(), 2);
+        assert_eq!(
+            imported.environment.variables[0].value,
+            "https://staging.example.test"
+        );
+        assert!(!imported.environment.variables[1].enabled);
+        assert_eq!(imported.warnings.len(), 1);
+    }
 }
