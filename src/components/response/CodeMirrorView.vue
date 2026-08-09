@@ -44,6 +44,7 @@ export interface CmMetrics {
   loadedBytes: number
   totalBytes: number
   highlight: boolean
+  lightweight: boolean
   /** 装载后的 DOM 节点数，用于判断是否真的做了视口虚拟化 */
   domNodes: number
 }
@@ -160,6 +161,7 @@ async function mountEditor() {
       loadedBytes: chunk.bytes,
       totalBytes: chunk.totalBytes || props.totalBytes,
       highlight: props.highlight,
+      lightweight: lightweight.value,
       domNodes: host.value?.querySelectorAll('*').length ?? 0,
     }
     metrics.value = m
@@ -254,7 +256,7 @@ defineExpose({ metrics })
       · 建编辑器 {{ metrics.editorMs.toFixed(1) }}ms
       · 首帧 {{ metrics.firstPaintMs.toFixed(1) }}ms
       · DOM {{ metrics.domNodes }} 节点
-      · 高亮 {{ metrics.highlight ? '开' : '关' }}
+      · {{ metrics.lightweight ? '轻量模式' : `高亮 ${metrics.highlight ? '开' : '关'}` }}
     </div>
   </div>
 </template>
