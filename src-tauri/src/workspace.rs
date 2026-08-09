@@ -16,8 +16,8 @@
 //! 目录名只使用稳定 UUID，用户重命名不会移动路径；可读名称全部写在 YAML 中。
 
 use anyhow::{bail, Context, Result};
-use apogee_core::request::{AuthConfig, Body, RequestSettings, RequestSpec};
 use apogee_core::model::KeyValue;
+use apogee_core::request::{AuthConfig, Body, RequestSettings, RequestSpec};
 use apogee_core::response::ResponseSummary;
 use apogee_core::vars::Environment;
 use apogee_core::workspace::{
@@ -72,9 +72,19 @@ impl WorkspaceRepository {
     pub fn create_example(root: impl Into<PathBuf>) -> Result<Self> {
         let repository = Self::create(root, "示例工作区".to_string())?;
         let snapshot = repository.create_collection("示例 API 集合".to_string())?;
-        let collection = snapshot.nodes.iter().find(|n| matches!(n.kind, WorkspaceNodeKind::Collection)).map(|n| n.id).context("示例集合创建失败")?;
+        let collection = snapshot
+            .nodes
+            .iter()
+            .find(|n| matches!(n.kind, WorkspaceNodeKind::Collection))
+            .map(|n| n.id)
+            .context("示例集合创建失败")?;
         let folder_snapshot = repository.create_folder(collection, "请求类型示例".to_string())?;
-        let folder = folder_snapshot.nodes.iter().find(|n| n.name == "请求类型示例").map(|n| n.id).context("示例文件夹创建失败")?;
+        let folder = folder_snapshot
+            .nodes
+            .iter()
+            .find(|n| n.name == "请求类型示例")
+            .map(|n| n.id)
+            .context("示例文件夹创建失败")?;
         let methods = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
         for method in methods {
             let request = repository.create_request(folder, format!("{method} 请求"))?;
@@ -84,12 +94,57 @@ impl WorkspaceRepository {
             repository.save_request(request.id, request.name, spec)?;
         }
         let bodies = [
-            ("JSON 请求体", Body::Json { content: "{\"hello\":\"world\"}".to_string() }),
-            ("文本请求体", Body::Text { content: "hello".to_string(), content_type: "text/plain".to_string() }),
-            ("表单请求体", Body::FormData { rows: vec![KeyValue { enabled: true, key: "name".to_string(), value: "Apogee".to_string(), description: None, kind: apogee_core::model::ValueKind::Text }] }),
-            ("URL 编码请求体", Body::UrlEncoded { rows: vec![KeyValue { enabled: true, key: "name".to_string(), value: "Apogee".to_string(), description: None, kind: apogee_core::model::ValueKind::Text }] }),
-            ("GraphQL 请求体", Body::GraphQl { query: "query { anything }".to_string(), variables: "{}".to_string(), operation_name: None }),
-            ("二进制请求体模板", Body::Binary { path: PathBuf::new() }),
+            (
+                "JSON 请求体",
+                Body::Json {
+                    content: "{\"hello\":\"world\"}".to_string(),
+                },
+            ),
+            (
+                "文本请求体",
+                Body::Text {
+                    content: "hello".to_string(),
+                    content_type: "text/plain".to_string(),
+                },
+            ),
+            (
+                "表单请求体",
+                Body::FormData {
+                    rows: vec![KeyValue {
+                        enabled: true,
+                        key: "name".to_string(),
+                        value: "Apogee".to_string(),
+                        description: None,
+                        kind: apogee_core::model::ValueKind::Text,
+                    }],
+                },
+            ),
+            (
+                "URL 编码请求体",
+                Body::UrlEncoded {
+                    rows: vec![KeyValue {
+                        enabled: true,
+                        key: "name".to_string(),
+                        value: "Apogee".to_string(),
+                        description: None,
+                        kind: apogee_core::model::ValueKind::Text,
+                    }],
+                },
+            ),
+            (
+                "GraphQL 请求体",
+                Body::GraphQl {
+                    query: "query { anything }".to_string(),
+                    variables: "{}".to_string(),
+                    operation_name: None,
+                },
+            ),
+            (
+                "二进制请求体模板",
+                Body::Binary {
+                    path: PathBuf::new(),
+                },
+            ),
         ];
         for (name, body) in bodies {
             let request = repository.create_request(folder, name.to_string())?;
@@ -100,9 +155,27 @@ impl WorkspaceRepository {
             repository.save_request(request.id, request.name, spec)?;
         }
         let auths = [
-            ("Basic 认证", AuthConfig::Basic { username: "demo".to_string(), password: "password".to_string() }),
-            ("Bearer 认证", AuthConfig::Bearer { token: "demo-token".to_string() }),
-            ("API Key 认证", AuthConfig::ApiKey { key: "X-API-Key".to_string(), value: "demo-key".to_string(), location: apogee_core::request::ApiKeyIn::Header }),
+            (
+                "Basic 认证",
+                AuthConfig::Basic {
+                    username: "demo".to_string(),
+                    password: "password".to_string(),
+                },
+            ),
+            (
+                "Bearer 认证",
+                AuthConfig::Bearer {
+                    token: "demo-token".to_string(),
+                },
+            ),
+            (
+                "API Key 认证",
+                AuthConfig::ApiKey {
+                    key: "X-API-Key".to_string(),
+                    value: "demo-key".to_string(),
+                    location: apogee_core::request::ApiKeyIn::Header,
+                },
+            ),
         ];
         for (name, auth) in auths {
             let request = repository.create_request(folder, name.to_string())?;
@@ -119,7 +192,10 @@ impl WorkspaceRepository {
         if !root.join("apogee.yaml").is_file() {
             bail!("所选目录不是 Apogee 工作区：缺少 apogee.yaml");
         }
-        let repository = Self { root, runtime_root: None };
+        let repository = Self {
+            root,
+            runtime_root: None,
+        };
         repository.read_manifest()?;
         Ok(repository)
     }
@@ -131,7 +207,10 @@ impl WorkspaceRepository {
         }
         fs::create_dir_all(root.join("collections"))?;
         fs::create_dir_all(root.join(ENVIRONMENT_DIR))?;
-        let repository = Self { root, runtime_root: None };
+        let repository = Self {
+            root,
+            runtime_root: None,
+        };
         repository.create_default_workspace(name)?;
         Ok(repository)
     }
@@ -833,8 +912,7 @@ mod tests {
 
     #[test]
     fn deleting_environment_updates_manifest_and_removes_file() {
-        let root = std::env::temp_dir()
-            .join(format!("apogee-environment-test-{}", Uuid::new_v4()));
+        let root = std::env::temp_dir().join(format!("apogee-environment-test-{}", Uuid::new_v4()));
         let repository = WorkspaceRepository::create(&root, "测试工作区".into()).unwrap();
         let environment = repository.create_environment("待删除".into()).unwrap();
         let environment_path = repository.environment_path(environment.id);
@@ -852,8 +930,8 @@ mod tests {
 
     #[test]
     fn environment_host_is_validated_and_normalized_on_save() {
-        let root = std::env::temp_dir()
-            .join(format!("apogee-environment-host-test-{}", Uuid::new_v4()));
+        let root =
+            std::env::temp_dir().join(format!("apogee-environment-host-test-{}", Uuid::new_v4()));
         let repository = WorkspaceRepository::create(&root, "测试工作区".into()).unwrap();
         let mut environment = repository.create_environment("开发".into()).unwrap();
 
@@ -914,22 +992,42 @@ mod tests {
         for method in ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"] {
             assert!(requests.iter().any(|request| request.spec.method == method));
         }
-        assert!(requests.iter().any(|r| matches!(r.spec.body, Body::Json { .. })));
-        assert!(requests.iter().any(|r| matches!(r.spec.body, Body::Text { .. })));
-        assert!(requests.iter().any(|r| matches!(r.spec.body, Body::FormData { .. })));
-        assert!(requests.iter().any(|r| matches!(r.spec.body, Body::UrlEncoded { .. })));
-        assert!(requests.iter().any(|r| matches!(r.spec.body, Body::Binary { .. })));
-        assert!(requests.iter().any(|r| matches!(r.spec.body, Body::GraphQl { .. })));
-        assert!(requests.iter().any(|r| matches!(r.spec.auth, AuthConfig::Basic { .. })));
-        assert!(requests.iter().any(|r| matches!(r.spec.auth, AuthConfig::Bearer { .. })));
-        assert!(requests.iter().any(|r| matches!(r.spec.auth, AuthConfig::ApiKey { .. })));
+        assert!(requests
+            .iter()
+            .any(|r| matches!(r.spec.body, Body::Json { .. })));
+        assert!(requests
+            .iter()
+            .any(|r| matches!(r.spec.body, Body::Text { .. })));
+        assert!(requests
+            .iter()
+            .any(|r| matches!(r.spec.body, Body::FormData { .. })));
+        assert!(requests
+            .iter()
+            .any(|r| matches!(r.spec.body, Body::UrlEncoded { .. })));
+        assert!(requests
+            .iter()
+            .any(|r| matches!(r.spec.body, Body::Binary { .. })));
+        assert!(requests
+            .iter()
+            .any(|r| matches!(r.spec.body, Body::GraphQl { .. })));
+        assert!(requests
+            .iter()
+            .any(|r| matches!(r.spec.auth, AuthConfig::Basic { .. })));
+        assert!(requests
+            .iter()
+            .any(|r| matches!(r.spec.auth, AuthConfig::Bearer { .. })));
+        assert!(requests
+            .iter()
+            .any(|r| matches!(r.spec.auth, AuthConfig::ApiKey { .. })));
         fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
     fn legacy_history_moves_to_application_runtime_directory() {
-        let root = std::env::temp_dir().join(format!("apogee-history-migration-{}", Uuid::new_v4()));
-        let runtime = std::env::temp_dir().join(format!("apogee-runtime-migration-{}", Uuid::new_v4()));
+        let root =
+            std::env::temp_dir().join(format!("apogee-history-migration-{}", Uuid::new_v4()));
+        let runtime =
+            std::env::temp_dir().join(format!("apogee-runtime-migration-{}", Uuid::new_v4()));
         let repository = WorkspaceRepository::create(&root, "测试工作区".into()).unwrap();
         let response_id = Uuid::new_v4();
         let source = root.join("source.body");
@@ -948,7 +1046,10 @@ mod tests {
         assert!(!root.join(HISTORY_DIR).exists());
         assert!(runtime.join(HISTORY_DIR).is_dir());
         assert_eq!(repository.list_history().unwrap().len(), 1);
-        assert_eq!(fs::read(repository.read_history(response_id).unwrap().1).unwrap(), b"runtime-history");
+        assert_eq!(
+            fs::read(repository.read_history(response_id).unwrap().1).unwrap(),
+            b"runtime-history"
+        );
         fs::remove_dir_all(root).unwrap();
         fs::remove_dir_all(runtime).unwrap();
     }

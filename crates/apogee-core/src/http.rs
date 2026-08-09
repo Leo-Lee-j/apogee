@@ -684,7 +684,11 @@ fn client_for(settings: &ResolvedSettings) -> Result<reqwest::Client, AppError> 
         // 不能因为「省事」而默认放开。
         .danger_accept_invalid_certs(!settings.verify_tls);
 
-    if let Some(proxy_url) = settings.proxy_url.as_deref().filter(|value| !value.trim().is_empty()) {
+    if let Some(proxy_url) = settings
+        .proxy_url
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    {
         let proxy = reqwest::Proxy::all(proxy_url).map_err(|error| {
             AppError::new(ErrorKind::Parse, "代理地址无效")
                 .detail(error.to_string())

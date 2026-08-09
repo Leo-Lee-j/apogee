@@ -11,8 +11,8 @@
 //!    窗口以 `visible: false` 创建，前端首帧就绪后调 `app_ready` 再 show，
 //!    避免白屏闪烁。带兜底超时，防止前端异常导致窗口永远不出现。
 
-mod mem;
 mod app_settings;
+mod mem;
 mod protocol;
 mod state;
 mod workspace;
@@ -108,7 +108,8 @@ pub fn run() {
                     let legacy = workspace::WorkspaceRepository::open(&legacy_root)?;
                     registry.register(&legacy)?;
                 }
-                let example_root = std::path::PathBuf::from(&settings.default_workspace_root).join("example-workspace");
+                let example_root = std::path::PathBuf::from(&settings.default_workspace_root)
+                    .join("example-workspace");
                 if !example_root.exists() {
                     let example = workspace::WorkspaceRepository::create_example(example_root)?;
                     registry.register(&example)?;
@@ -151,8 +152,8 @@ fn install_panic_hook() {
 }
 
 mod commands {
-    use crate::app_settings::{AppSettings, AppSettingsRepository};
     use super::state::AppState;
+    use crate::app_settings::{AppSettings, AppSettingsRepository};
     use crate::workspace::WorkspaceRepository;
     use crate::workspace::{HistoryEntry, HistoryRecord};
     use crate::workspace_registry::{WorkspaceDescriptor, WorkspaceRegistry};
@@ -189,11 +190,16 @@ mod commands {
     #[tauri::command]
     pub fn app_settings_load(app: tauri::AppHandle) -> Result<AppSettings, String> {
         let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-        AppSettingsRepository::new(&dir).load().map_err(|e| e.to_string())
+        AppSettingsRepository::new(&dir)
+            .load()
+            .map_err(|e| e.to_string())
     }
 
     #[tauri::command]
-    pub fn app_settings_save(app: tauri::AppHandle, settings: AppSettings) -> Result<AppSettings, String> {
+    pub fn app_settings_save(
+        app: tauri::AppHandle,
+        settings: AppSettings,
+    ) -> Result<AppSettings, String> {
         let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
         let repo = AppSettingsRepository::new(&dir);
         repo.save(&settings).map_err(|e| e.to_string())?;
@@ -216,21 +222,37 @@ mod commands {
             Some(path) => PathBuf::from(path),
             None => {
                 let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-                let settings = AppSettingsRepository::new(&data_dir).load().map_err(|e| e.to_string())?;
-                let slug: String = name.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).collect();
-                let slug = if slug.trim_matches('_').is_empty() { "workspace".to_string() } else { slug.trim_matches('_').to_string() };
+                let settings = AppSettingsRepository::new(&data_dir)
+                    .load()
+                    .map_err(|e| e.to_string())?;
+                let slug: String = name
+                    .chars()
+                    .map(|c| {
+                        if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                            c
+                        } else {
+                            '_'
+                        }
+                    })
+                    .collect();
+                let slug = if slug.trim_matches('_').is_empty() {
+                    "workspace".to_string()
+                } else {
+                    slug.trim_matches('_').to_string()
+                };
                 let base = slug;
                 let mut candidate = PathBuf::from(&settings.default_workspace_root).join(&base);
                 let mut suffix = 2;
                 while candidate.exists() {
-                    candidate = PathBuf::from(&settings.default_workspace_root).join(format!("{base}-{suffix}"));
+                    candidate = PathBuf::from(&settings.default_workspace_root)
+                        .join(format!("{base}-{suffix}"));
                     suffix += 1;
                 }
                 candidate
             }
         };
-        let repository = WorkspaceRepository::create(root, name)
-            .map_err(|error| error.to_string())?;
+        let repository =
+            WorkspaceRepository::create(root, name).map_err(|error| error.to_string())?;
         open_repository(&app, &state, repository)
     }
 
@@ -797,13 +819,20 @@ mod commands {
     }
 
     #[tauri::command]
-    pub fn postman_import(json: String) -> Result<apogee_core::postman::PostmanImportResult, AppError> {
+    pub fn postman_import(
+        json: String,
+    ) -> Result<apogee_core::postman::PostmanImportResult, AppError> {
         apogee_core::postman::import_json(&json)
     }
 
     #[tauri::command]
-    pub fn postman_import_file(path: String) -> Result<apogee_core::postman::PostmanImportResult, AppError> {
-        let json = std::fs::read_to_string(path).map_err(|e| AppError::new(apogee_core::error::ErrorKind::Io, "无法读取 Postman 文件").detail(e.to_string()))?;
+    pub fn postman_import_file(
+        path: String,
+    ) -> Result<apogee_core::postman::PostmanImportResult, AppError> {
+        let json = std::fs::read_to_string(path).map_err(|e| {
+            AppError::new(apogee_core::error::ErrorKind::Io, "无法读取 Postman 文件")
+                .detail(e.to_string())
+        })?;
         apogee_core::postman::import_json(&json)
     }
 

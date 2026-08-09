@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
-use crate::workspace::WorkspaceRepository;
 use crate::app_settings::clean_windows_path;
+use crate::workspace::WorkspaceRepository;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -106,9 +106,10 @@ impl WorkspaceRegistry {
     }
 
     pub fn relocate(&self, id: Uuid, path: impl AsRef<Path>) -> Result<WorkspaceDescriptor> {
-        let root = path.as_ref().canonicalize().with_context(|| {
-            format!("无法解析工作区路径：{}", path.as_ref().display())
-        })?;
+        let root = path
+            .as_ref()
+            .canonicalize()
+            .with_context(|| format!("无法解析工作区路径：{}", path.as_ref().display()))?;
         let repository = WorkspaceRepository::open(&root)?;
         if repository.id()? != id {
             anyhow::bail!("所选目录的工作区 id 与记录不匹配");
@@ -187,7 +188,10 @@ mod tests {
             descriptor.path,
             clean_windows_path(&moved.canonicalize().unwrap().to_string_lossy())
         );
-        assert!(matches!(registry.find(id).unwrap().status, WorkspaceStatus::Available));
+        assert!(matches!(
+            registry.find(id).unwrap().status,
+            WorkspaceStatus::Available
+        ));
         std::fs::remove_dir_all(root).unwrap();
     }
 }

@@ -75,7 +75,10 @@ impl AppState {
         // 无论点哪个工作区都进不去。
         let replaced = guard.is_some();
         let spool = Spool::new(runtime_root.as_ref().join("responses"))?;
-        *self.spool.write().unwrap_or_else(|poisoned| poisoned.into_inner()) = spool;
+        *self
+            .spool
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = spool;
         *guard = Some(WorkspaceSession {
             id: session_id,
             workspace_id,
@@ -221,7 +224,11 @@ impl AppState {
             }))
             .chain(std::iter::once(tail.as_slice()));
 
-        let spool = self.spool.read().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
+        let spool = self
+            .spool
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
         let size = spool.write_stream(id, chunks)?;
         let gen_ms = t0.elapsed().as_secs_f64() * 1000.0;
 
@@ -306,7 +313,11 @@ impl AppState {
         mut summary: ResponseSummary,
         body: &std::path::Path,
     ) -> Result<ResponseSummary> {
-        let spool = self.spool.read().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
+        let spool = self
+            .spool
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
         let target = spool.path_for(summary.id);
         if !target.exists() {
             std::fs::copy(body, &target)
@@ -336,7 +347,11 @@ impl AppState {
     /// mmap 只建立虚拟地址映射，不把完整 body 复制到 Rust 堆；索引构建结束后立即解除映射，
     /// 常驻内存只剩固定 32 字节/节点的元数据和去重后的对象键。
     pub fn index_response(&self, id: Uuid) -> Result<ResponseSummary> {
-        let spool = self.spool.read().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
+        let spool = self
+            .spool
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
         let path = spool.path_for(id);
         let file = File::open(&path)
             .with_context(|| format!("打开响应 spool 失败：{}", path.display()))?;
@@ -358,7 +373,11 @@ impl AppState {
         offset: usize,
         limit: usize,
     ) -> Result<Vec<TreeNode>> {
-        let spool = self.spool.read().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
+        let spool = self
+            .spool
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
         let index = self
             .store
             .index(id)
@@ -466,7 +485,9 @@ mod tests {
                 repository.snapshot()
             })
             .unwrap();
-        state.close_workspace(second_workspace, second_session).unwrap();
+        state
+            .close_workspace(second_workspace, second_session)
+            .unwrap();
 
         std::fs::remove_dir_all(root).unwrap();
     }

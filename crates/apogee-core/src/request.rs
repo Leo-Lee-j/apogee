@@ -23,16 +23,24 @@ pub enum Body {
     #[default]
     None,
     /// 原文直传，不做 JSON 校验 —— 调试时经常要故意发不合法的 JSON 看服务端反应。
-    Json { content: String },
+    Json {
+        content: String,
+    },
     #[serde(rename_all = "camelCase")]
     Text {
         content: String,
         content_type: String,
     },
     /// `kind == File` 时 `value` 是文件路径，由 HTTP 层流式读取。
-    FormData { rows: Vec<KeyValue> },
-    UrlEncoded { rows: Vec<KeyValue> },
-    Binary { path: PathBuf },
+    FormData {
+        rows: Vec<KeyValue>,
+    },
+    UrlEncoded {
+        rows: Vec<KeyValue>,
+    },
+    Binary {
+        path: PathBuf,
+    },
     #[serde(rename_all = "camelCase")]
     GraphQl {
         query: String,
@@ -94,8 +102,13 @@ pub enum AuthConfig {
     #[default]
     Inherit,
     None,
-    Basic { username: String, password: String },
-    Bearer { token: String },
+    Basic {
+        username: String,
+        password: String,
+    },
+    Bearer {
+        token: String,
+    },
     #[serde(rename_all = "camelCase")]
     ApiKey {
         key: String,
@@ -190,7 +203,10 @@ impl RequestSettings {
             http_version: self.http_version.unwrap_or(base.http_version),
             proxy_url: self.proxy_url.clone().or(base.proxy_url),
             retry_count: self.retry_count.unwrap_or(base.retry_count).min(10),
-            retry_backoff_ms: self.retry_backoff_ms.unwrap_or(base.retry_backoff_ms).min(60_000),
+            retry_backoff_ms: self
+                .retry_backoff_ms
+                .unwrap_or(base.retry_backoff_ms)
+                .min(60_000),
         }
     }
 }

@@ -85,13 +85,15 @@ impl Resolver {
                 if key.is_empty() {
                     continue;
                 }
-                if values.insert(key.to_string(), variable.value.clone()).is_some() {
-                    return Err(AppError::new(
-                        ErrorKind::Var,
-                        format!("环境变量名重复：{key}"),
-                    )
-                    .detail(format!("环境「{}」中有多个同名变量。", environment.name))
-                    .hint(Hint::new("删除重复变量，或为变量改名后再发送")));
+                if values
+                    .insert(key.to_string(), variable.value.clone())
+                    .is_some()
+                {
+                    return Err(
+                        AppError::new(ErrorKind::Var, format!("环境变量名重复：{key}"))
+                            .detail(format!("环境「{}」中有多个同名变量。", environment.name))
+                            .hint(Hint::new("删除重复变量，或为变量改名后再发送")),
+                    );
                 }
             }
             let host = environment.host.trim().trim_end_matches('/');
@@ -123,7 +125,10 @@ impl Resolver {
             let value_start = start + 2;
             let relative_end = text[value_start..].find("}}").ok_or_else(|| {
                 AppError::new(ErrorKind::Var, "变量占位符没有闭合")
-                    .detail(format!("从第 {} 个字符开始的 `{{{{` 没有对应的 `}}}}`。", start + 1))
+                    .detail(format!(
+                        "从第 {} 个字符开始的 `{{{{` 没有对应的 `}}}}`。",
+                        start + 1
+                    ))
                     .hint(Hint::new("检查变量语法，格式应为 {{variable}}"))
             })?;
             let end = value_start + relative_end;
@@ -255,10 +260,7 @@ impl Resolver {
 fn with_environment_host(url: &str, host: &str) -> String {
     let url = url.trim();
     let host = host.trim().trim_end_matches('/');
-    if url.is_empty()
-        || host.is_empty()
-        || url::Url::parse(url).is_ok()
-    {
+    if url.is_empty() || host.is_empty() || url::Url::parse(url).is_ok() {
         return url.to_string();
     }
     if url.starts_with('/') {
@@ -291,8 +293,14 @@ mod tests {
 
     #[test]
     fn resolves_nested_variables() {
-        let env = environment(&[("host", "api.example.test"), ("base", "https://{{host}}/v1")]);
-        assert_eq!(resolve_text("{{base}}/users", Some(&env)).unwrap(), "https://api.example.test/v1/users");
+        let env = environment(&[
+            ("host", "api.example.test"),
+            ("base", "https://{{host}}/v1"),
+        ]);
+        assert_eq!(
+            resolve_text("{{base}}/users", Some(&env)).unwrap(),
+            "https://api.example.test/v1/users"
+        );
     }
 
     #[test]
@@ -314,8 +322,16 @@ mod tests {
             name: "重复".into(),
             host: String::new(),
             variables: vec![
-                EnvironmentVariable { key: "x".into(), value: "1".into(), enabled: true },
-                EnvironmentVariable { key: "x".into(), value: "2".into(), enabled: true },
+                EnvironmentVariable {
+                    key: "x".into(),
+                    value: "1".into(),
+                    enabled: true,
+                },
+                EnvironmentVariable {
+                    key: "x".into(),
+                    value: "2".into(),
+                    enabled: true,
+                },
             ],
         };
         assert!(resolve_text("{{x}}", Some(&duplicate)).is_err());
@@ -348,8 +364,12 @@ mod tests {
                 description: None,
                 kind: crate::model::ValueKind::Text,
             }],
-            body: Body::Json { content: "{\"token\":\"{{token}}\"}".into() },
-            auth: AuthConfig::Bearer { token: "{{token}}".into() },
+            body: Body::Json {
+                content: "{\"token\":\"{{token}}\"}".into(),
+            },
+            auth: AuthConfig::Bearer {
+                token: "{{token}}".into(),
+            },
             settings: Default::default(),
         };
 
