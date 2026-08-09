@@ -63,6 +63,9 @@ const loadedBytes = ref(0)
 const lastText = ref('')
 
 const transformed = computed(() => mode.value !== 'raw')
+// 大文档的主要成本来自编辑器扩展维护的索引，而不是可见行本身。
+// 超过 512 KB 时保留行号与换行，关闭折叠、搜索和活动行等高开销扩展。
+const lightweight = computed(() => props.totalBytes > 512 * 1024)
 const FIRST_CHUNK = () => transformed.value
   ? props.totalBytes
   : (props.firstChunkBytes ?? 64 * 1024)
@@ -75,11 +78,11 @@ async function mountEditor() {
 
   try {
     // 动态 import：CodeMirror 不进首屏 chunk（03 文档 §4.1）
-    const [{ EditorState }, { EditorView, lineNumbers, highlightActiveLine, keymap }, { foldGutter, foldKeymap, foldAll, unfoldAll }, { search }] = await Promise.all([
+    const [{ EditorState }, { EditorView, lineNumbers, highlightActiveLine, keymap }, language, searchModule] = await Promise.all([
       import('@codemirror/state'),
       import('@codemirror/view'),
-      import('@codemirror/language'),
-      import('@codemirror/search'),
+      lightweight.value ? Promise.resolve(null) : import('@codemirror/language'),
+      lightweight.value ? Promise.resolve(null) : import('@codemirror/search'),
     ])
 
     const chunk = await fetchResponseRange(props.responseId, 0, FIRST_CHUNK())
@@ -95,10 +98,6 @@ async function mountEditor() {
 
     const extensions: unknown[] = [
       lineNumbers(),
-      highlightActiveLine(),
-      foldGutter(),
-      search(),
-      keymap.of([...foldKeymap, { key: 'Mod-Alt-0', run: foldAll }, { key: 'Mod-Alt-9', run: unfoldAll }]),
       ...(wrap.value ? [EditorView.lineWrapping] : []),
       EditorView.editable.of(false),
       EditorView.theme({
@@ -119,9 +118,19 @@ async function mountEditor() {
       }),
     ]
 
+    if (!lightweight.value && language && searchModule) {
+      const { foldGutter, foldKeymap, foldAll, unfoldAll } = language
+      extensions.push(
+        highlightActiveLine(),
+        foldGutter(),
+        searchModule.search(),
+        keymap.of([...foldKeymap, { key: 'Mod-Alt-0', run: foldAll }, { key: 'Mod-Alt-9', run: unfoldAll }]),
+      )
+    }
+
     // 只有在阈值以内才加载语言支持与语法高亮。
     // 这一步是分级降级的实际落点，不是配置项。
-    if (props.highlight) {
+    if (props.highlight && !lightweight.value) {
       const [{ json }, { syntaxHighlighting, defaultHighlightStyle }] = await Promise.all([
         import('@codemirror/lang-json'),
         import('@codemirror/language'),
@@ -184,13 +193,13 @@ function toggleWrap() {
 }
 
 async function searchText() {
-  if (!view.value) return
+  if (!view.value || lightweight.value) return
   const { openSearchPanel } = await import('@codemirror/search')
   openSearchPanel(view.value)
 }
 
 async function toggleFolds(all: boolean) {
-  if (!view.value) return
+  if (!view.value || lightweight.value) return
   const { foldAll, unfoldAll } = await import('@codemirror/language')
   ;(all ? foldAll : unfoldAll)(view.value)
 }
@@ -225,9 +234,11 @@ defineExpose({ metrics })
       <button type="button" :class="{ on: mode === 'compact' }" @click="setMode('compact')">压缩</button>
       <button type="button" :class="{ on: mode === 'escaped' }" @click="setMode('escaped')">转义</button>
       <button type="button" :class="{ on: wrap }" @click="toggleWrap">换行</button>
-      <button type="button" @click="toggleFolds(true)">折叠</button>
-      <button type="button" @click="toggleFolds(false)">展开</button>
-      <button type="button" @click="searchText">搜索</button>
+      <template v-if="!lightweight">
+        <button type="button" @click="toggleFolds(true)">折叠</button>
+        <button type="button" @click="toggleFolds(false)">展开</button>
+        <button type="button" @click="searchText">搜索</button>
+      </template>
       <button type="button" @click="download">下载</button>
     </div>
     <div v-if="loading" class="state">加载首屏分片…</div>
