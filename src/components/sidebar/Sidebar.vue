@@ -12,7 +12,7 @@ import {
   AppPopconfirm,
   AppSpace,
 } from '@/components/ui'
-import { IconAdd, IconApi, IconDelete, IconEdit, IconLocate, IconSort, IconFolder, IconFolderOpen } from '@/components/ui/icons'
+import { IconAdd, IconApi, IconDelete, IconEdit, IconLocate, IconSort, IconFolder, IconFolderOpen, IconStats } from '@/components/ui/icons'
 import NaiveThemeScope from '@/components/NaiveThemeScope.vue'
 import {
   ROW_H,
@@ -436,6 +436,20 @@ defineExpose({
     <NaiveThemeScope>
       <div class="head">
         <div class="head-tools">
+        <AppButton
+          class="head-button"
+          quaternary
+          circle
+          size="small"
+          aria-label="工作区统计"
+          title="工作区统计"
+          @click="tabs.openWorkspaceStats()"
+        >
+          <template #icon>
+            <AppIcon :component="IconStats" :size="16" />
+          </template>
+        </AppButton>
+
         <AppDropdown :options="CREATE_OPTIONS" @select="onCreateSelect">
           <AppButton class="head-button" quaternary circle size="small" aria-label="新建" title="新建">
             <template #icon>

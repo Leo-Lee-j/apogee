@@ -27,7 +27,7 @@ import { useUiStore } from '@/stores/ui'
  */
 
 export type TabState = 'active' | 'warm' | 'cold'
-export type TabKind = 'request' | 'settings'
+export type TabKind = 'request' | 'settings' | 'workspace-stats'
 
 export interface Tab {
   id: string
@@ -270,6 +270,17 @@ export const useTabsStore = defineStore('tabs', () => {
     return open({ kind: 'settings', title: '设置' })
   }
 
+  /** 工作区统计是单实例页面；重复打开时仅激活已有标签。 */
+  function openWorkspaceStats(): Tab {
+    useUiStore().spikeOpen = false
+    const existing = tabs.value.find((tab) => tab.kind === 'workspace-stats')
+    if (existing) {
+      activate(existing.id)
+      return existing
+    }
+    return open({ kind: 'workspace-stats', title: '工作区统计' })
+  }
+
   /** 将当前新建面板标签转换为空白请求编辑标签。 */
   function resolveNewPanel() {
     const tab = active.value
@@ -389,6 +400,7 @@ export const useTabsStore = defineStore('tabs', () => {
     openQuick,
     openNewPanel,
     openSettings,
+    openWorkspaceStats,
     resolveNewPanel,
     activate,
     close,

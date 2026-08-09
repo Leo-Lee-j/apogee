@@ -2,7 +2,7 @@
 import { useTabsStore } from '@/stores/tabs'
 import EnvironmentControls from '@/components/layout/EnvironmentControls.vue'
 import { AppIcon } from '@/components/ui'
-import { IconAdd, IconClose, IconDocument, IconFlash } from '@/components/ui/icons'
+import { IconAdd, IconClose, IconDocument, IconFlash, IconStats } from '@/components/ui/icons'
 
 /** 标签栏，34px。`•` 表示有未保存改动（02 文档 §3.2 / §4.5）。 */
 const tabs = useTabsStore()
@@ -47,7 +47,9 @@ function tabLabel(t: { title: string; url?: string; method?: string; kind: strin
           class="m"
           :style="{ color: methodColor[t.method] ?? 'var(--a-head)' }"
         >{{ t.method }}</span>
-        <span v-else class="page-icon" aria-hidden="true"><AppIcon :component="IconDocument" :size="13" /></span>
+        <span v-else class="page-icon" aria-hidden="true">
+          <AppIcon :component="t.kind === 'workspace-stats' ? IconStats : IconDocument" :size="13" />
+        </span>
         <span class="t">{{ tabLabel(t) }}</span>
         <span v-if="t.dirty" class="dot" aria-label="未保存">•</span>
         <span class="x" role="button" aria-label="关闭标签" @click.stop="tabs.close(t.id)"><AppIcon :component="IconClose" :size="13" /></span>

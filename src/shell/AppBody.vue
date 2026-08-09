@@ -29,6 +29,7 @@ import { saveCurrentRequest } from '@/features/saveRequest'
 
 const Sidebar = defineAsyncComponent(() => import('@/components/sidebar/Sidebar.vue'))
 const SettingsPanel = defineAsyncComponent(() => import('@/views/SettingsModal.vue'))
+const WorkspaceStatsPanel = defineAsyncComponent(() => import('@/views/WorkspaceStatsPanel.vue'))
 const HistoryPanel = defineAsyncComponent(() => import('@/views/HistoryPanel.vue'))
 const CommandPalette = defineAsyncComponent(() => import('@/views/CommandPalette.vue'))
 const NewPanel = defineAsyncComponent(() => import('@/views/NewPanel.vue'))
@@ -374,6 +375,7 @@ function onKeydown(e: KeyboardEvent) {
           <S2Panel v-else />
         </div>
         <SettingsPanel v-else-if="activeKind === 'settings'" />
+        <WorkspaceStatsPanel v-else-if="activeKind === 'workspace-stats'" />
         <div v-else-if="activeNewPanel" class="split new-content" :style="splitStyle">
           <NewPanel id="new-request-panel" class="pane a-block" />
         </div>
