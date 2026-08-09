@@ -62,6 +62,7 @@ pub fn run() {
             commands::index_response,
             commands::get_response_tree,
             commands::process_memory,
+            commands::app_memory,
             commands::spike_report,
             commands::spike_autorun,
             commands::send_request,
@@ -497,6 +498,12 @@ mod commands {
     #[tauri::command]
     pub fn process_memory() -> super::mem::MemInfo {
         super::mem::current()
+    }
+
+    /// 当前 Apogee 进程树的内存总量与分类明细，供状态栏内存监测组件使用。
+    #[tauri::command]
+    pub fn app_memory() -> super::mem::AppMemInfo {
+        super::mem::current_app()
     }
 
     /// 把 Spike 量测结果落盘。前端没有文件系统权限（能力最小化），所以走这里。

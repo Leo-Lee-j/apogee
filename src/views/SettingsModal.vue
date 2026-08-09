@@ -54,6 +54,10 @@ async function chooseWorkspaceRoot() {
 async function setAutoOpen(value: boolean) {
   await app.saveSettings({ ...app.settings, openLastWorkspaceOnStart: value })
 }
+
+async function setMemoryMonitorVisible(value: boolean) {
+  await app.saveSettings({ ...app.settings, showMemoryMonitor: value })
+}
 </script>
 
 <template>
@@ -101,6 +105,12 @@ async function setAutoOpen(value: boolean) {
                     :value="ui.layout"
                     :options="layoutOptions"
                     @update:value="(value: any) => { ui.setLayout(value) }"
+                  />
+                </AppFormItem>
+                <AppFormItem label="显示内存监测">
+                  <AppSwitch
+                    :value="app.settings.showMemoryMonitor"
+                    @update:value="setMemoryMonitorVisible"
                   />
                 </AppFormItem>
               </AppForm>

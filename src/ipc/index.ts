@@ -92,6 +92,21 @@ export interface MemInfo {
   available: boolean
 }
 
+export type AppMemoryPartKind = 'main' | 'webview' | 'other'
+
+export interface AppMemoryPart {
+  kind: AppMemoryPartKind
+  processCount: number
+  workingSetBytes: number
+  privateBytes: number
+}
+
+/** Apogee 进程树内存：含主进程及 WebView 子进程。 */
+export interface AppMemInfo extends MemInfo {
+  processCount: number
+  parts: AppMemoryPart[]
+}
+
 /** 前端阶段耗时；S1 同时记录这些应用内时钟与外部进程启动时钟。 */
 export interface BootMetrics {
   mountMs: number
@@ -150,6 +165,7 @@ export interface WorkspaceDescriptor {
 export interface AppSettings {
   defaultWorkspaceRoot: string
   openLastWorkspaceOnStart: boolean
+  showMemoryMonitor: boolean
 }
 
 export interface WorkspaceOpenResult {
@@ -292,6 +308,11 @@ export const ipc = {
   /** 当前进程内存。供「性能自检」面板与性能基准使用（PRD §5.2）。 */
   processMemory(): Promise<MemInfo> {
     return call('process_memory')
+  },
+
+  /** 当前 Apogee 进程树的内存总量及分类明细。 */
+  appMemory(): Promise<AppMemInfo> {
+    return call('app_memory')
   },
 
   /** 把 Spike 的量测结果交给 Rust 侧落盘（前端拿不到文件系统权限）。 */

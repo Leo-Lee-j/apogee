@@ -10,6 +10,12 @@ pub struct AppSettings {
     pub default_workspace_root: String,
     #[serde(default)]
     pub open_last_workspace_on_start: bool,
+    #[serde(default = "default_show_memory_monitor")]
+    pub show_memory_monitor: bool,
+}
+
+fn default_show_memory_monitor() -> bool {
+    true
 }
 
 pub struct AppSettingsRepository {
@@ -33,6 +39,7 @@ impl AppSettingsRepository {
                     .to_string_lossy()
                     .into_owned(),
                 open_last_workspace_on_start: false,
+                show_memory_monitor: true,
             };
             self.save(&settings)?;
             return Ok(settings);
@@ -60,6 +67,7 @@ impl AppSettingsRepository {
         let normalized_settings = AppSettings {
             default_workspace_root: clean_windows_path(&normalized.to_string_lossy()),
             open_last_workspace_on_start: settings.open_last_workspace_on_start,
+            show_memory_monitor: settings.show_memory_monitor,
         };
         fs::create_dir_all(&self.app_data_dir)?;
         let temporary = self

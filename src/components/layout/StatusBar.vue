@@ -5,10 +5,13 @@ import { useUiStore } from '@/stores/ui'
 import { inTauri } from '@/ipc'
 import { AppButton, AppIcon } from '@/components/ui'
 import { IconColumns, IconRows, IconMaximize } from '@/components/ui/icons'
+import MemoryMonitor from './MemoryMonitor.vue'
+import { useAppStore } from '@/stores/app'
 
 /** 状态栏，24px（02 文档 §3.2）。可在设置里隐藏。 */
 const tabs = useTabsStore()
 const ui = useUiStore()
+const app = useAppStore()
 const dirtyCount = computed(() => tabs.tabs.filter((t) => t.dirty).length)
 const layoutLabel = computed(() => ({
   stacked: '上下分栏',
@@ -31,6 +34,7 @@ const layoutLabel = computed(() => ({
     <span class="dim">{{ inTauri ? 'Tauri' : '浏览器（Spike 对照）' }}</span>
     <span class="sep">|</span>
     <span class="dim">v0.1.0</span>
+    <MemoryMonitor v-if="app.settings.showMemoryMonitor" />
     <AppButton
       class="layout-toggle"
       quaternary
