@@ -7,6 +7,7 @@ import NaiveThemeScope from '@/components/NaiveThemeScope.vue'
 import { useTabsStore } from '@/stores/tabs'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { importCurl } from '@/features/curl'
+import { ipc, inTauri } from '@/ipc'
 
 /**
  * 新建请求标签里的选项面板。
@@ -105,6 +106,19 @@ async function applyCurlImport() {
   }
 }
 
+async function openPostmanImport() {
+  if (!inTauri) { actionError.value = '请从 Apogee 桌面应用导入文件'; return }
+  const { open } = await import('@tauri-apps/plugin-dialog')
+  const selected = await open({ multiple: false, filters: [{ name: 'Postman Collection', extensions: ['json'] }] })
+  if (typeof selected !== 'string') return
+  const result = await ipc.postmanImportFile(selected)
+  if (!result.requests.length) { actionError.value = result.warnings.join('；'); return }
+  const first = result.requests[0]
+  const current = tabs.active
+  if (!current?.newPanel) return
+  tabs.patch(current.id, { title: first.name, method: first.spec.method, url: first.spec.url, params: first.spec.params, pathParams: first.spec.pathParams, headers: first.spec.headers, body: first.spec.body, auth: first.spec.auth, settings: first.spec.settings, newPanel: false, newRequestParentId: undefined, dirty: true })
+}
+
 const GROUPS: { title: string; items: NewOption[] }[] = [
   {
     title: '请求',
@@ -141,6 +155,7 @@ const GROUPS: { title: string; items: NewOption[] }[] = [
         title: '从其他工具导入',
         desc: 'Postman / OpenAPI / Insomnia / HAR',
         icon: 'import',
+        run: openPostmanImport,
         badge: 'v0.2',
         reason: '导入器排在 v0.2，先保证 MVP 请求链路完整。',
       },

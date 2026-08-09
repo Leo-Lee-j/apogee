@@ -90,6 +90,8 @@ pub fn run() {
             commands::history_read,
             commands::history_clear,
             commands::curl_import,
+            commands::postman_import,
+            commands::postman_import_file,
         ])
         .setup(move |app| {
             let data_dir = app
@@ -792,6 +794,17 @@ mod commands {
     #[tauri::command]
     pub fn curl_import(command: String) -> Result<apogee_core::curl::CurlImportResult, AppError> {
         apogee_core::curl::import(&command)
+    }
+
+    #[tauri::command]
+    pub fn postman_import(json: String) -> Result<apogee_core::postman::PostmanImportResult, AppError> {
+        apogee_core::postman::import_json(&json)
+    }
+
+    #[tauri::command]
+    pub fn postman_import_file(path: String) -> Result<apogee_core::postman::PostmanImportResult, AppError> {
+        let json = std::fs::read_to_string(path).map_err(|e| AppError::new(apogee_core::error::ErrorKind::Io, "无法读取 Postman 文件").detail(e.to_string()))?;
+        apogee_core::postman::import_json(&json)
     }
 
     /// 读取当前工作区的扁平树。

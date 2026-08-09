@@ -133,6 +133,12 @@ pub struct RequestSettings {
     pub http_version: Option<HttpVersion>,
     pub encode_url: Option<bool>,
     pub send_cookies: Option<bool>,
+    /// Optional explicit proxy (for example `http://127.0.0.1:8080`).
+    pub proxy_url: Option<String>,
+    /// Number of automatic retries for transient transport failures.
+    pub retry_count: Option<u8>,
+    /// Delay between retries in milliseconds.
+    pub retry_backoff_ms: Option<u64>,
 }
 
 /// 三级继承（集合 → 文件夹 → 请求）**解析之后**的设置。
@@ -140,13 +146,16 @@ pub struct RequestSettings {
 /// 为什么要单独一个类型：执行层不该关心继承。如果直接把 `RequestSettings`
 /// 传进去，每个用到超时的地方都要写一次 `.unwrap_or(默认值)`，默认值就会散落
 /// 在各处并慢慢漂移。这里收敛成一次解析、一个来源。
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct ResolvedSettings {
     pub timeout_ms: u64,
     pub follow_redirects: bool,
     pub max_redirects: u8,
     pub verify_tls: bool,
     pub http_version: HttpVersion,
+    pub proxy_url: Option<String>,
+    pub retry_count: u8,
+    pub retry_backoff_ms: u64,
 }
 
 /// 默认超时。Postman 默认无限等待，那会让「服务挂了」表现为「客户端卡住」，
@@ -162,6 +171,9 @@ impl Default for ResolvedSettings {
             max_redirects: DEFAULT_MAX_REDIRECTS,
             verify_tls: true,
             http_version: HttpVersion::Http2,
+            proxy_url: None,
+            retry_count: 0,
+            retry_backoff_ms: 250,
         }
     }
 }
@@ -176,6 +188,9 @@ impl RequestSettings {
             max_redirects: self.max_redirects.unwrap_or(base.max_redirects),
             verify_tls: self.verify_tls.unwrap_or(base.verify_tls),
             http_version: self.http_version.unwrap_or(base.http_version),
+            proxy_url: self.proxy_url.clone().or(base.proxy_url),
+            retry_count: self.retry_count.unwrap_or(base.retry_count).min(10),
+            retry_backoff_ms: self.retry_backoff_ms.unwrap_or(base.retry_backoff_ms).min(60_000),
         }
     }
 }

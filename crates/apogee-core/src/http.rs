@@ -605,12 +605,13 @@ mod tests {
 /// 只有会改变**连接行为**的设置才配得上一个独立的池。超时是 per-request 的
 /// （见 `client_for` 里为什么不设 builder 级 timeout），所以不进这个键 ——
 /// 否则每换一次超时值就白建一个连接池，把 §4.5 的连接复用直接废掉。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct PoolKey {
     verify_tls: bool,
     http_version: HttpVersion,
     follow_redirects: bool,
     max_redirects: u8,
+    proxy_url: Option<String>,
 }
 
 static POOL: OnceLock<Mutex<HashMap<PoolKey, reqwest::Client>>> = OnceLock::new();
@@ -655,6 +656,7 @@ fn client_for(settings: &ResolvedSettings) -> Result<reqwest::Client, AppError> 
         http_version: settings.http_version,
         follow_redirects: settings.follow_redirects,
         max_redirects: settings.max_redirects,
+        proxy_url: settings.proxy_url.clone(),
     };
 
     let pool = POOL.get_or_init(|| Mutex::new(HashMap::new()));
@@ -681,6 +683,15 @@ fn client_for(settings: &ResolvedSettings) -> Result<reqwest::Client, AppError> 
         // （见 `ResolvedSettings::default`）—— 这个开关是给自签证书的内网环境用的，
         // 不能因为「省事」而默认放开。
         .danger_accept_invalid_certs(!settings.verify_tls);
+
+    if let Some(proxy_url) = settings.proxy_url.as_deref().filter(|value| !value.trim().is_empty()) {
+        let proxy = reqwest::Proxy::all(proxy_url).map_err(|error| {
+            AppError::new(ErrorKind::Parse, "代理地址无效")
+                .detail(error.to_string())
+                .hint(Hint::new("检查代理 URL，例如 http://127.0.0.1:8080"))
+        })?;
+        builder = builder.proxy(proxy);
+    }
 
     builder = match settings.http_version {
         // 只用 HTTP/1.1：不协商升级。某些老网关看到 ALPN 里的 h2 会直接断连。

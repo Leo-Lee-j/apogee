@@ -439,6 +439,13 @@ export const ipc = {
   curlImport(command: string): Promise<{ spec: RequestSpec; warnings: string[] }> {
     return call('curl_import', { command })
   },
+
+  postmanImport(json: string): Promise<{ name: string; requests: Array<{ name: string; folder: string[]; spec: RequestSpec }>; warnings: string[] }> {
+    return call('postman_import', { json })
+  },
+  postmanImportFile(path: string): Promise<{ name: string; requests: Array<{ name: string; folder: string[]; spec: RequestSpec }>; warnings: string[] }> {
+    return call('postman_import_file', { path })
+  },
 }
 
 // ─────────────────────────────────────────────────────────────────────
