@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { NRadioGroup, NRadioButton } from 'naive-ui'
+import { NRadio, NRadioGroup } from 'naive-ui'
 
 defineOptions({ inheritAttrs: false })
 defineProps<{ options: Array<{ label: string; value: string }> }>()
@@ -7,8 +7,8 @@ defineProps<{ options: Array<{ label: string; value: string }> }>()
 
 <template>
   <NRadioGroup class="app-radio-group" v-bind="$attrs">
-    <NRadioButton v-for="option in options" :key="option.value" :value="option.value">
+    <NRadio v-for="option in options" :key="option.value" :value="option.value">
       {{ option.label }}
-    </NRadioButton>
+    </NRadio>
   </NRadioGroup>
 </template>

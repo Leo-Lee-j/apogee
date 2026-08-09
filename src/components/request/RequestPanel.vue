@@ -1,19 +1,17 @@
 <script setup lang="ts">
-import { computed, h, ref } from 'vue'
-import type { DataTableColumns } from 'naive-ui'
+import { computed, ref } from 'vue'
+import { open as openFileDialog } from '@tauri-apps/plugin-dialog'
 import type { AuthConfig, Body, KeyValue } from '@/ipc'
 import { useTabsStore, type Tab } from '@/stores/tabs'
 import {
   AppButton,
-  AppCheckbox,
-  AppDataTable,
   AppIcon,
   AppInput,
   AppRadioGroup,
   AppSelect,
   AppTooltip,
 } from '@/components/ui'
-import { IconClose } from '@/components/ui/icons'
+import { IconFolderOpen } from '@/components/ui/icons'
 import NaiveThemeScope from '@/components/NaiveThemeScope.vue'
 import ParameterEditor from './ParameterEditor.vue'
 import VariableInput from './VariableInput.vue'
@@ -147,8 +145,6 @@ function setAllRowsEnabled(kind: RowField, enabled: boolean) {
   patchRows(kind, rowsFor(kind).map((row) => ({ ...row, enabled })))
 }
 
-type EditableRow = KeyValue & { rowIndex: number }
-
 function updateParameterField(
   kind: RowField,
   index: number,
@@ -279,55 +275,25 @@ function patchBodyRows(rows: KeyValue[]) {
 }
 
 function updateBodyRow(index: number, delta: Partial<KeyValue>) {
-  patchBodyRows(bodyRows().map((row, rowIndex) => rowIndex === index ? { ...row, ...delta } : row))
-}
-
-function addBodyRow() {
-  patchBodyRows([...bodyRows(), { enabled: true, key: '', value: '', description: '', kind: 'text' }])
+  const rows = bodyRows()
+  if (index < rows.length) {
+    patchBodyRows(rows.map((row, rowIndex) => rowIndex === index ? { ...row, ...delta } : row))
+    return
+  }
+  patchBodyRows([...rows, { enabled: true, key: '', value: '', description: '', kind: 'text', ...delta }])
 }
 
 function removeBodyRow(index: number) {
   patchBodyRows(bodyRows().filter((_, rowIndex) => rowIndex !== index))
 }
 
-const bodyTableRows = computed<EditableRow[]>(() => bodyRows().map((row, rowIndex) => ({ ...row, rowIndex })))
-const bodyColumns = computed<DataTableColumns<EditableRow>>(() => {
-  const columns: DataTableColumns<EditableRow> = [
-    {
-      key: 'enabled', width: 38, align: 'center',
-      render: (row) => h(AppCheckbox, {
-        checked: row.enabled,
-        'onUpdate:checked': (checked: boolean) => updateBodyRow(row.rowIndex, { enabled: checked }),
-      }),
-    },
-    {
-      title: 'Key', key: 'key', minWidth: 160,
-      render: (row) => h(VariableInput, { value: row.key, bordered: false, 'onUpdate:value': (value: string) => updateBodyRow(row.rowIndex, { key: value }) }),
-    },
-    {
-      title: 'Value', key: 'value', minWidth: 220,
-      render: (row) => h(VariableInput, { value: row.value, bordered: false, placeholder: row.kind === 'file' ? '本地文件路径' : '', 'onUpdate:value': (value: string) => updateBodyRow(row.rowIndex, { value }) }),
-    },
-  ]
-  if (bodyType.value === 'formData') {
-    columns.push({
-      title: '类型', key: 'kind', width: 110,
-      render: (row) => h(AppSelect, {
-        value: row.kind ?? 'text', bordered: false,
-        options: [{ label: '文本', value: 'text' }, { label: '文件', value: 'file' }],
-        'onUpdate:value': (value: 'text' | 'file') => updateBodyRow(row.rowIndex, { kind: value }),
-      }),
-    })
-  }
-  columns.push({
-    key: 'actions', width: 42, align: 'center',
-    render: (row) => h(AppButton, {
-      quaternary: true, circle: true, size: 'tiny', title: '删除', 'aria-label': '删除',
-      onClick: () => removeBodyRow(row.rowIndex),
-    }, { icon: () => h(AppIcon, { component: IconClose, size: 13 }) }),
-  })
-  return columns
-})
+function reorderBodyRows(from: number, to: number) {
+  const rows = [...bodyRows()]
+  const [moved] = rows.splice(from, 1)
+  if (!moved) return
+  rows.splice(to, 0, moved)
+  patchBodyRows(rows)
+}
 
 function patchBodyField(field: string, value: string) {
   const currentBody = body.value
@@ -336,6 +302,11 @@ function patchBodyField(field: string, value: string) {
   } else if (currentBody.type === 'graphQl') {
     patchTab({ body: { ...currentBody, [field]: value || (field === 'operationName' ? undefined : '') } })
   }
+}
+
+async function chooseBinaryFile() {
+  const selected = await openFileDialog({ multiple: false })
+  if (typeof selected === 'string') patchBodyField('path', selected)
 }
 
 function setAuthType(type: AuthType) {
@@ -415,6 +386,7 @@ function patchAuth(delta: Record<string, string>) {
             选择发送内容的编码方式。
           </AppTooltip>
           <AppRadioGroup
+            class="body-types"
             :value="bodyType"
             :options="BODY_TYPES.map((option) => ({ label: option.label, value: option.type }))"
             name="request-body-type"
@@ -422,7 +394,8 @@ function patchAuth(delta: Record<string, string>) {
           />
         </header>
 
-        <div v-if="bodyType === 'none'" class="editor-empty">此请求不发送请求体。</div>
+        <div class="body-content">
+          <div v-if="bodyType === 'none'" class="editor-empty">此请求不发送请求体。</div>
         <VariableInput
           v-else-if="bodyType === 'json' || bodyType === 'text'"
           class="payload"
@@ -438,22 +411,36 @@ function patchAuth(delta: Record<string, string>) {
           <AppInput :value="textContentType" :input-props="{ spellcheck: false }" @update:value="body.type === 'text' && patchTab({ body: { ...body, contentType: $event } })" />
         </label>
         <template v-else-if="bodyType === 'formData' || bodyType === 'urlEncoded'">
-          <AppDataTable :columns="bodyColumns" :data="bodyTableRows" :row-key="(row: EditableRow) => row.rowIndex" :bordered="false" size="small" />
-          <footer class="config-footer"><AppButton quaternary size="small" class="link" @click="addBodyRow">+ 新增</AppButton></footer>
+          <div class="body-parameter-table">
+            <ParameterEditor
+              :rows="bodyRows()"
+              allow-create
+              :show-kind="bodyType === 'formData'"
+              @update-field="(index, field, value) => updateBodyRow(index, { [field]: value })"
+              @update-enabled="(index, enabled) => updateBodyRow(index, { enabled })"
+              @update-kind="(index, kind) => updateBodyRow(index, { kind })"
+              @set-all-enabled="(enabled) => patchBodyRows(bodyRows().map((row) => ({ ...row, enabled })))"
+              @remove="removeBodyRow"
+              @reorder="(from, to) => reorderBodyRows(from, to)"
+            />
+          </div>
         </template>
         <label v-else-if="bodyType === 'binary'" class="field-stack">
           <span>本地文件路径</span>
-          <AppInput :value="body.type === 'binary' ? body.path : ''" :input-props="{ spellcheck: false }" placeholder="C:\path\to\payload.bin" @update:value="patchBodyField('path', $event)" />
+          <div class="binary-path">
+            <AppInput :value="body.type === 'binary' ? body.path : ''" :input-props="{ spellcheck: false }" placeholder="C:\path\to\payload.bin" @update:value="patchBodyField('path', $event)" />
+            <AppButton secondary size="small" @click="chooseBinaryFile">
+              <template #icon><AppIcon :component="IconFolderOpen" :size="15" /></template>
+              选择文件
+            </AppButton>
+          </div>
         </label>
         <div v-else-if="body.type === 'graphQl'" class="graphql-grid">
           <label class="field-stack"><span>Query</span><VariableInput :value="body.query" multiline spellcheck="false" @update:value="patchBodyField('query', $event)" /></label>
           <label class="field-stack"><span>Variables (JSON)</span><VariableInput :value="body.variables" multiline spellcheck="false" @update:value="patchBodyField('variables', $event)" /></label>
           <label class="field-stack"><span>Operation Name（可选）</span><AppInput :value="body.operationName ?? ''" @update:value="patchBodyField('operationName', $event)" /></label>
         </div>
-        <AppTooltip class="body-hint">
-          <template #trigger><span class="hint-title">发送说明</span></template>
-          文本内容按原文发送；文件项与 binary 使用流式上传。
-        </AppTooltip>
+        </div>
       </section>
 
       <section v-else-if="current === 'Auth'" class="config-block auth-editor">
@@ -534,10 +521,6 @@ function patchAuth(delta: Record<string, string>) {
 }
 .section-head strong { font-weight: 600; }
 .body-type-head { justify-content: space-between; }
-.config-footer {
-  min-height: 30px; display: flex; align-items: center;
-  border-top: 1px solid var(--a-border); padding: 0 6px;
-}
 .hint-title { cursor: help; border-bottom: 1px dotted var(--a-text-faint); }
 .app-data-table :deep(.n-data-table-th) { font-size: 11px; color: var(--a-text-faint); }
 .app-data-table :deep(.n-data-table-td) { height: 38px; padding: 0 6px; }
@@ -568,7 +551,9 @@ function patchAuth(delta: Record<string, string>) {
 .cell:focus { background: var(--a-bg-3); outline: 2px solid var(--a-focus); outline-offset: -2px; }
 .del { width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; background: transparent; border: none; color: var(--a-text-faint); cursor: pointer; }
 .del:hover { color: var(--a-error); }
-.body-editor { display: flex; flex-direction: column; gap: 8px; min-height: 100%; }
+.body-editor { display: flex; flex-direction: column; min-height: 100%; }
+.body-content { display: flex; flex: 1 1 auto; flex-direction: column; gap: 8px; min-height: 0; padding: 8px; }
+.body-parameter-table { min-width: 0; overflow-x: auto; }
 .body-types { display: flex; align-items: center; gap: 14px; flex: 0 0 auto; }
 .body-type { display: inline-flex; align-items: center; gap: 4px; color: var(--a-text-dim); font-size: 12px; cursor: pointer; }
 .body-type:has(input:checked) { color: var(--a-text); }
@@ -587,7 +572,8 @@ function patchAuth(delta: Record<string, string>) {
   border: 1px solid var(--a-border); border-radius: var(--a-radius-md); color: var(--a-text);
   padding: 0 7px; font: 12px var(--a-font-mono);
 }
-.body-hint { margin: 0 2px; color: var(--a-text-faint); font-size: 11px; }
+.binary-path { display: flex; align-items: center; gap: 8px; }
+.binary-path :deep(.n-input) { flex: 1 1 auto; min-width: 0; }
 .body-table { border: 1px solid var(--a-border); }
 .select-cell { appearance: auto; }
 .field-stack { display: flex; flex-direction: column; gap: 5px; color: var(--a-text-dim); font-size: 12px; }

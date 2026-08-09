@@ -113,6 +113,7 @@ export default defineConfig({
       '@codemirror/language',
       '@codemirror/search',
       '@codemirror/lang-json',
+      '@tauri-apps/plugin-dialog',
     ],
   },
 

@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import Sortable from 'sortablejs'
+import { open as openFileDialog } from '@tauri-apps/plugin-dialog'
 import type { KeyValue } from '@/ipc'
-import { AppButton, AppCheckbox, AppIcon, AppInput } from '@/components/ui'
-import { IconCloseCircle, IconDrag, IconRemoveCircle } from '@/components/ui/icons'
+import { AppButton, AppCheckbox, AppIcon, AppInput, AppSelect } from '@/components/ui'
+import { IconCloseCircle, IconDrag, IconFolderOpen, IconRemoveCircle } from '@/components/ui/icons'
 import VariableInput from './VariableInput.vue'
 
 type Field = 'key' | 'value' | 'description'
@@ -11,6 +12,7 @@ type Field = 'key' | 'value' | 'description'
 const props = defineProps<{
   rows: KeyValue[]
   allowCreate?: boolean
+  showKind?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -19,6 +21,7 @@ const emit = defineEmits<{
   setAllEnabled: [enabled: boolean]
   remove: [index: number]
   reorder: [from: number, to: number]
+  updateKind: [index: number, kind: 'text' | 'file']
 }>()
 
 const list = ref<HTMLElement | null>(null)
@@ -46,6 +49,11 @@ function confirmRemove(index: number) {
   } else {
     pendingDelete.value = index
   }
+}
+
+async function chooseFile(index: number) {
+  const selected = await openFileDialog({ multiple: false })
+  if (typeof selected === 'string') emit('updateField', index, 'value', selected)
 }
 
 onMounted(() => {
@@ -89,7 +97,7 @@ watch(() => props.rows, () => { pendingDelete.value = null })
 </script>
 
 <template>
-  <div class="parameter-editor">
+  <div class="parameter-editor" :class="{ 'parameter-editor--with-kind': showKind }">
     <div class="parameter-header parameter-grid" role="row">
       <div class="parameter-enabled" role="columnheader">
         <AppCheckbox
@@ -103,6 +111,7 @@ watch(() => props.rows, () => { pendingDelete.value = null })
       <div role="columnheader">参数名</div>
       <div role="columnheader">参数值</div>
       <div role="columnheader">说明</div>
+      <div v-if="showKind" role="columnheader">类型</div>
       <div aria-hidden="true" />
     </div>
 
@@ -145,7 +154,27 @@ watch(() => props.rows, () => { pendingDelete.value = null })
             size="small"
             :bordered="true"
             :input-props="{ spellcheck: false }"
+            :placeholder="showKind && row.kind === 'file' ? '本地文件路径' : undefined"
             @update:value="emit('updateField', index, 'value', $event)"
+          />
+          <AppButton
+            v-if="showKind && row.kind === 'file'"
+            quaternary
+            circle
+            size="tiny"
+            title="选择文件"
+            aria-label="选择文件"
+            @click="chooseFile(index)"
+          >
+            <template #icon><AppIcon :component="IconFolderOpen" :size="15" /></template>
+          </AppButton>
+        </div>
+        <div v-if="showKind" role="cell">
+          <AppSelect
+            :value="row.kind ?? 'text'"
+            size="small"
+            :options="[{ label: '文本', value: 'text' }, { label: '文件', value: 'file' }]"
+            @update:value="emit('updateKind', index, $event as 'text' | 'file')"
           />
         </div>
         <div role="cell">
@@ -203,6 +232,14 @@ watch(() => props.rows, () => { pendingDelete.value = null })
             @keydown.enter.prevent="commitDraft"
           />
         </div>
+        <div v-if="showKind" role="cell">
+          <AppSelect
+            value="text"
+            size="small"
+            :options="[{ label: '文本', value: 'text' }, { label: '文件', value: 'file' }]"
+            @update:value="emit('updateKind', props.rows.length, $event as 'text' | 'file')"
+          />
+        </div>
         <div role="cell">
           <AppInput
             size="small"
@@ -226,6 +263,11 @@ watch(() => props.rows, () => { pendingDelete.value = null })
   grid-template-columns: 40px minmax(150px, 1fr) minmax(180px, 1.2fr) minmax(180px, 1fr) 40px;
   align-items: center;
 }
+.parameter-editor--with-kind .parameter-grid {
+  grid-template-columns: 40px minmax(130px, 1fr) minmax(160px, 1.1fr) 100px minmax(150px, 1fr) 40px;
+}
+.parameter-editor--with-kind .parameter-header > :nth-child(4) { grid-column: 5; }
+.parameter-editor--with-kind .parameter-header > :nth-child(5) { grid-column: 4; }
 .parameter-header {
   min-height: 34px;
   color: var(--a-text-faint);
@@ -241,6 +283,8 @@ watch(() => props.rows, () => { pendingDelete.value = null })
 }
 .parameter-row:last-child { border-bottom: 0; }
 .parameter-row > div { min-width: 0; box-sizing: border-box; padding: 0 6px 0 0; }
+.parameter-editor--with-kind .parameter-row > :nth-child(3) { display: flex; align-items: center; gap: 2px; }
+.parameter-editor--with-kind .parameter-row > :nth-child(3) :deep(.n-input) { flex: 1 1 auto; min-width: 0; }
 .parameter-row--off { opacity: 0.48; }
 .parameter-row--draft { opacity: 0.72; }
 .parameter-row--chosen { background: var(--a-bg-3); }
