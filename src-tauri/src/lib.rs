@@ -76,6 +76,8 @@ pub fn run() {
             commands::workspace_load,
             commands::workspace_read_request,
             commands::workspace_save_request,
+            commands::workspace_read_container,
+            commands::workspace_save_container,
             commands::workspace_create_collection,
             commands::workspace_create_folder,
             commands::workspace_create_request,
@@ -537,7 +539,7 @@ mod commands {
     pub async fn send_request(
         app: tauri::AppHandle,
         state: State<'_, Arc<AppState>>,
-        spec: apogee_core::request::RequestSpec,
+        mut spec: apogee_core::request::RequestSpec,
         ctx: Option<apogee_core::request::ExecContext>,
         workspace_id: String,
         session_id: String,
@@ -546,6 +548,14 @@ mod commands {
         state
             .with_workspace(workspace_id, session_id, |_| Ok(()))
             .map_err(|error| error.to_string())?;
+        if let Some(raw_id) = ctx.as_ref().and_then(|item| item.request_node_id.as_deref()) {
+            let request_id = Uuid::parse_str(raw_id).map_err(|_| format!("非法的请求节点 id：{raw_id}"))?;
+            spec = state
+                .with_workspace(workspace_id, session_id, |repository| {
+                    repository.resolve_request_inheritance(request_id, spec)
+                })
+                .map_err(|error| error.to_string())?;
+        }
         let environment = match ctx.as_ref().and_then(|item| item.environment_id.as_deref()) {
             Some(raw_id) => {
                 let environment_id =
@@ -1001,6 +1011,31 @@ mod commands {
             .with_workspace(workspace_id, session_id, |repository| {
                 repository.save_request(id, name, spec)
             })
+            .map_err(|error| error.to_string())
+    }
+
+    #[tauri::command]
+    pub fn workspace_read_container(
+        state: State<'_, Arc<AppState>>,
+        workspace_id: String,
+        session_id: String,
+        node_id: String,
+    ) -> Result<apogee_core::workspace::WorkspaceContainer, String> {
+        let node_id = parse_id(&node_id)?;
+        let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
+        state.with_workspace(workspace_id, session_id, |repository| repository.read_container(node_id))
+            .map_err(|error| error.to_string())
+    }
+
+    #[tauri::command]
+    pub fn workspace_save_container(
+        state: State<'_, Arc<AppState>>,
+        workspace_id: String,
+        session_id: String,
+        container: apogee_core::workspace::WorkspaceContainer,
+    ) -> Result<apogee_core::workspace::WorkspaceContainer, String> {
+        let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
+        state.with_workspace(workspace_id, session_id, |repository| repository.save_container(container))
             .map_err(|error| error.to_string())
     }
 

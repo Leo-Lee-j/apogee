@@ -81,6 +81,9 @@ pub struct ExecContext {
     pub tab_id: Option<String>,
     #[serde(default)]
     pub environment_id: Option<String>,
+    /// 已保存请求的工作区节点 id。存在时发送前解析其容器继承链。
+    #[serde(default)]
+    pub request_node_id: Option<String>,
 }
 
 /// `send_request` 的返回值（03 文档 §3.2）。命令**立即**返回它，不等网络。

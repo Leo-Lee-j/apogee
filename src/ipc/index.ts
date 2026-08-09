@@ -440,6 +440,14 @@ export const ipc = {
     return call('curl_import', { command })
   },
 
+  workspaceReadContainer(nodeId: string): Promise<WorkspaceContainer> {
+    return call('workspace_read_container', { ...sessionArgs(), nodeId })
+  },
+
+  workspaceSaveContainer(container: WorkspaceContainer): Promise<WorkspaceContainer> {
+    return call('workspace_save_container', { ...sessionArgs(), container })
+  },
+
   postmanImport(json: string): Promise<{ name: string; requests: Array<{ name: string; folder: string[]; spec: RequestSpec }>; warnings: string[] }> {
     return call('postman_import', { json })
   },
@@ -573,6 +581,14 @@ export interface RequestSettings {
 export interface ExecContext {
   tabId?: string
   environmentId?: string
+  requestNodeId?: string
+}
+
+export interface WorkspaceContainer {
+  id: string
+  name: string
+  auth: AuthConfig
+  settings: RequestSettings
 }
 
 export interface ExecHandle {

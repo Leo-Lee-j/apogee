@@ -194,6 +194,7 @@ export function useRequest() {
       const ctx: ExecContext = {
         tabId: tab.id,
         environmentId: workspace.activeEnvironmentId ?? undefined,
+        requestNodeId: tab.nodeId,
       }
       const handle = await ipc.sendRequest(spec, ctx)
       const early = orphans.get(handle.id)

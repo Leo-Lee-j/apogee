@@ -2,6 +2,7 @@
 import { defineAsyncComponent, computed, nextTick, onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import TitleBar from '@/components/layout/TitleBar.vue'
 import WorkspaceArea from '@/components/layout/WorkspaceArea.vue'
+import WorkspaceContent from '@/components/layout/WorkspaceContent.vue'
 import StatusBar from '@/components/layout/StatusBar.vue'
 import UrlBar from '@/components/request/UrlBar.vue'
 import RequestPanel from '@/components/request/RequestPanel.vue'
@@ -30,6 +31,7 @@ import { saveCurrentRequest } from '@/features/saveRequest'
 const Sidebar = defineAsyncComponent(() => import('@/components/sidebar/Sidebar.vue'))
 const SettingsPanel = defineAsyncComponent(() => import('@/views/SettingsModal.vue'))
 const WorkspaceStatsPanel = defineAsyncComponent(() => import('@/views/WorkspaceStatsPanel.vue'))
+const ContainerConfigPanel = defineAsyncComponent(() => import('@/components/sidebar/ContainerConfigPanel.vue'))
 const HistoryPanel = defineAsyncComponent(() => import('@/views/HistoryPanel.vue'))
 const CommandPalette = defineAsyncComponent(() => import('@/views/CommandPalette.vue'))
 const NewPanel = defineAsyncComponent(() => import('@/views/NewPanel.vue'))
@@ -168,6 +170,12 @@ const splitDragging = ref(false)
 const activeNewPanel = computed(() => tabs.active?.newPanel === true)
 const activeKind = computed(() => tabs.active?.kind ?? 'request')
 
+// The legacy resize helpers remain active only while a pre-existing split is mounted.
+// New workspace pages use WorkspaceContent below.
+void onSplitResizeStart
+void onSplitResizeKey
+void resetSplitRatio
+
 /**
  * 每个区域至少保留当前 splitter 容器方向尺寸的 1/3。
  *
@@ -287,6 +295,8 @@ const reqSize = computed(() =>
 const responseSize = computed(() =>
   ui.layout === 'focus' ? '1 1 0' : `${1 - splitRequestRatio.value} 1 0`,
 )
+void reqSize
+void responseSize
 
 watch(
   () => ui.layout,
@@ -376,38 +386,14 @@ function onKeydown(e: KeyboardEvent) {
         </div>
         <SettingsPanel v-else-if="activeKind === 'settings'" />
         <WorkspaceStatsPanel v-else-if="activeKind === 'workspace-stats'" />
+        <ContainerConfigPanel v-else-if="activeKind === 'container-config'" :node-id="tabs.active?.containerNodeId ?? null" />
         <div v-else-if="activeNewPanel" class="split new-content" :style="splitStyle">
           <NewPanel id="new-request-panel" class="pane a-block" />
         </div>
-        <div v-else ref="splitEl" class="split" :style="splitStyle">
-          <RequestPanel
-            class="pane a-block"
-            :class="{ collapsed: ui.layout === 'focus' }"
-            :style="{ flex: reqSize }"
-          />
-          <div
-            v-if="ui.layout !== 'focus'"
-            class="split-resizer"
-            :class="{
-              vertical: ui.layout === 'side-by-side',
-              horizontal: ui.layout !== 'side-by-side',
-              dragging: splitDragging,
-            }"
-            role="separator"
-            :aria-orientation="ui.layout === 'side-by-side' ? 'vertical' : 'horizontal'"
-            aria-label="调整请求区与响应区大小"
-            :aria-valuenow="Math.round(splitRequestRatio * 100)"
-            :aria-valuemin="Math.round(splitLimits.min * 100)"
-            :aria-valuemax="Math.round(splitLimits.max * 100)"
-            :aria-valuetext="`请求区 ${Math.round(splitRequestRatio * 100)}%，响应区 ${Math.round((1 - splitRequestRatio) * 100)}%`"
-            tabindex="0"
-            title="拖动调整请求区与响应区大小，双击恢复默认"
-            @pointerdown="onSplitResizeStart"
-            @keydown="onSplitResizeKey"
-            @dblclick="resetSplitRatio"
-          />
-          <ResponsePanel class="pane a-block" :style="{ flex: responseSize }" />
-        </div>
+        <WorkspaceContent v-else split use-global-layout>
+          <template #primary><RequestPanel /></template>
+          <template #secondary><ResponsePanel /></template>
+        </WorkspaceContent>
       </WorkspaceArea>
     </div>
     <StatusBar />

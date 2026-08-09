@@ -27,7 +27,7 @@ import { useUiStore } from '@/stores/ui'
  */
 
 export type TabState = 'active' | 'warm' | 'cold'
-export type TabKind = 'request' | 'settings' | 'workspace-stats'
+export type TabKind = 'request' | 'settings' | 'workspace-stats' | 'container-config'
 
 export interface Tab {
   id: string
@@ -52,6 +52,8 @@ export interface Tab {
    * 侧边栏的「定位当前接口」和「高亮当前打开的行」都只认这个字段。
    */
   nodeId?: string
+  /** 集合或文件夹配置页对应的容器节点。 */
+  containerNodeId?: string
   /**
    * 新建请求标签处于选项面板状态时为 true。状态归属标签，而不是全局 UI，
    * 这样切换回其他接口时不会把它们的内容替换掉。
@@ -281,6 +283,16 @@ export const useTabsStore = defineStore('tabs', () => {
     return open({ kind: 'workspace-stats', title: '工作区统计' })
   }
 
+  function openContainerConfig(node: { id: string; name: string }): Tab {
+    useUiStore().spikeOpen = false
+    const existing = tabs.value.find((tab) => tab.kind === 'container-config' && tab.containerNodeId === node.id)
+    if (existing) {
+      activate(existing.id)
+      return existing
+    }
+    return open({ kind: 'container-config', title: `配置 · ${node.name}`, containerNodeId: node.id, preview: false })
+  }
+
   /** 将当前新建面板标签转换为空白请求编辑标签。 */
   function resolveNewPanel() {
     const tab = active.value
@@ -401,6 +413,7 @@ export const useTabsStore = defineStore('tabs', () => {
     openNewPanel,
     openSettings,
     openWorkspaceStats,
+    openContainerConfig,
     resolveNewPanel,
     activate,
     close,

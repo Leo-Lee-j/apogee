@@ -3,7 +3,7 @@
 //! 文件读写由桌面端负责；这些类型放在 core 里，保证 Tauri 命令、未来 CLI
 //! 和公开的 YAML 格式共享同一份模型。
 
-use crate::request::RequestSpec;
+use crate::request::{AuthConfig, RequestSettings, RequestSpec};
 use crate::vars::Environment;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -46,6 +46,20 @@ pub struct ContainerDocument {
     pub apogee: u32,
     pub id: Uuid,
     pub name: String,
+    #[serde(default)]
+    pub auth: AuthConfig,
+    #[serde(default)]
+    pub settings: RequestSettings,
+}
+
+/// 集合或文件夹的可编辑配置投影。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceContainer {
+    pub id: Uuid,
+    pub name: String,
+    pub auth: AuthConfig,
+    pub settings: RequestSettings,
 }
 
 /// Rust 返回给前端的扁平节点类型。

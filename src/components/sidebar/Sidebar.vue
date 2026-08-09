@@ -345,6 +345,7 @@ function itemMenuOptions(node: FlatNode) {
   const label = node.kind === 'collection' ? '集合操作' : node.kind === 'folder' ? '文件夹操作' : '接口操作'
   return [
     { type: 'group' as const, key: `${node.id}-group`, label, children: [
+      ...(node.isFolder ? [{ label: '配置', key: 'config', icon: () => h(AppIcon, { component: IconEdit, size: 15 }) }] : []),
       { label: '重命名', key: 'rename', icon: () => h(AppIcon, { component: IconEdit, size: 15 }) },
       { label: '导出', key: 'export', icon: () => h(AppIcon, { component: IconDownload, size: 15 }) },
       { label: '复制', key: 'copy', icon: () => h(AppIcon, { component: IconCopy, size: 15 }) },
@@ -487,6 +488,7 @@ async function exportNode(node: FlatNode) {
 async function onItemMenuSelect(key: string | number, node: FlatNode) {
   selectNode(node)
   if (key === 'rename') openAction('rename')
+  else if (key === 'config' && node.isFolder) tabs.openContainerConfig(node)
   else if (key === 'export') await exportNode(node)
   else if (key === 'copy') {
     const success = await workspace.duplicateNode(node as WorkspaceNode)
