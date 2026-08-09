@@ -1,6 +1,7 @@
 import type { AppError } from '@/ipc'
 import { useTabsStore } from '@/stores/tabs'
 import { useUiStore } from '@/stores/ui'
+import { useWorkspaceStore } from '@/stores/workspace'
 // 注意：不要静态 import feedback —— 它带 naive-ui message 运行时，
 // 会破坏 S5 变体 b 的「首屏零 naive-ui」约束，保持动态 import。
 
@@ -23,6 +24,7 @@ export type SaveRequestResult =
 export async function saveCurrentRequest(): Promise<SaveRequestResult> {
   const tabs = useTabsStore()
   const ui = useUiStore()
+  const workspace = useWorkspaceStore()
   const tab = tabs.active
   if (!tab || tab.kind !== 'request') return { status: 'error' }
   if (!tab.nodeId) {
@@ -31,6 +33,7 @@ export async function saveCurrentRequest(): Promise<SaveRequestResult> {
   }
   const result = await tabs.save(tab.id)
   if (result.ok) {
+    if (tab.nodeId) workspace.updateRequestMethod(tab.nodeId, tab.method)
     const { toast } = await import('@/features/feedback')
     toast().success('已保存')
     return { status: 'saved' }

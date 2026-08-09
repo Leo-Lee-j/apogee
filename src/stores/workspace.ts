@@ -342,6 +342,15 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (changed) nodes.value = [...list]
   }
 
+  /** 保存请求后同步侧边栏中的轻量节点字段，避免必须重新加载整个工作区。 */
+  function updateRequestMethod(nodeId: string, method: string) {
+    const list = nodes.value
+    if (!list) return
+    const index = list.findIndex((node) => node.id === nodeId && node.kind === 'request')
+    if (index < 0 || list[index]?.method === method) return
+    nodes.value = list.map((node, nodeIndex) => nodeIndex === index ? { ...node, method } : node)
+  }
+
   async function createCollection(name = '新建集合'): Promise<boolean> {
     if (!inTauri) return false
     return applySnapshot(ipc.workspaceCreateCollection(name))
@@ -412,6 +421,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         newRequestParentId: undefined,
       })
       const saved = await tabs.save(tab.id)
+      if (saved.ok) updateRequestMethod(request.id, tab.method)
       if (!saved.ok && saved.error) report(saved.error)
       return saved.ok
     } catch (error) {
@@ -423,6 +433,75 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   async function renameNode(nodeId: string, name: string): Promise<boolean> {
     if (!inTauri) return false
     return applySnapshot(ipc.workspaceRenameNode(nodeId, name))
+  }
+
+  /** 复制集合、文件夹或接口；容器会连同其全部后代一起复制。 */
+  async function duplicateNode(node: WorkspaceNode): Promise<boolean> {
+    if (!inTauri || !node.kind) return false
+    try {
+      const sourceNodes = nodes.value ?? []
+      const byId = new Map(sourceNodes.map((item) => [item.id, item]))
+      const isDescendant = (item: WorkspaceNode) => {
+        let cursor = item
+        while (cursor.parentId) {
+          if (cursor.parentId === node.id) return true
+          const parent = byId.get(cursor.parentId)
+          if (!parent) return false
+          cursor = parent
+        }
+        return false
+      }
+      const subtree = sourceNodes.filter((item) => item.id === node.id || isDescendant(item))
+      const knownIds = new Set(sourceNodes.map((item) => item.id))
+      const cloneParents = new Map<string, string>()
+      const rootName = `${node.name} 副本`
+
+      if (node.kind === 'collection') {
+        const snapshot = await ipc.workspaceCreateCollection(rootName)
+        const root = snapshot.nodes.find((item) => !knownIds.has(item.id) && item.kind === 'collection')
+        if (!root) throw new Error('无法识别复制后的集合')
+        knownIds.add(root.id)
+        cloneParents.set(node.id, root.id)
+      } else if (node.kind === 'folder') {
+        if (!node.parentId) throw new Error('文件夹缺少父级')
+        const snapshot = await ipc.workspaceCreateFolder(node.parentId, rootName)
+        const root = snapshot.nodes.find((item) => !knownIds.has(item.id) && item.parentId === node.parentId)
+        if (!root) throw new Error('无法识别复制后的文件夹')
+        knownIds.add(root.id)
+        cloneParents.set(node.id, root.id)
+      } else {
+        if (!node.parentId) throw new Error('接口缺少父级')
+        const source = await ipc.workspaceReadRequest(node.id)
+        const copy = await ipc.workspaceCreateRequest(node.parentId, rootName)
+        await ipc.workspaceSaveRequest(copy.id, rootName, source.spec)
+        await load()
+        expandPath(node.parentId)
+        return true
+      }
+
+      for (const item of subtree.slice(1)) {
+        const parentId = item.parentId ? cloneParents.get(item.parentId) : undefined
+        if (!parentId) throw new Error('无法确定复制目标的位置')
+        if (item.kind === 'folder') {
+          const snapshot = await ipc.workspaceCreateFolder(parentId, item.name)
+          const copy = snapshot.nodes.find((candidate) => !knownIds.has(candidate.id) && candidate.parentId === parentId)
+          if (!copy) throw new Error('无法识别复制后的文件夹')
+          knownIds.add(copy.id)
+          cloneParents.set(item.id, copy.id)
+        } else if (item.kind === 'request') {
+          const source = await ipc.workspaceReadRequest(item.id)
+          const copy = await ipc.workspaceCreateRequest(parentId, item.name)
+          await ipc.workspaceSaveRequest(copy.id, source.name, source.spec)
+        }
+      }
+      await load()
+      const copiedRoot = cloneParents.get(node.id)
+      if (copiedRoot) expandPath(copiedRoot)
+      return true
+    } catch (error) {
+      report(error)
+      return false
+    }
   }
 
   async function deleteNode(nodeId: string): Promise<boolean> {
@@ -465,7 +544,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     createFolder,
     createRequest,
     saveTabAs,
+    updateRequestMethod,
     renameNode,
+    duplicateNode,
     deleteNode,
   }
 })

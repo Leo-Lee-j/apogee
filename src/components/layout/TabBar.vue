@@ -15,13 +15,8 @@ const methodColor: Record<string, string> = {
   DELETE: 'var(--a-delete)',
 }
 
-function tabLabel(t: { title: string; url?: string; method?: string; kind: string; newPanel?: boolean }) {
-  if (t.kind !== 'request' || t.newPanel) return t.title
-  const path = (t.url || '').trim()
-  if (path) {
-    try { return `${t.method} ${new URL(path).pathname || '/'}` } catch { return `${t.method} ${path}` }
-  }
-  return `${t.method} ${t.title}`
+function tabLabel(t: { title: string; kind: string; newPanel?: boolean }) {
+  return t.title
 }
 </script>
 

@@ -12,8 +12,10 @@ import {
   AppPopconfirm,
   AppSpace,
 } from '@/components/ui'
-import { IconAdd, IconApi, IconDelete, IconEdit, IconLocate, IconSort, IconFolder, IconFolderOpen, IconStats } from '@/components/ui/icons'
+import { IconAdd, IconApi, IconCopy, IconDelete, IconDownload, IconEdit, IconLocate, IconMore, IconSort, IconFolder, IconFolderOpen, IconStats } from '@/components/ui/icons'
 import NaiveThemeScope from '@/components/NaiveThemeScope.vue'
+import { toast } from '@/features/feedback'
+import { ipc, type KeyValue, type RequestSpec, type WorkspaceNode } from '@/ipc'
 import {
   ROW_H,
   OVERSCAN,
@@ -74,6 +76,7 @@ const actionName = ref('')
 const actionParentId = ref<string | null>(null)
 const actionError = ref('')
 const deleteError = ref('')
+const deleteTarget = ref<FlatNode | null>(null)
 const actionSaving = ref(false)
 const actionOpen = computed({
   get: () => actionKind.value !== null,
@@ -90,7 +93,7 @@ const actionModalTitle = computed(() => {
   return '新建'
 })
 const actionModalHint = computed(() => {
-  if (actionKind.value === 'rename') return '名称只影响显示，不会改变稳定 ID 或文件路径。'
+  if (actionKind.value === 'rename') return ''
   if (actionKind.value === 'collection') return '集合会保存到本地工作区，并立即出现在侧边栏。'
   if (actionKind.value === 'folder') return '文件夹用于组织请求，可在下方选择任意集合或文件夹作为保存位置。'
   return ''
@@ -329,6 +332,177 @@ async function deleteSelected() {
   } else {
     deleteError.value = workspace.lastError?.message ?? '删除失败，请稍后重试。'
   }
+}
+
+const deleteOpen = computed({
+  get: () => deleteTarget.value !== null,
+  set: (show: boolean) => {
+    if (!show) deleteTarget.value = null
+  },
+})
+
+function itemMenuOptions(node: FlatNode) {
+  const label = node.kind === 'collection' ? '集合操作' : node.kind === 'folder' ? '文件夹操作' : '接口操作'
+  return [
+    { type: 'group' as const, key: `${node.id}-group`, label, children: [
+      { label: '重命名', key: 'rename', icon: () => h(AppIcon, { component: IconEdit, size: 15 }) },
+      { label: '导出', key: 'export', icon: () => h(AppIcon, { component: IconDownload, size: 15 }) },
+      { label: '复制', key: 'copy', icon: () => h(AppIcon, { component: IconCopy, size: 15 }) },
+    ] },
+    { type: 'divider' as const, key: `${node.id}-divider` },
+    { label: '删除', key: 'delete', icon: () => h(AppIcon, { component: IconDelete, size: 15 }), props: { class: 'node-menu-delete' } },
+  ]
+}
+
+function selectNode(node: FlatNode) {
+  selectedId.value = node.id
+  deleteError.value = ''
+}
+
+function exportFilename(node: FlatNode) {
+  const safeName = node.name.replace(/[\\/:*?"<>|]/g, '_').trim() || 'apogee-export'
+  return `${safeName}.postman_collection.json`
+}
+
+function isDescendantOf(node: FlatNode, rootId: string, byId: Map<string, FlatNode>) {
+  let cursor: FlatNode | undefined = node
+  while (cursor?.parentId) {
+    if (cursor.parentId === rootId) return true
+    cursor = byId.get(cursor.parentId)
+  }
+  return false
+}
+
+type PostmanItem = {
+  name: string
+  item?: PostmanItem[]
+  request?: Record<string, unknown>
+}
+
+function postmanRows(rows: KeyValue[] = []) {
+  return rows.map((row) => ({
+    key: row.key,
+    value: row.value,
+    disabled: !row.enabled,
+    ...(row.description ? { description: row.description } : {}),
+  }))
+}
+
+function postmanBody(body: RequestSpec['body']): Record<string, unknown> | undefined {
+  if (!body || body.type === 'none') return undefined
+  if (body.type === 'json') {
+    return { mode: 'raw', raw: body.content, options: { raw: { language: 'json' } } }
+  }
+  if (body.type === 'text') {
+    return { mode: 'raw', raw: body.content, options: { raw: { language: 'text' } } }
+  }
+  if (body.type === 'formData') return { mode: 'formdata', formdata: postmanRows(body.rows) }
+  if (body.type === 'urlEncoded') return { mode: 'urlencoded', urlencoded: postmanRows(body.rows) }
+  if (body.type === 'binary') return { mode: 'file', file: { src: body.path } }
+  return {
+    mode: 'graphql',
+    graphql: {
+      query: body.query,
+      variables: body.variables,
+      ...(body.operationName ? { operationName: body.operationName } : {}),
+    },
+  }
+}
+
+function postmanAuth(auth: RequestSpec['auth']): Record<string, unknown> | undefined {
+  if (!auth || auth.type === 'inherit') return undefined
+  if (auth.type === 'none') return { type: 'noauth' }
+  if (auth.type === 'basic') {
+    return { type: 'basic', basic: [{ key: 'username', value: auth.username, type: 'string' }, { key: 'password', value: auth.password, type: 'string' }] }
+  }
+  if (auth.type === 'bearer') return { type: 'bearer', bearer: [{ key: 'token', value: auth.token, type: 'string' }] }
+  return {
+    type: 'apikey',
+    apikey: [
+      { key: 'key', value: auth.key, type: 'string' },
+      { key: 'value', value: auth.value, type: 'string' },
+      { key: 'in', value: auth.location, type: 'string' },
+    ],
+  }
+}
+
+function postmanRequest(spec: RequestSpec): Record<string, unknown> {
+  const body = postmanBody(spec.body)
+  const auth = postmanAuth(spec.auth)
+  return {
+    method: spec.method,
+    header: postmanRows(spec.headers),
+    url: {
+      raw: spec.url,
+      ...(spec.params?.length ? { query: postmanRows(spec.params) } : {}),
+    },
+    ...(body ? { body } : {}),
+    ...(auth ? { auth } : {}),
+  }
+}
+
+async function exportNode(node: FlatNode) {
+  if (!workspace.available || !node.kind) return
+  try {
+    const byId = new Map(all.value.map((item) => [item.id, item]))
+    const scope = all.value.filter((item) => item.id === node.id || isDescendantOf(item, node.id, byId))
+    const requests = await Promise.all(scope
+      .filter((item) => item.kind === 'request')
+      .map(async (item) => ({ node: item, request: await ipc.workspaceReadRequest(item.id) })))
+    const requestsById = new Map(requests.map(({ node: item, request }) => [item.id, request]))
+    const buildItems = (parentId: string): PostmanItem[] => {
+      const items: PostmanItem[] = []
+      for (const item of scope.filter((candidate) => candidate.parentId === parentId)) {
+        if (item.kind === 'request') {
+          const request = requestsById.get(item.id)
+          if (request) items.push({ name: item.name, request: postmanRequest(request.spec) })
+          continue
+        }
+        items.push({ name: item.name, item: buildItems(item.id) })
+      }
+      return items
+    }
+    const payload = {
+      info: {
+        name: node.name,
+        schema: 'https://schema.getpostman.com/json/collection/v2.1.0/collection.json',
+      },
+      item: node.kind === 'request'
+        ? [{ name: node.name, request: postmanRequest(requestsById.get(node.id)!.spec) }]
+        : buildItems(node.id),
+    }
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = exportFilename(node)
+    anchor.click()
+    URL.revokeObjectURL(url)
+    toast().success(`已导出 Postman Collection：“${node.name}”`)
+  } catch (error) {
+    deleteError.value = error instanceof Error ? error.message : '导出失败，请稍后重试。'
+  }
+}
+
+async function onItemMenuSelect(key: string | number, node: FlatNode) {
+  selectNode(node)
+  if (key === 'rename') openAction('rename')
+  else if (key === 'export') await exportNode(node)
+  else if (key === 'copy') {
+    const success = await workspace.duplicateNode(node as WorkspaceNode)
+    if (success) toast().success(`已复制“${node.name}”`)
+    else deleteError.value = workspace.lastError?.message ?? '复制失败，请稍后重试。'
+  } else if (key === 'delete') deleteTarget.value = node
+}
+
+async function deleteItem() {
+  const target = deleteTarget.value
+  if (!target?.kind) return
+  deleteError.value = ''
+  const success = await workspace.deleteNode(target.id)
+  if (success && selectedId.value === target.id) selectedId.value = null
+  if (!success) deleteError.value = workspace.lastError?.message ?? '删除失败，请稍后重试。'
+  if (success) deleteTarget.value = null
 }
 
 // ── 定位当前接口 ──────────────────────────────────────────────────────
@@ -590,7 +764,7 @@ defineExpose({
           </template>
 
           <label class="action-field">
-            <span>名称</span>
+            <span v-if="actionKind !== 'rename'">名称</span>
             <AppInput
               v-model:value="actionName"
               autofocus
@@ -607,6 +781,21 @@ defineExpose({
           <AppSpace justify="end">
             <AppButton :disabled="actionSaving" @click="closeAction">取消</AppButton>
             <AppButton type="primary" :loading="actionSaving" @click="submitAction">确认</AppButton>
+          </AppSpace>
+        </template>
+      </AppModal>
+
+      <AppModal
+        v-model:show="deleteOpen"
+        preset="card"
+        title="删除"
+        :style="{ width: '400px' }"
+      >
+        <p class="delete-confirmation">确定删除“{{ deleteTarget?.name }}”及其内容吗？此操作不可恢复。</p>
+        <template #footer>
+          <AppSpace justify="end">
+            <AppButton @click="deleteTarget = null">取消</AppButton>
+            <AppButton type="error" @click="deleteItem">删除</AppButton>
           </AppSpace>
         </template>
       </AppModal>
@@ -629,8 +818,21 @@ defineExpose({
           <span class="node-icon" :class="{ folder: n.isFolder }">
             <AppIcon :component="n.isFolder ? (n.expanded ? IconFolderOpen : IconFolder) : IconApi" :size="15" />
           </span>
-          <span v-if="!n.isFolder" class="m method-badge" :class="`method-${String(n.method ?? 'GET').toLowerCase()}`">{{ n.method }}</span>
+          <span v-if="!n.isFolder" class="m method-badge" :class="`method-${String(n.method ?? 'GET').toLowerCase()}`">{{ n.method === 'DELETE' ? 'DEL' : n.method }}</span>
           <span class="name">{{ n.name }}</span>
+          <AppDropdown :options="itemMenuOptions(n)" placement="bottom-end" @select="onItemMenuSelect($event, n)">
+            <AppButton
+              class="item-menu-button"
+              quaternary
+              circle
+              size="tiny"
+              :aria-label="`${n.name} 操作菜单`"
+              title="更多操作"
+              @click.stop
+            >
+              <template #icon><AppIcon :component="IconMore" :size="15" /></template>
+            </AppButton>
+          </AppDropdown>
         </div>
       </div>
     </div>
@@ -707,6 +909,7 @@ defineExpose({
 }
 
 .delete-error { margin: 0 6px 4px; }
+.delete-confirmation { margin: 0; color: var(--a-text-soft); font: var(--a-fs-sm) / 1.6 var(--a-font-ui); }
 .action-modal { display: flex; flex-direction: column; gap: 10px; }
 .action-hint { margin: 0; color: var(--a-text-dim); font-size: 12px; line-height: 1.5; }
 .action-error { margin-bottom: 2px; }
@@ -763,6 +966,7 @@ defineExpose({
   font: 12px/normal var(--a-font-ui); color: var(--a-text-dim);
   white-space: nowrap; cursor: pointer;
 }
+
 .row:hover { background: var(--a-hover); color: var(--a-text); border-radius: 6px; }
 .row.selected:not(.active) { box-shadow: inset 2px 0 0 var(--a-border-strong); }
 .row.folder { color: var(--a-text); font-weight: 600; }
@@ -799,6 +1003,21 @@ defineExpose({
   height: auto;
   line-height: normal;
 }
+.name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.item-menu-button {
+  flex: 0 0 24px;
+  width: 24px;
+  height: 24px;
+  margin-left: auto;
+  padding: 0;
+  color: var(--a-text-faint);
+  opacity: 0;
+}
+.row:hover .item-menu-button,
+.row.selected .item-menu-button,
+.item-menu-button:focus-visible { opacity: 1; }
+.item-menu-button:hover { color: var(--a-text); background: var(--a-bg-3); }
+:global(.node-menu-delete) { color: var(--a-error) !important; }
 .m { font: 700 10px/normal var(--a-font-mono); width: 40px; }
 .name {
   flex: 1 1 auto;

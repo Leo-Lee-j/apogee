@@ -320,7 +320,13 @@ defineExpose({
   border-color: var(--a-primary);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--a-primary) 18%, transparent);
 }
-.method-select { width: 76px; height: var(--url-inner-height); flex: 0 0 auto; }
+.method-select {
+  width: max-content;
+  min-width: 76px;
+  max-width: none;
+  height: var(--url-inner-height);
+  flex: 0 0 auto;
+}
 .method-select :deep(.n-base-selection) {
   display: flex;
   align-items: center;
