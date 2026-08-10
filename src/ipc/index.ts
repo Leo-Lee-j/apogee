@@ -167,6 +167,10 @@ export interface AppSettings {
   openLastWorkspaceOnStart: boolean
   showMemoryMonitor: boolean
   lowMemoryMode: boolean
+  proxyMode: 'system' | 'manual' | 'none'
+  proxyUrl?: string
+  timeoutMs: number
+  verifyTls: boolean
 }
 
 export interface WorkspaceOpenResult {

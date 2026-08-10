@@ -684,7 +684,10 @@ fn client_for(settings: &ResolvedSettings) -> Result<reqwest::Client, AppError> 
         // 不能因为「省事」而默认放开。
         .danger_accept_invalid_certs(!settings.verify_tls);
 
-    if let Some(proxy_url) = settings
+    if settings.proxy_url.as_deref() == Some("direct://") {
+        // reqwest otherwise honors HTTP(S)_PROXY environment variables.
+        builder = builder.no_proxy();
+    } else if let Some(proxy_url) = settings
         .proxy_url
         .as_deref()
         .filter(|value| !value.trim().is_empty())

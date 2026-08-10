@@ -23,9 +23,6 @@ type SettingsSection = 'appearance' | 'network' | 'privacy'
 const ui = useUiStore()
 const app = useAppStore()
 const activeSection = ref<SettingsSection>('appearance')
-const proxyMode = ref('system')
-const timeout = ref(30000)
-const verifyTls = ref(true)
 const telemetry = ref(false)
 
 const sections = [
@@ -63,6 +60,10 @@ async function setMemoryMonitorVisible(value: boolean) {
 
 async function setLowMemoryMode(value: boolean) {
   await app.saveSettings({ ...app.settings, lowMemoryMode: value })
+}
+
+async function setNetwork(patch: Partial<typeof app.settings>) {
+  await app.saveSettings({ ...app.settings, ...patch })
 }
 
 async function restartApp() {
@@ -196,7 +197,8 @@ async function restartApp() {
               <AppForm label-placement="left" label-width="112" size="medium">
                 <AppFormItem label="代理">
                   <AppSelect
-                    v-model:value="proxyMode"
+                    :value="app.settings.proxyMode"
+                    @update:value="(value: any) => setNetwork({ proxyMode: value })"
                     class="control"
                     size="medium"
                     :options="[
@@ -206,15 +208,18 @@ async function restartApp() {
                     ]"
                   />
                 </AppFormItem>
+                <AppFormItem v-if="app.settings.proxyMode === 'manual'" label="Manual proxy URL">
+                  <AppInput :value="app.settings.proxyUrl" placeholder="http://127.0.0.1:8080" @update:value="(value: string) => setNetwork({ proxyUrl: value })" />
+                </AppFormItem>
                 <AppFormItem label="超时">
-                  <AppInputNumber v-model:value="timeout" class="control" :min="0" :step="1000" />
+                  <AppInputNumber :value="app.settings.timeoutMs" class="control" :min="0" :step="1000" @update:value="(value: number | null) => setNetwork({ timeoutMs: value ?? 30000 })" />
                   <span class="unit">ms</span>
                 </AppFormItem>
                 <AppFormItem label="校验 TLS">
-                  <AppSwitch v-model:value="verifyTls" />
+                  <AppSwitch :value="app.settings.verifyTls" @update:value="setNetwork({ verifyTls: $event })" />
                 </AppFormItem>
               </AppForm>
-              <AppAlert v-if="!verifyTls" type="warning" :bordered="false">
+              <AppAlert v-if="!app.settings.verifyTls" type="warning" :bordered="false">
                 关闭 TLS 校验后，连接可能被中间人窃听。仅用于明确知道风险的测试环境。
               </AppAlert>
             </section>

@@ -605,6 +605,20 @@ mod commands {
                 })
                 .map_err(|error| error.to_string())?;
         }
+        // 应用级网络设置只作为默认值，显式配置在请求/集合层的字段优先。
+        let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+        let settings = crate::app_settings::AppSettingsRepository::new(&data_dir)
+            .load()
+            .map_err(|error| error.to_string())?;
+        if spec.settings.timeout_ms.is_none() { spec.settings.timeout_ms = Some(settings.timeout_ms); }
+        if spec.settings.verify_tls.is_none() { spec.settings.verify_tls = Some(settings.verify_tls); }
+        if spec.settings.proxy_url.is_none() {
+            spec.settings.proxy_url = match settings.proxy_mode.as_str() {
+                "manual" => settings.proxy_url.filter(|v| !v.trim().is_empty()),
+                "none" => Some("direct://".to_string()),
+                _ => None,
+            };
+        }
         let environment = match ctx.as_ref().and_then(|item| item.environment_id.as_deref()) {
             Some(raw_id) => {
                 let environment_id =

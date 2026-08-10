@@ -14,11 +14,23 @@ pub struct AppSettings {
     pub show_memory_monitor: bool,
     #[serde(default)]
     pub low_memory_mode: bool,
+    #[serde(default = "default_proxy_mode")]
+    pub proxy_mode: String,
+    #[serde(default)]
+    pub proxy_url: Option<String>,
+    #[serde(default = "default_timeout_ms")]
+    pub timeout_ms: u64,
+    #[serde(default = "default_verify_tls")]
+    pub verify_tls: bool,
 }
 
 fn default_show_memory_monitor() -> bool {
     true
 }
+
+fn default_proxy_mode() -> String { "system".to_string() }
+fn default_timeout_ms() -> u64 { 30_000 }
+fn default_verify_tls() -> bool { true }
 
 pub struct AppSettingsRepository {
     app_data_dir: PathBuf,
@@ -43,6 +55,10 @@ impl AppSettingsRepository {
                 open_last_workspace_on_start: false,
                 show_memory_monitor: true,
                 low_memory_mode: false,
+                proxy_mode: default_proxy_mode(),
+                proxy_url: None,
+                timeout_ms: default_timeout_ms(),
+                verify_tls: default_verify_tls(),
             };
             self.save(&settings)?;
             return Ok(settings);
@@ -72,6 +88,10 @@ impl AppSettingsRepository {
             open_last_workspace_on_start: settings.open_last_workspace_on_start,
             show_memory_monitor: settings.show_memory_monitor,
             low_memory_mode: settings.low_memory_mode,
+            proxy_mode: settings.proxy_mode.clone(),
+            proxy_url: settings.proxy_url.clone(),
+            timeout_ms: settings.timeout_ms,
+            verify_tls: settings.verify_tls,
         };
         fs::create_dir_all(&self.app_data_dir)?;
         let temporary = self
