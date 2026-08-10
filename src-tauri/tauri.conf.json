@@ -25,7 +25,8 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' data: blob: apogee: http://apogee.localhost; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ipc: http://ipc.localhost apogee: http://apogee.localhost ws://localhost:5183 http://localhost:5183"
+      "csp": "default-src 'self'; img-src 'self' data: blob: apogee: http://apogee.localhost; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ipc: http://ipc.localhost apogee: http://apogee.localhost ws://localhost:5183 http://localhost:5183",
+      "dangerousDisableAssetCspModification": true
     }
   },
   "bundle": {
