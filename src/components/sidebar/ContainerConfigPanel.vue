@@ -60,6 +60,64 @@ function selectLayer(id: string) {
 
 const auth = computed<AuthConfig>(() => container.value?.auth ?? { type: 'inherit' })
 const settings = computed<RequestSettings>(() => container.value?.settings ?? {})
+const selectedLayerIndex = computed(() => chain.value.findIndex((layer) => layer.id === selectedNodeId.value))
+const hasParentLayer = computed(() => selectedLayerIndex.value > 0)
+const inheritedAuth = computed<AuthConfig>(() => {
+  let resolved: AuthConfig = { type: 'none' }
+  for (const layer of chain.value.slice(0, selectedLayerIndex.value)) {
+    const value = layerConfig(layer.id)?.auth
+    if (value && value.type !== 'inherit') resolved = value
+  }
+  return resolved
+})
+function inheritedBooleanSetting(field: 'followRedirects' | 'verifyTls') {
+  for (const layer of [...chain.value.slice(0, selectedLayerIndex.value)].reverse()) {
+    const value = layerConfig(layer.id)?.settings[field]
+    if (typeof value === 'boolean') return value
+  }
+  return true
+}
+const inheritedFollowRedirects = computed(() => inheritedBooleanSetting('followRedirects'))
+const inheritedVerifyTls = computed(() => inheritedBooleanSetting('verifyTls'))
+function inheritedNumberSetting(field: 'timeoutMs' | 'maxRedirects') {
+  for (const layer of [...chain.value.slice(0, selectedLayerIndex.value)].reverse()) {
+    const value = layerConfig(layer.id)?.settings[field]
+    if (typeof value === 'number') return value
+  }
+  return undefined
+}
+const inheritedTimeoutMs = computed(() => inheritedNumberSetting('timeoutMs'))
+const inheritedMaxRedirects = computed(() => inheritedNumberSetting('maxRedirects'))
+function numberSettingPlaceholder(value: number | undefined, defaultValue: number, unit: string) {
+  if (!hasParentLayer.value) return `默认值（${defaultValue} ${unit}）`
+  return value === undefined
+    ? `使用默认值（${defaultValue} ${unit}）`
+    : `继承上级（${value} ${unit}）`
+}
+const timeoutPlaceholder = computed(() => numberSettingPlaceholder(inheritedTimeoutMs.value, 30_000, 'ms'))
+const maxRedirectsPlaceholder = computed(() => numberSettingPlaceholder(inheritedMaxRedirects.value, 10, '次'))
+const authOptions = computed(() => [
+  ...(hasParentLayer.value ? [{ label: `继承上级（${authSummary(inheritedAuth.value)}）`, value: 'inherit' }] : []),
+  { label: '无鉴权', value: 'none' },
+  { label: 'Basic Auth', value: 'basic' },
+  { label: 'Bearer Token', value: 'bearer' },
+  { label: 'API Key', value: 'apiKey' },
+])
+const followRedirectOptions = computed(() => [
+  ...(hasParentLayer.value ? [{ label: `继承上级（${inheritedFollowRedirects.value ? '开启' : '关闭'}）`, value: 'inherit' }] : []),
+  { label: '开启', value: 'true' },
+  { label: '关闭', value: 'false' },
+])
+const verifyTlsOptions = computed(() => [
+  ...(hasParentLayer.value ? [{ label: `继承上级（${inheritedVerifyTls.value ? '校验' : '忽略'}）`, value: 'inherit' }] : []),
+  { label: '校验', value: 'true' },
+  { label: '忽略', value: 'false' },
+])
+const authSelectValue = computed(() => !hasParentLayer.value && auth.value.type === 'inherit' ? 'none' : auth.value.type)
+function booleanSelectValue(value: boolean | null | undefined, fallback: boolean) {
+  if (typeof value === 'boolean') return String(value)
+  return hasParentLayer.value ? 'inherit' : String(fallback)
+}
 function patchAuth(next: AuthConfig) { if (container.value) container.value = { ...container.value, auth: next } }
 function setAuthType(type: AuthConfig['type']) {
   const current = auth.value
@@ -117,14 +175,13 @@ async function save() {
       <section class="config-block editor">
         <header class="section-head"><strong>鉴权</strong><span>当前层配置</span></header>
         <WorkspaceForm :columns="2" class="editor-form">
-        <WorkspaceField label="鉴权类型"><AppSelect :value="auth.type" :options="[{ label: '继承上级', value: 'inherit' }, { label: '无鉴权', value: 'none' }, { label: 'Basic Auth', value: 'basic' }, { label: 'Bearer Token', value: 'bearer' }, { label: 'API Key', value: 'apiKey' }]" @update:value="setAuthType($event as AuthConfig['type'])" /></WorkspaceField>
-        <p v-if="auth.type === 'inherit'" class="hint">继承上级鉴权配置{{ currentNode?.kind === 'collection' ? '；集合未配置上级时等同无鉴权。' : '。' }}</p>
+        <WorkspaceField label="鉴权类型"><AppSelect :value="authSelectValue" :options="authOptions" @update:value="setAuthType($event as AuthConfig['type'])" /></WorkspaceField>
         <template v-if="auth.type === 'basic'"><WorkspaceField label="用户名"><AppInput :value="auth.username" @update:value="patchAuthField({ username: $event })" /></WorkspaceField><WorkspaceField label="密码"><AppInput :value="auth.password" type="password" show-password-on="click" @update:value="patchAuthField({ password: $event })" /></WorkspaceField></template>
         <WorkspaceField v-else-if="auth.type === 'bearer'" label="Token"><AppInput :value="auth.token" type="password" show-password-on="click" @update:value="patchAuthField({ token: $event })" /></WorkspaceField>
         <template v-else-if="auth.type === 'apiKey'"><WorkspaceField label="Key"><AppInput :value="auth.key" @update:value="patchAuthField({ key: $event })" /></WorkspaceField><WorkspaceField label="Value"><AppInput :value="auth.value" type="password" show-password-on="click" @update:value="patchAuthField({ value: $event })" /></WorkspaceField><WorkspaceField label="添加到"><AppSelect :value="auth.location" :options="[{ label: 'Header', value: 'header' }, { label: 'Query', value: 'query' }, { label: 'Cookie', value: 'cookie' }]" @update:value="patchAuthField({ location: String($event) })" /></WorkspaceField></template>
         </WorkspaceForm>
       </section>
-      <section class="config-block editor"><header class="section-head"><strong>请求设置</strong><span>未设置的项目继续继承</span></header><WorkspaceForm class="settings-grid" :columns="2"><WorkspaceField label="超时（ms）"><AppInputNumber :value="settings.timeoutMs ?? null" :min="1" @update:value="patchSettings({ timeoutMs: $event ?? undefined })" /></WorkspaceField><WorkspaceField label="最大重定向"><AppInputNumber :value="settings.maxRedirects ?? null" :min="0" :max="100" @update:value="patchSettings({ maxRedirects: $event ?? undefined })" /></WorkspaceField><WorkspaceField label="跟随重定向"><AppSelect :value="settings.followRedirects == null ? 'inherit' : String(settings.followRedirects)" :options="[{ label: '继承', value: 'inherit' }, { label: '开启', value: 'true' }, { label: '关闭', value: 'false' }]" @update:value="patchBooleanSetting('followRedirects', $event)" /></WorkspaceField><WorkspaceField label="校验 TLS"><AppSelect :value="settings.verifyTls == null ? 'inherit' : String(settings.verifyTls)" :options="[{ label: '继承', value: 'inherit' }, { label: '校验', value: 'true' }, { label: '忽略', value: 'false' }]" @update:value="patchBooleanSetting('verifyTls', $event)" /></WorkspaceField></WorkspaceForm></section>
+      <section class="config-block editor"><header class="section-head"><strong>请求设置</strong></header><WorkspaceForm class="settings-grid" :columns="2"><WorkspaceField label="超时（ms）"><AppInputNumber :value="settings.timeoutMs ?? null" :min="1" clearable :placeholder="timeoutPlaceholder" @update:value="patchSettings({ timeoutMs: $event ?? undefined })" /></WorkspaceField><WorkspaceField label="最大重定向"><AppInputNumber :value="settings.maxRedirects ?? null" :min="0" :max="100" clearable :placeholder="maxRedirectsPlaceholder" @update:value="patchSettings({ maxRedirects: $event ?? undefined })" /></WorkspaceField><WorkspaceField label="跟随重定向"><AppSelect :value="booleanSelectValue(settings.followRedirects, inheritedFollowRedirects)" :options="followRedirectOptions" @update:value="patchBooleanSetting('followRedirects', $event)" /></WorkspaceField><WorkspaceField label="校验 TLS"><AppSelect :value="booleanSelectValue(settings.verifyTls, inheritedVerifyTls)" :options="verifyTlsOptions" @update:value="patchBooleanSetting('verifyTls', $event)" /></WorkspaceField></WorkspaceForm></section>
       </div></template>
       </WorkspaceContent>
       <div v-else class="empty">找不到该容器配置。</div>
