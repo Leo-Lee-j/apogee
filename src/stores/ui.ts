@@ -86,6 +86,11 @@ export const useUiStore = defineStore('ui', () => {
   const historyOpen = ref(false)
   /** 「保存到」位置选择器。草稿保存（保存按钮或 Ctrl+S）从任意位置打开它。 */
   const saveAsOpen = ref(false)
+  /**
+   * 设置页当前分区。命令面板 / Ctrl+, 深链会写这里；Settings 面板双向同步。
+   * 放在 ui 而不是 tab 字段：设置是单例页，分区是导航状态不是标签身份。
+   */
+  const settingsSection = ref<'appearance' | 'startup' | 'network' | 'performance' | 'about'>('appearance')
 
   /**
    * 「把焦点交给 URL 栏」的信号计数器。
@@ -133,7 +138,7 @@ export const useUiStore = defineStore('ui', () => {
 
   return {
     sidebarVisible, sidebarWidth, sidebarMaxW, layout, themeMode, requestRatio,
-    historyOpen, saveAsOpen, paletteOpen, spikeOpen, spikePanel,
+    historyOpen, saveAsOpen, settingsSection, paletteOpen, spikeOpen, spikePanel,
     urlFocusSeq, focusUrl,
     systemDark, isDark, applyTheme, cycleLayout, setLayout,
     setSidebarWidth, resetSidebarWidth, syncViewport,

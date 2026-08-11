@@ -261,9 +261,16 @@ export const useTabsStore = defineStore('tabs', () => {
     })
   }
 
-  /** 设置是单实例工作区页；重复点击入口只激活已有标签。 */
-  function openSettings(): Tab {
-    useUiStore().spikeOpen = false
+  /**
+   * 设置是单实例工作区页；重复点击入口只激活已有标签。
+   * section 用于命令面板深链（外观 / 网络 / 关于…）。
+   */
+  function openSettings(
+    section?: 'appearance' | 'startup' | 'network' | 'performance' | 'about',
+  ): Tab {
+    const ui = useUiStore()
+    ui.spikeOpen = false
+    if (section) ui.settingsSection = section
     const existing = tabs.value.find((tab) => tab.kind === 'settings')
     if (existing) {
       activate(existing.id)

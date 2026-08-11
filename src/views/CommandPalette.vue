@@ -19,6 +19,9 @@ const commands = computed(() => [
   { id: 'layout', label: '切换请求/响应布局', hint: 'Ctrl+Shift+L', run: () => ui.cycleLayout() },
   { id: 'theme', label: ui.isDark ? '切换到亮色主题' : '切换到暗色主题', hint: '', run: () => { ui.themeMode = ui.isDark ? 'light' : 'dark'; ui.applyTheme() } },
   { id: 'settings', label: '打开设置', hint: 'Ctrl+,', run: () => tabs.openSettings() },
+  { id: 'settings-network', label: '打开设置 → 网络', hint: '', run: () => tabs.openSettings('network') },
+  { id: 'settings-appearance', label: '打开设置 → 外观', hint: '', run: () => tabs.openSettings('appearance') },
+  { id: 'settings-about', label: '打开设置 → 关于', hint: '', run: () => tabs.openSettings('about') },
 ])
 
 const filtered = computed(() => {

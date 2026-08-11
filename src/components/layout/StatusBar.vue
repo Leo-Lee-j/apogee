@@ -19,6 +19,16 @@ const layoutLabel = computed(() => ({
   'side-by-side': '左右分栏',
   focus: '专注模式',
 }[ui.layout]))
+const proxyLabel = computed(() => {
+  switch (app.settings.proxyMode) {
+    case 'manual':
+      return '手动'
+    case 'none':
+      return '关闭'
+    default:
+      return '系统'
+  }
+})
 </script>
 
 <template>
@@ -27,7 +37,7 @@ const layoutLabel = computed(() => ({
     <span class="sep">|</span>
     <span>dev</span>
     <span class="sep">|</span>
-    <span>代理: 系统</span>
+    <span>代理: {{ proxyLabel }}</span>
     <span class="sep">|</span>
     <span v-if="dirtyCount">未保存 {{ dirtyCount }}</span>
     <span v-else class="dim">全部已保存</span>
