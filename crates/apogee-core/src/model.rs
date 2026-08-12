@@ -79,6 +79,12 @@ pub struct ActualRequest {
     pub method: String,
     pub url: String,
     pub headers: Vec<(String, String)>,
+    /// 已知浏览器/协议通用 Header 名称。
+    ///
+    /// 导入 cURL / HAR 时标准浏览器 Header 同样会标记，以便 UI 默认只显示
+    /// 业务自定义 Header；打开“显示通用 Header”后仍可查看完整实际请求。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub common_header_names: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub body: Option<String>,
 }

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, defineAsyncComponent, watch } from 'vue'
 import { fetchResponseRange, responseUrl, type AppError } from '@/ipc'
+import { isKnownOfficialHeader } from '@/features/commonHeaders'
 import { useTabsStore } from '@/stores/tabs'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import AppTooltip from '@/components/ui/AppTooltip.vue'
@@ -25,6 +26,12 @@ const bodyView = ref<BodyView>('pretty')
 const codeTarget = ref<CodeTarget>('windows')
 const copyState = ref('')
 
+const props = withDefaults(defineProps<{
+  showCommonHeaders?: boolean
+}>(), {
+  showCommonHeaders: false,
+})
+
 const tabs = useTabsStore()
 const resp = computed(() => tabs.active?.response ?? null)
 const requestError = computed<AppError | null>(() => tabs.active?.error ?? null)
@@ -48,6 +55,20 @@ const canPreview = computed(() => {
 })
 const previewSrc = computed(() => resp.value ? responseUrl(resp.value.id) : '')
 const actualRequest = computed(() => resp.value?.actualRequest ?? null)
+const actualHeaders = computed(() => {
+  const request = actualRequest.value
+  if (!request || props.showCommonHeaders) return request?.headers ?? []
+
+  const commonHeaderNames = new Set(
+    (request.commonHeaderNames ?? []).map((name) => name.toLowerCase()),
+  )
+  return request.headers.filter(([name]) =>
+    !commonHeaderNames.has(name.toLowerCase()) && !isKnownOfficialHeader(name),
+  )
+})
+const hiddenCommonHeaderCount = computed(() =>
+  (actualRequest.value?.headers.length ?? 0) - actualHeaders.value.length,
+)
 
 function decodeQueryPart(value: string) {
   try {
@@ -318,11 +339,16 @@ async function copyText(text: string, success = '已复制') {
           </section>
 
           <section class="actual-section">
-            <header><strong>Header</strong><span>{{ actualRequest.headers.length }} 项</span></header>
-            <div class="actual-headers">
+            <header>
+              <strong>Header</strong>
+              <span>{{ actualHeaders.length }} 项</span>
+              <span v-if="hiddenCommonHeaderCount" class="actual-hidden-note">已隐藏 {{ hiddenCommonHeaderCount }} 项通用 Header</span>
+            </header>
+            <div v-if="actualHeaders.length" class="actual-headers">
               <div class="actual-header actual-header-head"><span>名称</span><span>值</span></div>
-              <div v-for="([name, value], index) in actualRequest.headers" :key="`${name}-${index}`" class="actual-header"><code>{{ name }}</code><span class="a-selectable">{{ value }}</span></div>
+              <div v-for="([name, value], index) in actualHeaders" :key="`${name}-${index}`" class="actual-header"><code>{{ name }}</code><span class="a-selectable">{{ value }}</span></div>
             </div>
+            <p v-else class="actual-none">{{ hiddenCommonHeaderCount ? '通用 Header 已隐藏；请在请求 Headers 中打开“显示通用 Header”。' : '此请求没有 Header。' }}</p>
           </section>
 
           <section class="actual-section code-section">
@@ -459,6 +485,7 @@ async function copyText(text: string, success = '已复制') {
 .actual-section { margin-top: 16px; }
 .actual-section > header { min-height: 28px; display: flex; align-items: center; gap: 8px; color: var(--a-text); font-size: var(--a-font-result); }
 .actual-section > header > span { color: var(--a-text-faint); font: 11px var(--a-font-mono); }
+.actual-section > header > .actual-hidden-note { margin-left: auto; color: var(--a-text-faint); font-family: var(--a-font-ui); }
 .actual-params { overflow: hidden; border: 1px solid var(--a-border); border-radius: var(--a-radius-sm); }
 .actual-param { min-height: 28px; display: grid; grid-template-columns: minmax(130px, 22%) minmax(180px, 34%) minmax(240px, 1fr); border-bottom: 1px solid var(--a-border); font-size: var(--a-font-result); }
 .actual-param:last-child { border-bottom: 0; }

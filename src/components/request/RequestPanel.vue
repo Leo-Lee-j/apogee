@@ -16,6 +16,7 @@ import { IconFolderOpen } from '@/components/ui/icons'
 import NaiveThemeScope from '@/components/NaiveThemeScope.vue'
 import ParameterEditor from './ParameterEditor.vue'
 import VariableInput from './VariableInput.vue'
+import { commonHeadersFor, isKnownOfficialHeader } from '@/features/commonHeaders'
 import { booleanSetting, httpVersionSetting, numberSetting, settingBooleanValue } from '@/features/requestSettings'
 
 /**
@@ -58,6 +59,26 @@ interface EditorSection {
 const tabs = useTabsStore()
 const tab = computed(() => tabs.active)
 const current = ref<PanelTab>('Params')
+const props = withDefaults(defineProps<{
+  showCommonHeaders?: boolean
+}>(), {
+  showCommonHeaders: false,
+})
+const emit = defineEmits<{
+  'update:showCommonHeaders': [show: boolean]
+}>()
+const headers = computed<KeyValue[]>(() => tab.value?.headers ?? [])
+const visibleHeaderIndices = computed(() => headers.value.flatMap((header, index) =>
+  props.showCommonHeaders || !isKnownOfficialHeader(header.key) ? [index] : [],
+))
+const visibleHeaders = computed(() => visibleHeaderIndices.value
+  .map((index) => headers.value[index])
+  .filter((header): header is KeyValue => header != null))
+const commonHeaders = computed(() => commonHeadersFor(headers.value))
+
+function toggleCommonHeaders() {
+  emit('update:showCommonHeaders', !props.showCommonHeaders)
+}
 
 /** 当前 tab 下需要显示的参数/请求头表格。 */
 const editorSections = computed<EditorSection[]>(() => {
@@ -82,13 +103,11 @@ const editorSections = computed<EditorSection[]>(() => {
   }
 
   if (current.value === 'Headers') {
-    return [
-      {
-        kind: 'headers',
-        label: '请求 Headers',
-        rows: currentTab.headers,
-      },
-    ]
+    return [{
+      kind: 'headers',
+      label: '请求 Headers',
+      rows: visibleHeaders.value,
+    }]
   }
 
   return []
@@ -125,26 +144,46 @@ function patchRows(kind: RowField, rows: KeyValue[]) {
   if (currentTab) tabs.patch(currentTab.id, delta)
 }
 
+/** 把界面中的 Header 行索引映射回完整的持久化 Header 数组。 */
+function sourceIndexFor(kind: RowField, displayedIndex: number): number | undefined {
+  const sourceIndex = kind === 'headers'
+    ? visibleHeaderIndices.value[displayedIndex]
+    : displayedIndex
+  return sourceIndex != null && sourceIndex < rowsFor(kind).length ? sourceIndex : undefined
+}
+
 function updateRow(kind: RowField, index: number, delta: Partial<KeyValue>) {
+  const sourceIndex = sourceIndexFor(kind, index)
+  if (sourceIndex == null) return
   const rows = rowsFor(kind)
-  const currentRow = rows[index]
+  const currentRow = rows[sourceIndex]
   if (!currentRow) return
   const nextRow = { ...currentRow, ...delta }
   const empty = !nextRow.key && !nextRow.value && !nextRow.description
   patchRows(
     kind,
     empty
-      ? rows.filter((_, rowIndex) => rowIndex !== index)
-      : rows.map((row, rowIndex) => rowIndex === index ? nextRow : row),
+      ? rows.filter((_, rowIndex) => rowIndex !== sourceIndex)
+      : rows.map((row, rowIndex) => rowIndex === sourceIndex ? nextRow : row),
   )
 }
 
 function removeRow(kind: RowField, index: number) {
-  patchRows(kind, rowsFor(kind).filter((_, rowIndex) => rowIndex !== index))
+  const sourceIndex = sourceIndexFor(kind, index)
+  if (sourceIndex == null) return
+  patchRows(kind, rowsFor(kind).filter((_, rowIndex) => rowIndex !== sourceIndex))
 }
 
 function setAllRowsEnabled(kind: RowField, enabled: boolean) {
-  patchRows(kind, rowsFor(kind).map((row) => ({ ...row, enabled })))
+  if (kind !== 'headers') {
+    patchRows(kind, rowsFor(kind).map((row) => ({ ...row, enabled })))
+    return
+  }
+
+  const visible = new Set(visibleHeaderIndices.value)
+  patchRows('headers', rowsFor('headers').map((row, index) =>
+    visible.has(index) ? { ...row, enabled } : row,
+  ))
 }
 
 function updateParameterField(
@@ -153,7 +192,7 @@ function updateParameterField(
   field: 'key' | 'value' | 'description',
   value: string,
 ) {
-  if (index < rowsFor(kind).length) {
+  if (sourceIndexFor(kind, index) != null) {
     updateRow(kind, index, { [field]: value })
     return
   }
@@ -165,16 +204,50 @@ function updateParameterField(
 }
 
 function reorderRows(kind: RowField, from: number, to: number) {
-  const rows = [...rowsFor(kind)]
-  const [moved] = rows.splice(from, 1)
+  if (kind !== 'headers') {
+    const rows = [...rowsFor(kind)]
+    const [moved] = rows.splice(from, 1)
+    if (!moved) return
+    rows.splice(to, 0, moved)
+    patchRows(kind, rows)
+    return
+  }
+
+  const sourceIndices = visibleHeaderIndices.value
+  if (from === to || to < 0 || to >= sourceIndices.length) return
+  const displayedRows = sourceIndices.map((index) => rowsFor('headers')[index]).filter((row): row is KeyValue => row != null)
+  const [moved] = displayedRows.splice(from, 1)
   if (!moved) return
-  rows.splice(to, 0, moved)
-  patchRows(kind, rows)
+  displayedRows.splice(to, 0, moved)
+
+  const nextRows = [...rowsFor('headers')]
+  sourceIndices.forEach((sourceIndex, displayedIndex) => {
+    const row = displayedRows[displayedIndex]
+    if (row) nextRows[sourceIndex] = row
+  })
+  patchRows('headers', nextRows)
+}
+
+function displayedRowsFor(kind: RowField): KeyValue[] {
+  return kind === 'headers' ? visibleHeaders.value : rowsFor(kind)
+}
+
+/** 用批量编辑结果替换可见 Header，保留默认隐藏的通用 Header。 */
+function patchVisibleHeaders(nextVisibleRows: KeyValue[]) {
+  const visible = new Set(visibleHeaderIndices.value)
+  let nextVisibleIndex = 0
+  const nextRows = rowsFor('headers').flatMap((row, index) => {
+    if (!visible.has(index)) return [row]
+    const replacement = nextVisibleRows[nextVisibleIndex]
+    nextVisibleIndex += 1
+    return replacement ? [replacement] : []
+  })
+  patchRows('headers', [...nextRows, ...nextVisibleRows.slice(nextVisibleIndex)])
 }
 
 /**
  * 批量编辑：Params 只编辑 Query 参数（Path 参数由 URL 自动识别，不参与批量），
- * Headers 编辑全部请求头。纯文本一行一条，`key: value` 格式，`//` 前缀行在应用后禁用。
+ * Headers 仅编辑当前可见项；默认隐藏的通用 Header 会原样保留。
  */
 const bulkEditing = ref(false)
 const bulkDraft = ref('')
@@ -217,13 +290,14 @@ function bulkTextToRows(text: string): KeyValue[] {
 function openBulkEdit() {
   const kind = bulkKind.value
   if (!kind || !tab.value) return
-  bulkDraft.value = rowsToBulkText(rowsFor(kind))
+  bulkDraft.value = rowsToBulkText(displayedRowsFor(kind))
   bulkEditing.value = true
 }
 
 function applyBulkEdit() {
   const kind = bulkKind.value
-  if (kind) patchRows(kind, bulkTextToRows(bulkDraft.value))
+  if (kind === 'headers') patchVisibleHeaders(bulkTextToRows(bulkDraft.value))
+  else if (kind) patchRows(kind, bulkTextToRows(bulkDraft.value))
   bulkEditing.value = false
 }
 
@@ -380,7 +454,29 @@ function patchVersion(value: string | number | null) {
         </section>
         <template v-else>
           <section v-for="section in editorSections" :key="section.kind" class="parameter-group">
-            <header class="section-head"><strong>{{ section.label }}</strong><span>{{ section.rows.length }} 项</span></header>
+            <header class="section-head">
+              <strong>{{ section.label }}</strong>
+              <span>{{ section.rows.length + (section.kind === 'headers' && props.showCommonHeaders ? commonHeaders.length : 0) }} 项</span>
+              <button
+                v-if="section.kind === 'headers'"
+                type="button"
+                class="common-header-toggle"
+                :aria-pressed="props.showCommonHeaders"
+                :title="props.showCommonHeaders ? '隐藏客户端和协议自动生成的通用 Header' : '显示客户端和协议自动生成的通用 Header'"
+                @click="toggleCommonHeaders"
+              >
+                {{ props.showCommonHeaders ? '隐藏通用 Header' : '显示通用 Header' }}
+              </button>
+            </header>
+            <div v-if="section.kind === 'headers' && props.showCommonHeaders" class="common-headers" role="table" aria-label="通用请求 Headers">
+              <div v-if="commonHeaders.length" class="common-header-table">
+                <div class="common-header-row common-header-head" role="row"><span>名称</span><span>值</span><span>来源</span></div>
+                <div v-for="header in commonHeaders" :key="header.key" class="common-header-row" role="row">
+                  <code>{{ header.key }}</code><span>{{ header.value }}</span><span>自动附加</span>
+                </div>
+              </div>
+              <p v-else class="common-header-empty">当前请求已显式配置所有可预览的通用 Header。</p>
+            </div>
             <div class="parameter-table">
               <ParameterEditor
                 :rows="section.rows"
@@ -556,6 +652,26 @@ function patchVersion(value: string | number | null) {
 .parameter-group { overflow: hidden; border: 1px solid var(--a-border); border-radius: var(--a-radius-md); background: var(--a-bg-2); }
 .parameter-group + .parameter-group { margin-top: 8px; }
 .parameter-group > .section-head span { margin-left: auto; color: var(--a-text-faint); font-size: 11px; font-weight: 400; }
+.common-header-toggle {
+  flex: 0 0 auto; height: 24px; padding: 0 7px; border: 1px solid var(--a-border);
+  border-radius: var(--a-radius-sm); background: transparent; color: var(--a-text-dim);
+  font: 11px var(--a-font-ui); cursor: pointer;
+}
+.common-header-toggle:hover { border-color: var(--a-primary); color: var(--a-primary); }
+.common-header-toggle[aria-pressed='true'] { border-color: var(--a-primary); background: var(--a-selected); color: var(--a-primary); }
+.common-headers { border-bottom: 1px solid var(--a-border); background: color-mix(in srgb, var(--a-bg-1) 48%, transparent); }
+.common-header-table { overflow-x: auto; }
+.common-header-row {
+  min-height: 28px; display: grid; grid-template-columns: minmax(120px, 28%) minmax(180px, 1fr) 84px;
+  border-bottom: 1px solid var(--a-border); color: var(--a-text-soft); font-size: 11px;
+}
+.common-header-row:last-child { border-bottom: 0; }
+.common-header-row > * { min-width: 0; padding: 5px 9px; overflow-wrap: anywhere; border-right: 1px solid var(--a-border); }
+.common-header-row > :last-child { border-right: 0; color: var(--a-text-faint); }
+.common-header-row code { color: var(--a-post); font: 11px/18px var(--a-font-mono); }
+.common-header-head { background: var(--a-bg-3); color: var(--a-text-faint); font-weight: var(--a-fw-medium); }
+.common-header-head span { color: inherit; }
+.common-header-empty { margin: 0; padding: 9px 10px; color: var(--a-text-faint); font-size: 11px; }
 .parameter-table { min-width: 0; overflow-x: auto; padding: 8px; }
 .config-head, .section-head {
   display: flex; align-items: center; gap: 8px;

@@ -44,6 +44,8 @@ const workspace = useWorkspaceStore()
 const urlBar = ref<{ send: () => void } | null>(null)
 const historyMounted = ref(false)
 const paletteMounted = ref(false)
+/** 仅影响当前工作区的展示，不写入请求配置或持久化数据。 */
+const showCommonHeaders = ref(false)
 
 // 首次打开时才下载弹窗；之后保持挂载，仅切换 NModal 的 show，保证进出场动画完整。
 watch(() => ui.historyOpen, (open) => { if (open) historyMounted.value = true }, { immediate: true })
@@ -392,8 +394,13 @@ function onKeydown(e: KeyboardEvent) {
           <NewPanel id="new-request-panel" class="pane a-block" />
         </div>
         <WorkspaceContent v-else split use-global-layout>
-          <template #primary><RequestPanel /></template>
-          <template #secondary><ResponsePanel /></template>
+          <template #primary>
+            <RequestPanel
+              :show-common-headers="showCommonHeaders"
+              @update:show-common-headers="showCommonHeaders = $event"
+            />
+          </template>
+          <template #secondary><ResponsePanel :show-common-headers="showCommonHeaders" /></template>
         </WorkspaceContent>
       </WorkspaceArea>
     </div>

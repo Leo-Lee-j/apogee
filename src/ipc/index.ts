@@ -55,6 +55,8 @@ export interface ActualRequest {
   method: string
   url: string
   headers: [string, string][]
+  /** 已知浏览器/协议通用 Header 名称，供实际请求表格默认隐藏。 */
+  commonHeaderNames?: string[]
   /** 仅小型内存请求体可用；文件和流式上传不会进入快照。 */
   body?: string
 }

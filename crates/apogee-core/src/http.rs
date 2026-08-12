@@ -859,6 +859,62 @@ async fn execute_inner(
     }))
 }
 
+/// 浏览器、HTTP 客户端或协议层惯例生成的 Header。导入 cURL / HAR 后这些值
+/// 也会按名称归类为通用 Header，使默认视图只保留业务自定义 Header。
+fn is_known_official_header(name: &str) -> bool {
+    matches!(
+        name,
+        "accept"
+            | "accept-charset"
+            | "accept-encoding"
+            | "accept-language"
+            | "access-control-request-headers"
+            | "access-control-request-method"
+            | "baggage"
+            | "cache-control"
+            | "connection"
+            | "content-length"
+            | "content-type"
+            | "cookie"
+            | "device-memory"
+            | "dnt"
+            | "downlink"
+            | "dpr"
+            | "ect"
+            | "expect"
+            | "host"
+            | "if-match"
+            | "if-modified-since"
+            | "if-none-match"
+            | "if-range"
+            | "if-unmodified-since"
+            | "origin"
+            | "pragma"
+            | "priority"
+            | "purpose"
+            | "range"
+            | "referer"
+            | "requestid"
+            | "rtt"
+            | "save-data"
+            | "sec-gpc"
+            | "sentry-trace"
+            | "service-worker-navigation-preload"
+            | "te"
+            | "trailer"
+            | "transfer-encoding"
+            | "upgrade"
+            | "upgrade-insecure-requests"
+            | "user-agent"
+            | "via"
+            | "viewport-width"
+            | "warning"
+            | "width"
+            | "x-client-data"
+    ) || name.starts_with("sec-ch-")
+        || name.starts_with("sec-fetch-")
+}
+
 fn snapshot_request(request: &reqwest::Request) -> ActualRequest {
     const MAX_SNAPSHOT_BODY: usize = 64 * 1024;
 
@@ -900,6 +956,17 @@ fn snapshot_request(request: &reqwest::Request) -> ActualRequest {
     }
     headers.sort_by(|left, right| left.0.cmp(&right.0));
 
+    let common_header_names = headers
+        .iter()
+        .map(|(name, _)| name.to_ascii_lowercase())
+        .filter(|name| is_known_official_header(name))
+        .fold(Vec::new(), |mut names, name| {
+            if !names.contains(&name) {
+                names.push(name);
+            }
+            names
+        });
+
     let body = body_bytes
         .filter(|bytes| bytes.len() <= MAX_SNAPSHOT_BODY)
         .map(|bytes| String::from_utf8_lossy(bytes).into_owned());
@@ -907,6 +974,7 @@ fn snapshot_request(request: &reqwest::Request) -> ActualRequest {
     ActualRequest {
         method: request.method().as_str().to_string(),
         url: request.url().as_str().to_string(),
+        common_header_names,
         headers,
         body,
     }
@@ -932,8 +1000,8 @@ fn build_request(
 
     let mut builder = client.request(method, &url);
 
-    // 用户在 Header 面板里显式写的头名。先收集，因为鉴权和 body 的
-    // `Content-Type` 都要给它让位 —— 见 `apply_auth` 里关于 append 语义的说明。
+    // Header 面板里的显式配置拥有最高优先级：它会覆盖客户端默认 Header，
+    // 以及鉴权和 body 自动生成的同名 Header。
     let user_headers: HashSet<String> = spec
         .headers
         .iter()
