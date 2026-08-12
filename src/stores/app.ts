@@ -3,6 +3,7 @@ import { defineStore } from 'pinia'
 import { ipc, normalizeError, type AppError, type AppSettings, type WorkspaceDescriptor, type WorkspaceOpenResult } from '@/ipc'
 import { useTabsStore } from '@/stores/tabs'
 import { useWorkspaceStore } from '@/stores/workspace'
+import { useUiStore } from '@/stores/ui'
 
 export type AppShellKind = 'launcher' | 'opening' | 'workspace' | 'closing'
 
@@ -12,7 +13,7 @@ export const useAppStore = defineStore('app', () => {
   const busyWorkspaceId = ref<string | null>(null)
   const lastError = ref<AppError | null>(null)
   const createDialogOpen = ref(false)
-  const settings = ref<AppSettings>({ defaultWorkspaceRoot: '', openLastWorkspaceOnStart: false, showMemoryMonitor: true, lowMemoryMode: false, proxyMode: 'system', proxyUrl: '', timeoutMs: 30000, verifyTls: true })
+  const settings = ref<AppSettings>({ settingsVersion: 1, defaultWorkspaceRoot: '', openLastWorkspaceOnStart: false, showMemoryMonitor: true, lowMemoryMode: false, proxyMode: 'system', proxyUrl: '', timeoutMs: 30000, verifyTls: true, themeMode: 'light', language: 'system', fontFamily: 'system' })
   let initialized = false
 
   async function refresh() {
@@ -29,6 +30,14 @@ export const useAppStore = defineStore('app', () => {
     initialized = true
     try {
       settings.value = await ipc.appSettingsLoad()
+      const ui = useUiStore()
+      ui.themeMode = settings.value.themeMode
+      ui.applyTheme()
+      ui.applyFont(settings.value.fontFamily)
+      if (typeof document !== 'undefined') {
+        const systemLanguage = typeof navigator !== 'undefined' && navigator.language.toLowerCase().startsWith('en') ? 'en-US' : 'zh-CN'
+        document.documentElement.lang = settings.value.language === 'system' ? systemLanguage : settings.value.language
+      }
     } catch (error) {
       lastError.value = normalizeError(error)
     }

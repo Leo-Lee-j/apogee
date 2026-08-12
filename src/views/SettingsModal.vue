@@ -26,6 +26,7 @@ import {
 import { ipc } from '@/ipc'
 import { useUiStore } from '@/stores/ui'
 import { useAppStore } from '@/stores/app'
+import type { FontFamilyMode, LanguageMode, ThemeMode } from '@/stores/ui'
 
 /** 设置左侧导航分区；命令面板 / openSettings 可直达。 */
 export type SettingsSection = 'appearance' | 'startup' | 'network' | 'performance' | 'about'
@@ -54,6 +55,21 @@ const themeOptions = [
   { label: '暗色', value: 'dark' },
   { label: '亮色', value: 'light' },
   { label: '跟随系统', value: 'system' },
+]
+const languageOptions = [
+  { label: '跟随系统', value: 'system' },
+  { label: '简体中文', value: 'zh-CN' },
+  { label: 'English', value: 'en-US' },
+]
+const fontOptions = [
+  { label: '系统默认', value: 'system' },
+  { label: 'Inter', value: 'Inter' },
+  { label: 'Segoe UI', value: 'Segoe UI' },
+  { label: '微软雅黑', value: 'Microsoft YaHei UI' },
+  { label: '苹方', value: 'PingFang SC' },
+  { label: '等线', value: 'DengXian' },
+  { label: '霞鹜文楷', value: 'LXGW WenKai' },
+  { label: 'Noto Sans SC', value: 'Noto Sans SC' },
 ]
 const proxyOptions = [
   { label: '系统代理', value: 'system' },
@@ -138,6 +154,26 @@ async function setNetwork(patch: Partial<typeof app.settings>) {
   await persist(patch)
 }
 
+async function setTheme(value: ThemeMode) {
+  ui.themeMode = value
+  ui.applyTheme()
+  await persist({ themeMode: value })
+}
+
+async function setLanguage(value: LanguageMode) {
+  await persist({ language: value })
+  if (typeof document !== 'undefined') {
+    const systemLanguage = typeof navigator !== 'undefined' && navigator.language.toLowerCase().startsWith('en') ? 'en-US' : 'zh-CN'
+    document.documentElement.lang = value === 'system' ? systemLanguage : value
+  }
+}
+
+async function setFont(value: FontFamilyMode) {
+  if (!value.trim()) return
+  ui.applyFont(value)
+  await persist({ fontFamily: value })
+}
+
 function onProxyUrlInput(value: string) {
   proxyUrlDraft.value = value
   if (proxySaveTimer) clearTimeout(proxySaveTimer)
@@ -204,12 +240,22 @@ async function restartApp() {
                   :class="{ selected: ui.themeMode === option.value }"
                   role="radio"
                   :aria-checked="ui.themeMode === option.value"
-                  @click="ui.themeMode = option.value as any; ui.applyTheme()"
+                  @click="setTheme(option.value as ThemeMode)"
                 >
                   <span class="choice-title">{{ option.label }}</span>
                   <span class="choice-description">{{ option.value === 'dark' ? '适合低光环境' : option.value === 'light' ? '清晰明亮的界面' : '跟随系统设置' }}</span>
                 </button>
               </div>
+            </section>
+
+            <section class="settings-group">
+              <div class="group-heading"><h2>语言</h2><p>控制组件内置文案；应用业务文案将逐步补齐翻译。</p></div>
+              <AppSelect class="control" size="medium" :value="app.settings.language" :options="languageOptions" @update:value="(value: any) => setLanguage(value)" />
+            </section>
+
+            <section class="settings-group">
+              <div class="group-heading"><h2>字体</h2><p>从常见系统字体中选择，也可以输入本机已安装的字体名称。</p></div>
+              <AppSelect class="control-wide" size="medium" :value="app.settings.fontFamily" :options="fontOptions" filterable tag clearable placeholder="选择或输入字体名称" @update:value="(value: string | null) => setFont(value || 'system')" />
             </section>
 
             <section class="settings-group">
@@ -375,6 +421,7 @@ async function restartApp() {
   overflow: hidden;
   background: var(--a-bg-2);
 }
+
 .settings-nav {
   display: flex;
   flex-direction: column;
@@ -537,7 +584,8 @@ async function restartApp() {
   font-weight: var(--a-fw-medium);
   font-size: 13px;
 }
-.choice-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; max-width: 640px; }
+.choice-grid, .font-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; max-width: 640px; }
+.font-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .choice-card { min-height: 68px; padding: 12px 14px; border: 1px solid var(--a-border-strong); border-radius: 6px; background: var(--a-bg-2); color: var(--a-text); text-align: left; cursor: pointer; }
 .choice-card:hover { background: var(--a-hover); }
 .choice-card.selected { background: var(--a-bg-3); border-color: var(--a-text-dim); }

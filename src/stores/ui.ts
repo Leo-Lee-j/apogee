@@ -4,6 +4,8 @@ import { ref, computed } from 'vue'
 /** 布局模式（02 文档 §3.3）。`Ctrl+Shift+L` 循环。 */
 export type LayoutMode = 'stacked' | 'side-by-side' | 'focus'
 export type ThemeMode = 'dark' | 'light' | 'system'
+export type LanguageMode = 'system' | 'zh-CN' | 'en-US'
+export type FontFamilyMode = string
 
 /**
  * 侧边栏宽度区间（02 文档 §3.2：「370px，可拖拽 180～480」）。
@@ -124,6 +126,21 @@ export const useUiStore = defineStore('ui', () => {
     document.documentElement.dataset.theme = isDark.value ? 'dark' : 'light'
   }
 
+  function applyFont(font: FontFamilyMode) {
+    if (typeof document === 'undefined') return
+    const root = document.documentElement
+    const uiFonts: Record<string, string> = {
+      system: "'Inter', 'Segoe UI', -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei UI', sans-serif",
+      inter: "'Inter', 'Segoe UI', sans-serif",
+      segoe: "'Segoe UI', 'Inter', sans-serif",
+      yahei: "'Microsoft YaHei UI', 'Microsoft YaHei', 'PingFang SC', sans-serif",
+    }
+    const legacyAliases: Record<string, string> = { inter: 'Inter', segoe: 'Segoe UI', yahei: 'Microsoft YaHei UI' }
+    const requested = legacyAliases[font] ?? font
+    const family = uiFonts[requested] ?? (requested === 'system' ? uiFonts.system : `'${requested.replace(/["']/g, '')}', ${uiFonts.system}`)
+    root.style.setProperty('--a-font-ui', family)
+  }
+
   function cycleLayout() {
     const order: LayoutMode[] = ['side-by-side', 'stacked', 'focus']
     const index = order.indexOf(layout.value)
@@ -140,7 +157,7 @@ export const useUiStore = defineStore('ui', () => {
     sidebarVisible, sidebarWidth, sidebarMaxW, layout, themeMode, requestRatio,
     historyOpen, saveAsOpen, settingsSection, paletteOpen, spikeOpen, spikePanel,
     urlFocusSeq, focusUrl,
-    systemDark, isDark, applyTheme, cycleLayout, setLayout,
+    systemDark, isDark, applyTheme, applyFont, cycleLayout, setLayout,
     setSidebarWidth, resetSidebarWidth, syncViewport,
     setRequestRatio, resetRequestRatio,
   }

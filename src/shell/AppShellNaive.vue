@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { NConfigProvider, NMessageProvider, NDialogProvider, darkTheme, lightTheme } from 'naive-ui'
+import { NConfigProvider, NMessageProvider, NDialogProvider, darkTheme, lightTheme, zhCN, enUS } from 'naive-ui'
 import RootShell from './RootShell.vue'
 import { useUiStore } from '@/stores/ui'
 import { darkThemeOverrides, lightThemeOverrides } from '@/theme'
+import { useAppStore } from '@/stores/app'
 
 /**
  * Spike S5 变体 A —— **按 02 文档 §7.5 原样实现**。
@@ -19,12 +20,14 @@ import { darkThemeOverrides, lightThemeOverrides } from '@/theme'
  */
 
 const ui = useUiStore()
+const app = useAppStore()
 const theme = computed(() => (ui.isDark ? darkTheme : lightTheme))
 const overrides = computed(() => (ui.isDark ? darkThemeOverrides : lightThemeOverrides))
+const locale = computed(() => app.settings.language === 'en-US' ? enUS : zhCN)
 </script>
 
 <template>
-  <NConfigProvider :theme="theme" :theme-overrides="overrides" abstract>
+  <NConfigProvider :theme="theme" :theme-overrides="overrides" :locale="locale" abstract>
     <NDialogProvider>
       <NMessageProvider>
         <RootShell />

@@ -163,6 +163,7 @@ export interface WorkspaceDescriptor {
 }
 
 export interface AppSettings {
+  settingsVersion: number
   defaultWorkspaceRoot: string
   openLastWorkspaceOnStart: boolean
   showMemoryMonitor: boolean
@@ -171,6 +172,9 @@ export interface AppSettings {
   proxyUrl?: string
   timeoutMs: number
   verifyTls: boolean
+  themeMode: 'dark' | 'light' | 'system'
+  language: 'system' | 'zh-CN' | 'en-US'
+  fontFamily: string
 }
 
 export interface WorkspaceOpenResult {

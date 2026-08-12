@@ -35,6 +35,7 @@ bootMarks.mountMs = performance.now() - t0
 // 主题在挂载后立刻应用：CSS 变量切换是同步的，不会有闪烁
 const ui = useUiStore()
 ui.applyTheme()
+ui.applyFont('system')
 
 // 入口首帧只加载轻量工作区注册表。只有用户选择工作区后才挂载请求编辑器。
 if (inTauri) void useAppStore().initialize()

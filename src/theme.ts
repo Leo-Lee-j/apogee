@@ -56,9 +56,8 @@ const commonDark = {
   borderRadiusSmall: '8px',
 
   // 固定 px，不用 clamp —— 理由见 tokens.css 文件头。
-  fontFamily:
-    "'Inter', 'Segoe UI', -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei UI', sans-serif",
-  fontFamilyMono: "'JetBrains Mono', 'Cascadia Code', 'SF Mono', Consolas, monospace",
+  fontFamily: 'var(--a-font-ui)',
+  fontFamilyMono: 'var(--a-font-mono)',
   fontSize: '13px',
   fontSizeSmall: '12px',
   lineHeight: '20px',
