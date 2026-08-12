@@ -28,6 +28,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util
 # 仅用于 `FutureExt::catch_unwind`,把 spawned task 的 panic 转成 `request:error`
 # 事件而非 abort 整进程(`panic = "abort"` 下)。Release 不引入异步运行时,体积增量可忽略。
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
+fontdb = "0.23"
 uuid = { version = "1", features = ["v4", "serde"] }
 
 # ── HTTP 客户端（03 文档 §2.1 技术选型）───────────────────────────────

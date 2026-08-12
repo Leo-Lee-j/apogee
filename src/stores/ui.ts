@@ -165,6 +165,18 @@ export const useUiStore = defineStore('ui', () => {
     root.style.setProperty('--a-font-ui', family)
   }
 
+  function applyFontSizes(uiSize: number, resultSize: number) {
+    if (typeof document === 'undefined') return
+    const root = document.documentElement
+    const boundedUiSize = Math.min(24, Math.max(11, Math.round(uiSize)))
+    const boundedResultSize = Math.min(24, Math.max(11, Math.round(resultSize)))
+    root.style.setProperty('--a-fs-base', `${boundedUiSize}px`)
+    root.style.setProperty('--a-fs-sm', `${Math.max(10, boundedUiSize - 1)}px`)
+    root.style.setProperty('--a-fs-xs', `${Math.max(9, boundedUiSize - 2)}px`)
+    root.style.setProperty('--a-font-result', `${boundedResultSize}px`)
+    root.style.setProperty('--a-lh-result', `${Math.round(boundedResultSize * 1.54)}px`)
+  }
+
   function cycleLayout() {
     const order: LayoutMode[] = ['side-by-side', 'stacked', 'focus']
     const index = order.indexOf(layout.value)
@@ -181,7 +193,7 @@ export const useUiStore = defineStore('ui', () => {
     sidebarVisible, sidebarWidth, sidebarMaxW, layout, themeMode, requestRatio,
     historyOpen, saveAsOpen, settingsSection, shortcutPreferences, isShortcutEnabled, setShortcutEnabled, paletteOpen, spikeOpen, spikePanel,
     urlFocusSeq, focusUrl,
-    systemDark, isDark, applyTheme, applyFont, cycleLayout, setLayout,
+    systemDark, isDark, applyTheme, applyFont, applyFontSizes, cycleLayout, setLayout,
     setSidebarWidth, resetSidebarWidth, syncViewport,
     setRequestRatio, resetRequestRatio,
   }

@@ -5,7 +5,7 @@ import { NInput, type InputInst } from 'naive-ui'
 type ControlSize = 'small' | 'medium' | 'large'
 
 defineOptions({ inheritAttrs: false })
-const props = withDefaults(defineProps<{ size?: ControlSize }>(), { size: 'medium' })
+const props = withDefaults(defineProps<{ size?: ControlSize; width?: string }>(), { size: 'medium' })
 const input = ref<InputInst | null>(null)
 
 /** 与 theme.ts Input.height* 对齐，避免表单/flex 布局把输入框压扁。 */
@@ -28,7 +28,7 @@ defineExpose({
     class="app-input"
     v-bind="$attrs"
     :size="props.size"
-    :style="{ '--app-input-height': sizeHeight }"
+    :style="{ '--app-input-height': sizeHeight, ...(props.width ? { width: props.width, maxWidth: '100%' } : {}) }"
   />
 </template>
 

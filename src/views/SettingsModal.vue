@@ -1,15 +1,13 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, h, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   AppAlert,
   AppButton,
   AppForm,
-  AppFormItem,
   AppInputNumber,
   AppInput,
   AppPopconfirm,
   AppSelect,
-  AppSpace,
   AppSwitch,
   SettingToggleCard,
 } from '@/components/ui'
@@ -64,16 +62,9 @@ const languageOptions = [
   { label: '简体中文', value: 'zh-CN' },
   { label: 'English', value: 'en-US' },
 ]
-const fontOptions = [
+const fontOptions = ref([
   { label: '系统默认', value: 'system' },
-  { label: 'Inter', value: 'Inter' },
-  { label: 'Segoe UI', value: 'Segoe UI' },
-  { label: '微软雅黑', value: 'Microsoft YaHei UI' },
-  { label: '苹方', value: 'PingFang SC' },
-  { label: '等线', value: 'DengXian' },
-  { label: '霞鹜文楷', value: 'LXGW WenKai' },
-  { label: 'Noto Sans SC', value: 'Noto Sans SC' },
-]
+])
 const proxyOptions = [
   { label: '系统代理', value: 'system' },
   { label: '手动配置', value: 'manual' },
@@ -184,6 +175,18 @@ onBeforeUnmount(() => {
   }
 })
 
+onMounted(async () => {
+  try {
+    const families = await ipc.systemFontFamilies()
+    fontOptions.value = [
+      { label: '系统默认', value: 'system' },
+      ...families.map((family) => ({ label: family, value: family })),
+    ]
+  } catch {
+    // IPC 不可用时保留系统默认和可输入模式，避免设置页不可用。
+  }
+})
+
 function selectSection(section: SettingsSection) {
   activeSection.value = section
   ui.settingsSection = section
@@ -244,6 +247,27 @@ async function setFont(value: FontFamilyMode) {
   await persist({ fontFamily: value })
 }
 
+async function setFontSize(key: 'uiFontSize' | 'resultFontSize', value: number | null) {
+  if (value == null) return
+  const size = Math.min(24, Math.max(11, Math.round(value)))
+  ui.applyFontSizes(
+    key === 'uiFontSize' ? size : app.settings.uiFontSize,
+    key === 'resultFontSize' ? size : app.settings.resultFontSize,
+  )
+  await persist({ [key]: size })
+}
+
+function fontCssValue(value: string) {
+  if (value === 'system') return undefined
+  return `'${value.replace(/["']/g, '')}', sans-serif`
+}
+
+function renderFontOption(option: { label?: string | number; value?: string | number }) {
+  const value = String(option.value ?? '')
+  const label = String(option.label ?? value)
+  return h('span', { style: { fontFamily: fontCssValue(value) } }, `${label}  中文 Aa 123`)
+}
+
 function onProxyUrlInput(value: string) {
   proxyUrlDraft.value = value
   if (proxySaveTimer) clearTimeout(proxySaveTimer)
@@ -298,8 +322,8 @@ async function restartApp() {
           <template v-if="activeSection === 'appearance'">
             <section class="settings-group">
               <div class="group-heading">
-                <h2>界面</h2>
-                <p>主题立即生效，并作用于整个应用窗口。</p>
+                <h2>主题</h2>
+                <p>选择应用的明暗模式。</p>
               </div>
               <div class="choice-grid" role="radiogroup" aria-label="主题">
                 <button
@@ -319,57 +343,72 @@ async function restartApp() {
             </section>
 
             <section class="settings-group">
-              <div class="group-heading"><h2>语言</h2><p>控制组件内置文案；应用业务文案将逐步补齐翻译。</p></div>
-              <AppSelect class="control" size="medium" :value="app.settings.language" :options="languageOptions" @update:value="(value: any) => setLanguage(value)" />
-            </section>
-
-            <section class="settings-group">
-              <div class="group-heading"><h2>字体</h2><p>从常见系统字体中选择，也可以输入本机已安装的字体名称。</p></div>
-              <AppSelect class="control-wide" size="medium" :value="app.settings.fontFamily" :options="fontOptions" filterable tag clearable placeholder="选择或输入字体名称" @update:value="(value: string | null) => setFont(value || 'system')" />
-            </section>
-
-            <section class="settings-group">
-              <div class="group-heading">
-                <h2>侧边栏</h2>
-                <p>恢复工作区导航栏的默认宽度。</p>
+              <div class="setting-row">
+                <div class="setting-copy"><h2>语言</h2><p>控制组件内置文案。</p></div>
+                <AppSelect class="control" size="medium" :value="app.settings.language" :options="languageOptions" @update:value="(value: any) => setLanguage(value)" />
               </div>
-              <AppButton secondary @click="ui.resetSidebarWidth()">
-                <template #icon><AppIcon :component="IconReset" :size="16" /></template>
-                恢复默认宽度
-              </AppButton>
+            </section>
+
+            <section class="settings-group">
+              <div class="group-heading"><h2>排版</h2><p>调整界面文字和查询结果的阅读体验。</p></div>
+              <div class="setting-row">
+                <div class="setting-copy"><h3>字体</h3><p>从本机已安装的系统字体中选择。</p></div>
+                <AppSelect width="620px" size="medium" :value="app.settings.fontFamily" :options="fontOptions" :render-label="renderFontOption" filterable tag clearable placeholder="选择字体" @update:value="(value: string | null) => setFont(value || 'system')" />
+              </div>
+              <div class="font-preview" :style="{ fontFamily: fontCssValue(app.settings.fontFamily) }">中文预览 Aa 123</div>
+              <div class="setting-row">
+                <div class="setting-copy"><h3>应用界面字号</h3><p>控制菜单、按钮和设置文字。</p></div>
+                <AppInputNumber :value="app.settings.uiFontSize" :min="11" :max="24" :step="1" :show-button="true" @update:value="(value: number | null) => setFontSize('uiFontSize', value)">
+                  <template #suffix>px</template>
+                </AppInputNumber>
+              </div>
+              <div class="setting-row">
+                <div class="setting-copy"><h3>查询结果字号</h3><p>控制响应正文、树视图和数据表。</p></div>
+                <AppInputNumber :value="app.settings.resultFontSize" :min="11" :max="24" :step="1" :show-button="true" @update:value="(value: number | null) => setFontSize('resultFontSize', value)">
+                  <template #suffix>px</template>
+                </AppInputNumber>
+              </div>
+            </section>
+
+            <section class="settings-group">
+              <div class="setting-row">
+                <div class="setting-copy"><h2>布局</h2><p>恢复工作区导航栏的默认宽度。</p></div>
+                <AppButton secondary @click="ui.resetSidebarWidth()">
+                  <template #icon><AppIcon :component="IconReset" :size="16" /></template>
+                  恢复默认宽度
+                </AppButton>
+              </div>
             </section>
           </template>
 
           <template v-else-if="activeSection === 'startup'">
             <section class="settings-group">
-              <div class="group-heading">
-                <h2>启动</h2>
-                <p>关闭后每次启动都会回到工作区选择页。</p>
+              <div class="setting-row">
+                <div class="setting-copy">
+                  <h2>启动</h2>
+                  <p>启动时自动进入最近一次可用的工作区。</p>
+                </div>
+                <AppSwitch :value="app.settings.openLastWorkspaceOnStart" @update:value="setAutoOpen" />
               </div>
-              <AppForm label-placement="left" :label-width="LABEL_WIDTH" size="medium">
-                <SettingToggleCard title="打开上次工作区" description="启动时自动进入最近一次可用的工作区" :value="app.settings.openLastWorkspaceOnStart" @update:value="setAutoOpen" />
-              </AppForm>
             </section>
 
             <section class="settings-group">
-              <div class="group-heading">
-                <h2>默认工作区位置</h2>
-                <p>新建工作区默认保存到此目录，已有工作区不会被移动。</p>
+              <div class="setting-row setting-row-top setting-row-long">
+                <div class="setting-copy">
+                  <h2>默认工作区位置</h2>
+                  <p>新建工作区默认保存到此目录。</p>
+                </div>
+                <div class="path-control">
+                  <AppInput
+                    class="control-grow"
+                    size="medium"
+                    :value="app.settings.defaultWorkspaceRoot"
+                    readonly
+                    :input-props="{ spellcheck: false }"
+                  />
+                  <AppButton secondary size="medium" @click="chooseWorkspaceRoot">更改位置</AppButton>
+                </div>
               </div>
-              <AppForm label-placement="left" :label-width="LABEL_WIDTH" size="medium">
-                <AppFormItem label="保存位置" :show-feedback="false">
-                  <AppSpace :wrap="false" :size="8" align="center" class="control-row">
-                    <AppInput
-                      class="control-grow"
-                      size="medium"
-                      :value="app.settings.defaultWorkspaceRoot"
-                      readonly
-                      :input-props="{ spellcheck: false }"
-                    />
-                    <AppButton secondary size="medium" @click="chooseWorkspaceRoot">更改位置</AppButton>
-                  </AppSpace>
-                </AppFormItem>
-              </AppForm>
             </section>
           </template>
 
@@ -377,45 +416,27 @@ async function restartApp() {
             <section class="settings-group">
               <div class="group-heading">
                 <h2>连接</h2>
-                <p>当前代理：{{ proxyModeLabel }}。状态栏会同步显示。</p>
+                <p>当前代理：{{ proxyModeLabel }}。</p>
               </div>
-              <AppForm label-placement="left" :label-width="LABEL_WIDTH" size="medium">
-                <AppFormItem label="代理">
-                  <AppSelect
-                    class="control"
-                    size="medium"
-                    :value="app.settings.proxyMode"
-                    :options="proxyOptions"
-                    @update:value="(value: any) => setNetwork({ proxyMode: value })"
-                  />
-                </AppFormItem>
-                <AppFormItem v-if="app.settings.proxyMode === 'manual'" label="代理地址" :show-feedback="false">
-                  <AppInput
-                    class="control-wide"
-                    size="medium"
-                    :value="proxyUrlDraft"
-                    placeholder="http://127.0.0.1:8080"
-                    :input-props="{ spellcheck: false }"
-                    @update:value="onProxyUrlInput"
-                    @blur="flushProxyUrl"
-                  />
-                </AppFormItem>
-                <AppFormItem label="超时">
-                  <div class="setting-inline">
-                    <AppInputNumber
-                      :value="app.settings.timeoutMs"
-                      class="control-num"
-                      size="medium"
-                      :min="0"
-                      :step="1000"
-                      @update:value="(value: number | null) => setNetwork({ timeoutMs: value ?? 30000 })"
-                    />
-                    <span class="unit">ms</span>
-                    <span class="hint">整请求超时（含连接与下载）</span>
-                  </div>
-                </AppFormItem>
-                <SettingToggleCard title="校验 TLS" description="验证 HTTPS 证书链，关闭后允许自签名证书。" :value="app.settings.verifyTls" @update:value="(value: boolean) => setNetwork({ verifyTls: value })" />
-              </AppForm>
+              <div class="setting-row">
+                <div class="setting-copy"><h3>代理</h3><p>选择请求使用的代理方式。</p></div>
+                <AppSelect width="180px" size="medium" :value="app.settings.proxyMode" :options="proxyOptions" @update:value="(value: any) => setNetwork({ proxyMode: value })" />
+              </div>
+              <div v-if="app.settings.proxyMode === 'manual'" class="setting-row">
+                <div class="setting-copy"><h3>代理地址</h3><p>HTTP 或 SOCKS 代理服务器地址。</p></div>
+                <AppInput width="620px" size="medium" :value="proxyUrlDraft" placeholder="http://127.0.0.1:8080" :input-props="{ spellcheck: false }" @update:value="onProxyUrlInput" @blur="flushProxyUrl" />
+              </div>
+              <div class="setting-row">
+                <div class="setting-copy"><h3>超时</h3><p>整次请求，包含连接和下载。</p></div>
+                <div class="setting-inline">
+                  <AppInputNumber :value="app.settings.timeoutMs" class="control-num" size="medium" :min="0" :step="1000" @update:value="(value: number | null) => setNetwork({ timeoutMs: value ?? 30000 })" />
+                  <span class="unit">ms</span>
+                </div>
+              </div>
+              <div class="setting-row">
+                <div class="setting-copy"><h3>校验 TLS</h3><p>验证 HTTPS 证书链。</p></div>
+                <AppSwitch :value="app.settings.verifyTls" @update:value="(value: boolean) => setNetwork({ verifyTls: value })" />
+              </div>
               <AppAlert v-if="!app.settings.verifyTls" type="warning" :bordered="false">
                 关闭 TLS 校验后，连接可能被中间人窃听。仅用于明确知道风险的测试环境。
               </AppAlert>
@@ -505,12 +526,12 @@ async function restartApp() {
                 <h2>应用</h2>
                 <p>本地优先的桌面 API 客户端。</p>
               </div>
-              <dl class="about-list">
-                <div>
+              <dl class="about-list settings-info-list">
+                <div class="setting-row">
                   <dt>版本</dt>
                   <dd>v{{ APP_VERSION }}</dd>
                 </div>
-                <div>
+                <div class="setting-row">
                   <dt>产品定位</dt>
                   <dd class="plain">本地优先 · 启动即用</dd>
                 </div>
@@ -528,7 +549,7 @@ async function restartApp() {
 .settings-page {
   flex: 1 1 auto;
   display: grid;
-  grid-template-columns: 180px minmax(0, 1fr);
+  grid-template-columns: 164px minmax(0, 1fr);
   min-height: 0;
   overflow: hidden;
   background: var(--a-bg-2);
@@ -537,13 +558,13 @@ async function restartApp() {
 .settings-nav {
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  padding: 20px 10px;
+  gap: 2px;
+  padding: 18px 8px;
   border-right: 1px solid var(--a-border);
   background: var(--a-bg-3);
-  width: 180px;
+  width: 164px;
 }
-.nav-heading { padding: 0 10px 16px; }
+.nav-heading { padding: 0 10px 14px; }
 .nav-title {
   color: var(--a-text);
   font-size: 16px;
@@ -584,19 +605,20 @@ async function restartApp() {
 .settings-scroll {
   flex: 1 1 auto;
   min-height: 0;
-  width: min(820px, 100%);
+  width: min(1040px, 100%);
+  margin-inline: auto;
   display: flex;
   flex-direction: column;
-  gap: 26px;
+  gap: 8px;
   overflow: auto;
-  padding: 28px 32px 48px;
+  padding: 30px 48px 52px;
 }
 .settings-banner { margin-bottom: 4px; }
 .settings-group {
   min-width: 0;
-  padding: 0 0 22px;
+  padding: 18px 0;
   border: 0;
-  border-bottom: 1px solid var(--a-border);
+  border-bottom: 0;
   background: transparent;
   border-radius: 0;
   box-shadow: none;
@@ -619,28 +641,30 @@ async function restartApp() {
 .group-heading p {
   margin: 0;
   color: var(--a-text-dim);
-  font-size: 13px;
-  line-height: 20px;
+  font-size: 12px;
+  line-height: 18px;
 }
+.setting-row { display: grid; grid-template-columns: minmax(210px, 1fr) auto; align-items: center; gap: 24px; min-height: 44px; }
+.setting-row + .setting-row { margin-top: 14px; }
+.setting-row-top { align-items: start; }
+.setting-row-long { grid-template-columns: minmax(210px, 1fr) minmax(0, 680px); }
+.setting-copy { min-width: 0; }
+.setting-copy h2, .setting-copy h3 { margin: 0; color: var(--a-text); font-size: 13px; line-height: 18px; font-weight: var(--a-fw-medium); }
+.setting-copy h2 { font-size: 14px; }
+.setting-copy p { margin: 2px 0 0; color: var(--a-text-dim); font-size: 12px; line-height: 17px; }
 .control { width: min(328px, 100%); }
-.control-wide { width: min(472px, 100%); }
+.control-wide { width: min(328px, 100%); }
+.font-preview { width: min(620px, 100%); margin-top: 8px; color: var(--a-text-dim); font-size: 13px; line-height: 20px; }
+.font-size-form { width: min(328px, 100%); }
+.font-size-form :deep(.n-input-number) { width: 140px; }
 .control-num { width: 140px; }
-.control-row {
-  width: min(520px, 100%);
-  min-width: 0;
-}
-.control-row :deep(.n-space) {
-  width: 100%;
-  flex-wrap: nowrap;
-}
+.path-control { width: 100%; display: flex; align-items: center; gap: 8px; min-width: 0; }
 .control-grow {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-width: 0;
   width: auto !important;
 }
-.control-grow :deep(.n-input) {
-  width: 100%;
-}
+.path-control :deep(.n-input) { width: 100%; }
 .unit {
   color: var(--a-text-faint);
   font: var(--a-fs-xs) var(--a-font-mono);
@@ -667,6 +691,11 @@ async function restartApp() {
   gap: 0;
   max-width: 480px;
 }
+.settings-info-list { max-width: none; }
+.settings-info-list > div { grid-template-columns: minmax(210px, 1fr) auto; gap: 24px; min-height: 44px; padding: 0; border-top: 0; }
+.settings-info-list > div + div { margin-top: 14px; }
+.settings-info-list dt { color: var(--a-text); font-size: 13px; font-weight: var(--a-fw-medium); }
+.settings-info-list dd { justify-self: start; color: var(--a-text-soft); }
 .about-list > div {
   display: grid;
   grid-template-columns: 96px minmax(0, 1fr);
@@ -696,7 +725,7 @@ async function restartApp() {
   font-weight: var(--a-fw-medium);
   font-size: 13px;
 }
-.choice-grid, .font-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; max-width: 640px; }
+.choice-grid, .font-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; max-width: none; }
 .font-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .choice-card { min-height: 68px; padding: 12px 14px; border: 1px solid var(--a-border-strong); border-radius: 6px; background: var(--a-bg-2); color: var(--a-text); text-align: left; cursor: pointer; }
 .choice-card:hover { background: var(--a-hover); }
@@ -726,6 +755,7 @@ async function restartApp() {
 .shortcut-empty { margin: 0; color: var(--a-text-faint); font-size: 13px; }
 .settings-group :deep(.n-form-item) { margin-bottom: 12px; }
 .settings-group :deep(.n-input), .settings-group :deep(.n-base-selection), .settings-group :deep(.n-button) { border-radius: 6px; }
+.settings-group > .font-preview { margin-left: calc(min(210px, 100%) + 24px); }
 
 @media (max-width: 760px) {
   .settings-page {
@@ -742,9 +772,11 @@ async function restartApp() {
   .nav-heading { display: none; }
   .settings-nav button { flex: 0 0 auto; }
   .settings-nav button.active { box-shadow: inset 0 -2px 0 var(--a-primary); }
-  .settings-scroll { width: 100%; padding: 22px 16px 32px; }
-  .control-row { width: 100%; }
-  .control-row :deep(.n-space) { flex-wrap: wrap; }
+  .settings-scroll { width: 100%; padding: 18px 16px 32px; }
+  .setting-row { grid-template-columns: 1fr; gap: 8px; align-items: start; }
+  .settings-group > .font-preview { margin-left: 0; }
+  .control-wide, .path-control, .font-preview { width: 100%; }
+  .path-control { flex-wrap: wrap; }
   .control-grow { flex: 1 1 100%; }
   .about-list > div { grid-template-columns: 1fr; gap: 2px; }
   .shortcut-search { grid-template-columns: 1fr; align-items: stretch; }

@@ -102,8 +102,8 @@ async function mountEditor() {
       ...(wrap.value ? [EditorView.lineWrapping] : []),
       EditorView.editable.of(false),
       EditorView.theme({
-        '&': { height: '100%', fontSize: '13px' },
-        '.cm-scroller': { fontFamily: 'var(--a-font-mono)', lineHeight: '20px' },
+        '&': { height: '100%', fontSize: 'var(--a-font-result)' },
+        '.cm-scroller': { fontFamily: 'var(--a-font-mono)', lineHeight: 'var(--a-lh-result)' },
         '.cm-gutters': { background: 'var(--a-bg-2)', border: 'none', color: 'var(--a-text-faint)' },
         '.cm-activeLine': { background: 'var(--a-hover)' },
         '.cm-panels': { backgroundColor: 'var(--a-bg-2)', color: 'var(--a-text)', borderBottom: '1px solid var(--a-border)' },

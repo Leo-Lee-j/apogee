@@ -58,8 +58,8 @@ const commonDark = {
   // 固定 px，不用 clamp —— 理由见 tokens.css 文件头。
   fontFamily: 'var(--a-font-ui)',
   fontFamilyMono: 'var(--a-font-mono)',
-  fontSize: '13px',
-  fontSizeSmall: '12px',
+  fontSize: 'var(--a-fs-base)',
+  fontSizeSmall: 'var(--a-fs-sm)',
   lineHeight: '20px',
 } as const
 
@@ -119,6 +119,10 @@ const components = {
     textColorPressedPrimary: '#0c0e12',
     textColorFocusPrimary: '#0c0e12',
     textColorDisabledPrimary: '#0c0e12',
+  },
+  // Checkbox 尺寸较小，不能继承 8px 小圆角，否则视觉上会成为圆形。
+  Checkbox: {
+    borderRadius: '2px',
   },
   Card: {
     borderRadius: '12px',

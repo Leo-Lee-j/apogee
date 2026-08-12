@@ -175,6 +175,8 @@ export interface AppSettings {
   themeMode: 'dark' | 'light' | 'system'
   language: 'system' | 'zh-CN' | 'en-US'
   fontFamily: string
+  uiFontSize: number
+  resultFontSize: number
 }
 
 export interface WorkspaceOpenResult {
@@ -288,6 +290,10 @@ export const ipc = {
 
   appSettingsSave(settings: AppSettings): Promise<AppSettings> {
     return call('app_settings_save', { settings })
+  },
+
+  systemFontFamilies(): Promise<string[]> {
+    return call('system_font_families')
   },
 
   appRestart(): Promise<void> {

@@ -114,8 +114,8 @@ const kindColor: Record<string, string> = {
 
 <style scoped>
 .tree { flex: 1 1 auto; min-height: 0; overflow: auto; }
-.rows { font: 12px/20px var(--a-font-mono); }
-.row { display: flex; gap: 4px; height: 20px; align-items: center; cursor: default; white-space: nowrap; }
+.rows { font: var(--a-font-result)/var(--a-lh-result) var(--a-font-mono); }
+.row { display: flex; gap: 4px; height: var(--a-lh-result); align-items: center; cursor: default; white-space: nowrap; }
 .row:hover { background: var(--a-hover); }
 .caret { width: 12px; color: var(--a-text-faint); }
 .caret.has { cursor: pointer; }

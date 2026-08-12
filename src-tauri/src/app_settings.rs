@@ -30,6 +30,10 @@ pub struct AppSettings {
     pub language: String,
     #[serde(default = "default_font_family")]
     pub font_family: String,
+    #[serde(default = "default_ui_font_size")]
+    pub ui_font_size: u8,
+    #[serde(default = "default_result_font_size")]
+    pub result_font_size: u8,
 }
 
 fn default_show_memory_monitor() -> bool {
@@ -42,6 +46,12 @@ fn default_verify_tls() -> bool { true }
 fn default_theme_mode() -> String { "light".to_string() }
 fn default_language() -> String { "system".to_string() }
 fn default_font_family() -> String { "system".to_string() }
+fn default_ui_font_size() -> u8 { 13 }
+fn default_result_font_size() -> u8 { 13 }
+
+fn normalize_font_size(value: u8, default: u8) -> u8 {
+    if (11..=24).contains(&value) { value } else { default }
+}
 
 pub struct AppSettingsRepository {
     app_data_dir: PathBuf,
@@ -74,6 +84,8 @@ impl AppSettingsRepository {
                 theme_mode: default_theme_mode(),
                 language: default_language(),
                 font_family: default_font_family(),
+                ui_font_size: default_ui_font_size(),
+                result_font_size: default_result_font_size(),
             };
             self.save(&settings)?;
             return Ok(settings);
@@ -118,6 +130,8 @@ impl AppSettingsRepository {
             theme_mode: settings.theme_mode.clone(),
             language: settings.language.clone(),
             font_family: settings.font_family.clone(),
+            ui_font_size: normalize_font_size(settings.ui_font_size, default_ui_font_size()),
+            result_font_size: normalize_font_size(settings.result_font_size, default_result_font_size()),
         };
         fs::create_dir_all(&self.app_data_dir)?;
         let temporary = self

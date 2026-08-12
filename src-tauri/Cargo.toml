@@ -32,6 +32,7 @@ tracing-subscriber.workspace = true
 tokio.workspace = true
 # `FutureExt::catch_unwind`,把 spawned task 的 panic 转成 IPC 错误事件。
 futures-util.workspace = true
+fontdb.workspace = true
 # 只读映射 spool 文件，索引构建不再复制完整响应体。
 memmap2 = "=0.9.11"
 

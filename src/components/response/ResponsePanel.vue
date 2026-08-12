@@ -430,7 +430,7 @@ async function copyText(text: string, success = '已复制') {
 }
 .actions button:hover { background: var(--a-hover); }
 .preview { flex: 1 1 auto; width: 100%; min-height: 0; border: 0; background: #fff; }
-.data-table { flex: 1 1 auto; min-height: 0; overflow: auto; font-size: 12px; }
+.data-table { flex: 1 1 auto; min-height: 0; overflow: auto; font-size: var(--a-font-result); }
 .data-row { min-height: 30px; display: grid; grid-template-columns: minmax(140px, 28%) minmax(260px, 1fr); border-bottom: 1px solid var(--a-border); }
 .data-row > span, .data-row > code { display: flex; align-items: center; min-width: 0; padding: 5px 10px; border-right: 1px solid var(--a-border); overflow-wrap: anywhere; }
 .data-row > :last-child { border-right: 0; }
@@ -441,7 +441,7 @@ async function copyText(text: string, success = '已复制') {
 .selectable { user-select: text; color: var(--a-text-soft); }
 .empty-inline { margin: 0; padding: 18px 10px; color: var(--a-text-faint); }
 .timing-panel { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 18px 20px; }
-.timing-row { display: grid; grid-template-columns: 160px minmax(120px, 1fr) 142px; gap: 14px; align-items: center; min-height: 34px; color: var(--a-text-dim); font-size: 12px; }
+.timing-row { display: grid; grid-template-columns: 160px minmax(120px, 1fr) 142px; gap: 14px; align-items: center; min-height: 34px; color: var(--a-text-dim); font-size: var(--a-font-result); }
 .timing-track { height: 6px; overflow: hidden; border-radius: 3px; background: var(--a-bg-3); }
 .timing-track span { display: block; height: 100%; min-width: 2px; border-radius: 3px; background: var(--a-primary); }
 .timing-row code { text-align: right; color: var(--a-text-soft); font: 11px var(--a-font-mono); }
@@ -457,10 +457,10 @@ async function copyText(text: string, success = '已复制') {
 .copy-url { justify-self: start; max-width: 100%; padding: 0 0 2px; overflow: hidden; border: 0; border-bottom: 1px dashed transparent; background: transparent; color: var(--a-text-soft); font: 12px/20px var(--a-font-mono); text-align: left; text-overflow: ellipsis; white-space: nowrap; cursor: copy; }
 .copy-url:hover { color: var(--a-primary); border-bottom-color: currentColor; }
 .actual-section { margin-top: 16px; }
-.actual-section > header { min-height: 28px; display: flex; align-items: center; gap: 8px; color: var(--a-text); font-size: 12px; }
+.actual-section > header { min-height: 28px; display: flex; align-items: center; gap: 8px; color: var(--a-text); font-size: var(--a-font-result); }
 .actual-section > header > span { color: var(--a-text-faint); font: 11px var(--a-font-mono); }
 .actual-params { overflow: hidden; border: 1px solid var(--a-border); border-radius: var(--a-radius-sm); }
-.actual-param { min-height: 28px; display: grid; grid-template-columns: minmax(130px, 22%) minmax(180px, 34%) minmax(240px, 1fr); border-bottom: 1px solid var(--a-border); font-size: 11px; }
+.actual-param { min-height: 28px; display: grid; grid-template-columns: minmax(130px, 22%) minmax(180px, 34%) minmax(240px, 1fr); border-bottom: 1px solid var(--a-border); font-size: var(--a-font-result); }
 .actual-param:last-child { border-bottom: 0; }
 .actual-param > * { min-width: 0; padding: 5px 9px; overflow-wrap: anywhere; border-right: 1px solid var(--a-border); }
 .actual-param > :last-child { border-right: 0; }
@@ -470,7 +470,7 @@ async function copyText(text: string, success = '已复制') {
 .actual-param-head span { color: inherit; }
 .actual-none { margin: 0; padding: 10px; border: 1px solid var(--a-border); border-radius: var(--a-radius-sm); color: var(--a-text-faint); font-size: 11px; }
 .actual-headers { overflow: hidden; border: 1px solid var(--a-border); border-radius: var(--a-radius-sm); }
-.actual-header { min-height: 28px; display: grid; grid-template-columns: minmax(150px, 28%) minmax(260px, 1fr); border-bottom: 1px solid var(--a-border); font-size: 11px; }
+.actual-header { min-height: 28px; display: grid; grid-template-columns: minmax(150px, 28%) minmax(260px, 1fr); border-bottom: 1px solid var(--a-border); font-size: var(--a-font-result); }
 .actual-header:last-child { border-bottom: 0; }
 .actual-header > * { min-width: 0; padding: 5px 9px; overflow-wrap: anywhere; border-right: 1px solid var(--a-border); }
 .actual-header > :last-child { border-right: 0; }

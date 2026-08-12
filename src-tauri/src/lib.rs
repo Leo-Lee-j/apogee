@@ -60,6 +60,7 @@ pub fn run() {
             commands::app_ready,
             commands::app_settings_load,
             commands::app_settings_save,
+            commands::system_font_families,
             commands::app_restart,
             commands::spike_make_response,
             commands::get_response_meta,
@@ -245,6 +246,22 @@ mod commands {
         let repo = AppSettingsRepository::new(&dir);
         repo.save(&settings).map_err(|e| e.to_string())?;
         repo.load().map_err(|e| e.to_string())
+    }
+
+    /// 返回当前操作系统已安装字体的家族名称。字体文件扫描可能较慢，因此只在用户
+    /// 打开设置页时由前端调用，而不是在应用启动路径中执行。
+    #[tauri::command]
+    pub fn system_font_families() -> Vec<String> {
+        let mut database = fontdb::Database::new();
+        database.load_system_fonts();
+
+        let mut families = database
+            .faces()
+            .flat_map(|face| face.families.iter().map(|(name, _)| name.clone()))
+            .collect::<Vec<_>>();
+        families.sort_unstable_by_key(|name| name.to_lowercase());
+        families.dedup();
+        families
     }
 
     #[tauri::command]

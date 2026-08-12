@@ -137,6 +137,7 @@ pub fn import(command: &str) -> Result<CurlImportResult, AppError> {
 fn normalize_for_parser(command: &str) -> (String, bool, Vec<String>) {
     let (command, ignored_comments) = normalize_lines(command);
     let command = normalize_executable(&command);
+    let command = normalize_parser_aliases(&command);
     let command = encode_quotes_in_single_quoted_urls(&command);
     let mut normalized = String::with_capacity(command.len());
     let mut index = 0;
@@ -210,6 +211,71 @@ fn normalize_for_parser(command: &str) -> (String, bool, Vec<String>) {
         vec![format!("已忽略 {ignored_comments} 行注释")]
     };
     (normalized, follow_redirects, warnings)
+}
+
+/// `curl-parser` intentionally supports a small portable cURL grammar. Chromium's
+/// "Copy as cURL" output uses aliases outside that grammar, so normalize them
+/// before handing the command to the dependency.
+fn normalize_parser_aliases(command: &str) -> String {
+    let mut normalized = String::with_capacity(command.len());
+    let mut index = 0;
+    let mut quote = None;
+    let mut at_token_start = true;
+    let mut cookie_value_pending = false;
+
+    while index < command.len() {
+        let rest = &command[index..];
+        let character = rest.chars().next().expect("index is on a char boundary");
+        if let Some(active_quote) = quote {
+            normalized.push(character);
+            if character == active_quote {
+                quote = None;
+            }
+            at_token_start = false;
+            index += character.len_utf8();
+            continue;
+        }
+        if character == '\'' || character == '"' {
+            if cookie_value_pending {
+                normalized.push_str("'Cookie: ");
+                quote = Some(character);
+                cookie_value_pending = false;
+                at_token_start = false;
+                index += character.len_utf8();
+                continue;
+            }
+            quote = Some(character);
+            normalized.push(character);
+            at_token_start = false;
+            index += character.len_utf8();
+            continue;
+        }
+        if at_token_start {
+            let alias = if rest.starts_with("--data-raw") {
+                Some(("--data-raw", "--data", false))
+            } else if rest.starts_with("--cookie") {
+                Some(("--cookie", "--header ", true))
+            } else if rest.starts_with("-b") {
+                Some(("-b", "--header ", true))
+            } else {
+                None
+            };
+            if let Some((from, to, is_cookie)) = alias {
+                let suffix = &rest[from.len()..];
+                if suffix.is_empty() || suffix.chars().next().is_some_and(char::is_whitespace) {
+                    normalized.push_str(to);
+                    cookie_value_pending = is_cookie;
+                    index += from.len();
+                    at_token_start = false;
+                    continue;
+                }
+            }
+        }
+        normalized.push(character);
+        at_token_start = character.is_whitespace();
+        index += character.len_utf8();
+    }
+    normalized
 }
 
 fn normalize_executable(command: &str) -> String {
@@ -417,5 +483,38 @@ mod tests {
 
         assert_eq!(result.spec.headers[0].value, "//keep-this");
         assert!(result.warnings.is_empty());
+    }
+
+    #[test]
+    fn imports_chrome_copy_as_curl_request() {
+        let command = r#"curl 'https://jupiter.tec-do.com/phoenix/v1.0/column/get-columns' \
+  -H 'accept: application/json, text/plain, */*' \
+  -H 'accept-language: zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6' \
+  -H 'accesstoken: token' \
+  -H 'baggage: sentry-environment=production,sentry-release=jupiter%40v1.4.2.0' \
+  -H 'content-type: application/json;charset=UTF-8' \
+  -b 'UM_distinctid=abc; crm-token=def; _webtracing_device_id=ghi' \
+  -H 'origin: https://jupiter.tec-do.com' \
+  -H 'priority: u=1, i' \
+  -H 'referer: https://jupiter.tec-do.com/adMange/tiktok?t=gmvMax' \
+  -H 'requestid: 8565b55a-8d24-4786-8509-b6ddfba62b26' \
+  -H 'sec-ch-ua: "Not;A=Brand";v="8", "Chromium";v="150", "Microsoft Edge";v="150"' \
+  -H 'sec-ch-ua-mobile: ?0' \
+  -H 'sec-ch-ua-platform: "Windows"' \
+  -H 'sec-fetch-dest: empty' \
+  -H 'sec-fetch-mode: cors' \
+  -H 'sec-fetch-site: same-origin' \
+  -H 'sentry-trace: trace' \
+  -H 'user-agent: Mozilla/5.0' \
+  --data-raw '{"platform":"Bytedance","type":16}'"#;
+        let result = import(command).unwrap();
+        assert_eq!(result.spec.method, "POST");
+        assert_eq!(
+            result.spec.url,
+            "https://jupiter.tec-do.com/phoenix/v1.0/column/get-columns"
+        );
+        assert!(
+            matches!(result.spec.body, Body::Json { ref content } if content.contains("Bytedance"))
+        );
     }
 }
