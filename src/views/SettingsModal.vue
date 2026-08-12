@@ -10,6 +10,7 @@ import {
   AppPopconfirm,
   AppSelect,
   AppSpace,
+  AppSwitch,
   SettingToggleCard,
 } from '@/components/ui'
 import NaiveThemeScope from '@/components/NaiveThemeScope.vue'
@@ -18,6 +19,7 @@ import {
   IconFlash,
   IconFolderOpen,
   IconInfo,
+  IconKeyboard,
   IconNetwork,
   IconPalette,
   IconReset,
@@ -26,10 +28,10 @@ import {
 import { ipc } from '@/ipc'
 import { useUiStore } from '@/stores/ui'
 import { useAppStore } from '@/stores/app'
-import type { FontFamilyMode, LanguageMode, ThemeMode } from '@/stores/ui'
+import type { FontFamilyMode, LanguageMode, ShortcutId, ThemeMode } from '@/stores/ui'
 
 /** 设置左侧导航分区；命令面板 / openSettings 可直达。 */
-export type SettingsSection = 'appearance' | 'startup' | 'network' | 'performance' | 'about'
+export type SettingsSection = 'appearance' | 'startup' | 'network' | 'performance' | 'shortcuts' | 'about'
 
 const LABEL_WIDTH = 140
 const PROXY_SAVE_DEBOUNCE_MS = 400
@@ -48,6 +50,7 @@ const sections = [
   { id: 'startup' as const, label: '启动与工作区', icon: IconFolderOpen },
   { id: 'network' as const, label: '网络', icon: IconNetwork },
   { id: 'performance' as const, label: '性能', icon: IconFlash },
+  { id: 'shortcuts' as const, label: '快捷键', icon: IconKeyboard },
   { id: 'about' as const, label: '关于', icon: IconInfo },
 ]
 
@@ -76,6 +79,73 @@ const proxyOptions = [
   { label: '手动配置', value: 'manual' },
   { label: '不使用代理', value: 'none' },
 ]
+
+type ShortcutArea = '全局' | '工作区' | '请求编辑'
+interface ShortcutItem {
+  id: ShortcutId
+  area: ShortcutArea
+  name: string
+  description: string
+  keys: string[]
+}
+
+const shortcutSearch = ref('')
+const shortcutSearchBy = ref<'name' | 'key'>('name')
+const shortcuts: ShortcutItem[] = [
+  { id: 'command-palette', area: '全局', name: '打开命令面板', description: '搜索并执行常用操作', keys: ['Ctrl', 'K'] },
+  { id: 'settings', area: '全局', name: '打开设置', description: '进入应用偏好与配置', keys: ['Ctrl', ','] },
+  { id: 'new-request', area: '工作区', name: '新建快捷请求', description: '创建空白请求并聚焦地址栏', keys: ['Ctrl', 'T'] },
+  { id: 'toggle-sidebar', area: '工作区', name: '显示或隐藏侧边栏', description: '切换工作区导航栏', keys: ['Ctrl', 'B'] },
+  { id: 'cycle-layout', area: '工作区', name: '切换请求与响应布局', description: '依次切换左右、上下和专注视图', keys: ['Ctrl', 'Shift', 'L'] },
+  { id: 'save-request', area: '请求编辑', name: '保存请求', description: '保存当前请求或打开保存位置选择', keys: ['Ctrl', 'S'] },
+  { id: 'send-request', area: '请求编辑', name: '发送请求', description: '发送当前正在编辑的请求', keys: ['Ctrl', 'Enter'] },
+]
+const shortcutAreas: ShortcutArea[] = ['全局', '工作区', '请求编辑']
+const visibleShortcutGroups = computed(() => {
+  const query = shortcutSearch.value.trim().toLowerCase()
+  return shortcutAreas.map((area) => ({
+    area,
+    items: shortcuts.filter((shortcut) => {
+      if (shortcut.area !== area) return false
+      if (!query) return true
+      const target = shortcutSearchBy.value === 'name'
+        ? `${shortcut.name} ${shortcut.description}`.toLowerCase()
+        : shortcut.keys.join('+').toLowerCase()
+      return target.includes(query)
+    }),
+  })).filter((group) => group.items.length)
+})
+
+function shortcutKeyLabel(event: KeyboardEvent) {
+  const key = event.key
+  if (['Control', 'Shift', 'Alt', 'Meta'].includes(key)) return null
+  const parts: string[] = []
+  if (event.ctrlKey) parts.push('Ctrl')
+  if (event.metaKey) parts.push('Meta')
+  if (event.altKey) parts.push('Alt')
+  if (event.shiftKey) parts.push('Shift')
+  const displayKey = key === ' ' ? 'Space' : key.length === 1 ? key.toUpperCase() : key
+  parts.push(displayKey)
+  return parts.join('+')
+}
+
+function captureShortcutSearch(event: KeyboardEvent) {
+  if (shortcutSearchBy.value !== 'key') return
+  if (event.key === 'Backspace' || event.key === 'Delete') {
+    shortcutSearch.value = ''
+    event.preventDefault()
+    return
+  }
+  const key = shortcutKeyLabel(event)
+  if (!key) return
+  shortcutSearch.value = key
+  event.preventDefault()
+}
+
+function setShortcutSearchMode(mode: 'name' | 'key') {
+  shortcutSearchBy.value = mode
+  shortcutSearch.value = ''
+}
 
 const proxyModeLabel = computed(() => {
   switch (app.settings.proxyMode) {
@@ -220,7 +290,7 @@ async function restartApp() {
       </aside>
 
       <div class="settings-content">
-        <div class="settings-scroll">
+        <div class="settings-scroll" :class="{ 'settings-scroll-shortcuts': activeSection === 'shortcuts' }">
           <AppAlert v-if="settingsError" class="settings-banner" type="error" :bordered="false">
             {{ settingsError }}
           </AppAlert>
@@ -384,6 +454,48 @@ async function restartApp() {
                     </AppPopconfirm>
                 </SettingToggleCard>
               </AppForm>
+            </section>
+          </template>
+
+          <template v-else-if="activeSection === 'shortcuts'">
+            <section class="shortcut-page" aria-label="快捷键设置">
+              <div class="shortcut-search">
+                <AppInput
+                  class="shortcut-search-input"
+                  size="medium"
+                  :value="shortcutSearch"
+                  :placeholder="shortcutSearchBy === 'name' ? '搜索名称或说明' : '按下快捷键进行搜索'"
+                  clearable
+                  :input-props="{ spellcheck: false }"
+                  @update:value="shortcutSearchBy === 'name' && (shortcutSearch = $event)"
+                  @keydown="captureShortcutSearch"
+                />
+                <div class="shortcut-search-mode" role="group" aria-label="搜索方式">
+                  <button type="button" :class="{ active: shortcutSearchBy === 'name' }" @click="setShortcutSearchMode('name')">名称</button>
+                  <button type="button" :class="{ active: shortcutSearchBy === 'key' }" @click="setShortcutSearchMode('key')">快捷键</button>
+                </div>
+              </div>
+
+              <div v-if="visibleShortcutGroups.length" class="shortcut-grid">
+                <section v-for="group in visibleShortcutGroups" :key="group.area" class="shortcut-area">
+                  <h2>{{ group.area }}</h2>
+                  <div class="shortcut-list">
+                    <div v-for="shortcut in group.items" :key="shortcut.id" class="shortcut-item">
+                      <div class="shortcut-copy">
+                        <strong>{{ shortcut.name }}</strong>
+                        <span>{{ shortcut.description }}</span>
+                      </div>
+                      <div class="shortcut-actions">
+                        <div class="shortcut-keys" :aria-label="`${shortcut.name}：${shortcut.keys.join(' + ')}`">
+                          <kbd v-for="key in shortcut.keys" :key="key">{{ key }}</kbd>
+                        </div>
+                        <AppSwitch :value="ui.isShortcutEnabled(shortcut.id)" @update:value="ui.setShortcutEnabled(shortcut.id, $event)" />
+                      </div>
+                    </div>
+                  </div>
+                </section>
+              </div>
+              <p v-else class="shortcut-empty">没有找到匹配的快捷键。</p>
             </section>
           </template>
 
@@ -591,6 +703,27 @@ async function restartApp() {
 .choice-card.selected { background: var(--a-bg-3); border-color: var(--a-text-dim); }
 .choice-title { display: block; font-size: 13px; font-weight: 500; line-height: 18px; }
 .choice-description { display: block; margin-top: 4px; color: var(--a-text-dim); font-size: 12px; line-height: 16px; }
+.settings-scroll-shortcuts { width: 100%; }
+.shortcut-page { width: 100%; display: flex; flex-direction: column; gap: 28px; }
+.shortcut-search { display: grid; grid-template-columns: minmax(280px, 1fr) auto; align-items: center; gap: 12px; padding-bottom: 20px; border-bottom: 1px solid var(--a-border); }
+.shortcut-search-input { flex: 1 1 auto; min-width: 0; }
+.shortcut-search-mode { display: inline-flex; flex: 0 0 auto; padding: 3px; border: 1px solid var(--a-border); border-radius: 6px; background: var(--a-bg-3); }
+.shortcut-search-mode button { height: 28px; padding: 0 11px; border: 0; border-radius: 4px; background: transparent; color: var(--a-text-dim); font-size: 12px; cursor: pointer; }
+.shortcut-search-mode button:hover { color: var(--a-text); background: var(--a-hover); }
+.shortcut-search-mode button.active { color: var(--a-text); background: var(--a-bg-2); box-shadow: inset 0 0 0 1px var(--a-border-strong); }
+.shortcut-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 30px 36px; align-items: start; }
+.shortcut-area { min-width: 0; }
+.shortcut-area h2 { margin: 0 0 10px; color: var(--a-text-soft); font-size: 13px; font-weight: var(--a-fw-semibold); line-height: 20px; }
+.shortcut-list { border-top: 1px solid var(--a-border-strong); }
+.shortcut-item { display: flex; align-items: center; justify-content: space-between; gap: 18px; min-height: 78px; padding: 14px 2px; border-bottom: 1px solid var(--a-border); }
+.shortcut-item:hover { background: var(--a-hover); box-shadow: 10px 0 0 var(--a-hover), -10px 0 0 var(--a-hover); }
+.shortcut-copy { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.shortcut-copy strong { color: var(--a-text); font-size: 13px; font-weight: var(--a-fw-medium); line-height: 18px; }
+.shortcut-copy span { color: var(--a-text-dim); font-size: 12px; line-height: 17px; }
+.shortcut-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 16px; }
+.shortcut-keys { display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
+.shortcut-keys kbd { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; height: 23px; padding: 0 6px; border: 1px solid var(--a-border-strong); border-bottom-color: var(--a-text-faint); border-radius: 4px; background: var(--a-bg-3); color: var(--a-text-soft); font: 11px/1 var(--a-font-mono); white-space: nowrap; }
+.shortcut-empty { margin: 0; color: var(--a-text-faint); font-size: 13px; }
 .settings-group :deep(.n-form-item) { margin-bottom: 12px; }
 .settings-group :deep(.n-input), .settings-group :deep(.n-base-selection), .settings-group :deep(.n-button) { border-radius: 6px; }
 
@@ -614,5 +747,8 @@ async function restartApp() {
   .control-row :deep(.n-space) { flex-wrap: wrap; }
   .control-grow { flex: 1 1 100%; }
   .about-list > div { grid-template-columns: 1fr; gap: 2px; }
+  .shortcut-search { grid-template-columns: 1fr; align-items: stretch; }
+  .shortcut-search-mode { align-self: flex-start; }
+  .shortcut-grid { grid-template-columns: 1fr; gap: 20px; }
 }
 </style>

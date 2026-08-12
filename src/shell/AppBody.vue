@@ -317,18 +317,19 @@ function onKeydown(e: KeyboardEvent) {
   if (!mod) return
   const k = e.key.toLowerCase()
   if (k === 'enter') {
+    if (!ui.isShortcutEnabled('send-request')) return
     if (tabs.active?.kind !== 'request' || ui.paletteOpen || ui.historyOpen || ui.saveAsOpen) return
     e.preventDefault()
     urlBar.value?.send()
-  } else if (k === 'b') { e.preventDefault(); ui.sidebarVisible = !ui.sidebarVisible }
+  } else if (k === 'b' && ui.isShortcutEnabled('toggle-sidebar')) { e.preventDefault(); ui.sidebarVisible = !ui.sidebarVisible }
   // Ctrl+T 是 1 步操作（02 文档 §1 第 3 条），直接创建并激活“新建请求”标签。
-  else if (k === 't') { e.preventDefault(); tabs.openQuick() }
-  else if (k === 'k') { e.preventDefault(); ui.paletteOpen = true }
-  else if (k === ',') { e.preventDefault(); tabs.openSettings() }
-  else if (k === 'l' && e.shiftKey) { e.preventDefault(); ui.cycleLayout() }
+  else if (k === 't' && ui.isShortcutEnabled('new-request')) { e.preventDefault(); tabs.openQuick() }
+  else if (k === 'k' && ui.isShortcutEnabled('command-palette')) { e.preventDefault(); ui.paletteOpen = true }
+  else if (k === ',' && ui.isShortcutEnabled('settings')) { e.preventDefault(); tabs.openSettings() }
+  else if (k === 'l' && e.shiftKey && ui.isShortcutEnabled('cycle-layout')) { e.preventDefault(); ui.cycleLayout() }
   // Ctrl+S 保存（02 文档 §6.3）。草稿会打开「保存到」选择器；已绑定的节点直接落盘。
   // 预留 Ctrl+Shift+S 给 v0.2 的「另存为」，现在不拦截。
-  else if (k === 's' && !e.shiftKey) { e.preventDefault(); void saveCurrentRequest() }
+  else if (k === 's' && !e.shiftKey && ui.isShortcutEnabled('save-request')) { e.preventDefault(); void saveCurrentRequest() }
   else if (e.shiftKey && k === 'arrowup') { e.preventDefault(); setSplitRatio(splitLimits.value.max) }
   else if (e.shiftKey && k === 'arrowdown') { e.preventDefault(); setSplitRatio(splitLimits.value.min) }
 }

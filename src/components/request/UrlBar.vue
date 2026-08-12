@@ -171,7 +171,7 @@ watch(
 
 /** Ctrl+Enter 发送（02 文档 §4.4 ResponsePanel 的快捷键提示）。 */
 function onKeydown(e: KeyboardEvent) {
-  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && ui.isShortcutEnabled('send-request')) {
     e.preventDefault()
     triggerSend()
   }

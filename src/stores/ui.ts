@@ -6,6 +6,18 @@ export type LayoutMode = 'stacked' | 'side-by-side' | 'focus'
 export type ThemeMode = 'dark' | 'light' | 'system'
 export type LanguageMode = 'system' | 'zh-CN' | 'en-US'
 export type FontFamilyMode = string
+export type ShortcutId = 'command-palette' | 'settings' | 'new-request' | 'save-request' | 'toggle-sidebar' | 'cycle-layout' | 'send-request'
+
+const SHORTCUT_PREFERENCES_KEY = 'apogee.shortcut-preferences'
+
+function loadShortcutPreferences(): Partial<Record<ShortcutId, boolean>> {
+  if (typeof localStorage === 'undefined') return {}
+  try {
+    return JSON.parse(localStorage.getItem(SHORTCUT_PREFERENCES_KEY) ?? '{}')
+  } catch {
+    return {}
+  }
+}
 
 /**
  * 侧边栏宽度区间（02 文档 §3.2：「370px，可拖拽 180～480」）。
@@ -92,7 +104,19 @@ export const useUiStore = defineStore('ui', () => {
    * 设置页当前分区。命令面板 / Ctrl+, 深链会写这里；Settings 面板双向同步。
    * 放在 ui 而不是 tab 字段：设置是单例页，分区是导航状态不是标签身份。
    */
-  const settingsSection = ref<'appearance' | 'startup' | 'network' | 'performance' | 'about'>('appearance')
+  const settingsSection = ref<'appearance' | 'startup' | 'network' | 'performance' | 'shortcuts' | 'about'>('appearance')
+
+  /** 本地快捷键偏好。未记录的快捷键默认开启，避免升级后意外关闭已有操作。 */
+  const shortcutPreferences = ref<Partial<Record<ShortcutId, boolean>>>(loadShortcutPreferences())
+  function isShortcutEnabled(id: ShortcutId) {
+    return shortcutPreferences.value[id] !== false
+  }
+  function setShortcutEnabled(id: ShortcutId, enabled: boolean) {
+    shortcutPreferences.value = { ...shortcutPreferences.value, [id]: enabled }
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(SHORTCUT_PREFERENCES_KEY, JSON.stringify(shortcutPreferences.value))
+    }
+  }
 
   /**
    * 「把焦点交给 URL 栏」的信号计数器。
@@ -155,7 +179,7 @@ export const useUiStore = defineStore('ui', () => {
 
   return {
     sidebarVisible, sidebarWidth, sidebarMaxW, layout, themeMode, requestRatio,
-    historyOpen, saveAsOpen, settingsSection, paletteOpen, spikeOpen, spikePanel,
+    historyOpen, saveAsOpen, settingsSection, shortcutPreferences, isShortcutEnabled, setShortcutEnabled, paletteOpen, spikeOpen, spikePanel,
     urlFocusSeq, focusUrl,
     systemDark, isDark, applyTheme, applyFont, cycleLayout, setLayout,
     setSidebarWidth, resetSidebarWidth, syncViewport,

@@ -266,7 +266,7 @@ export const useTabsStore = defineStore('tabs', () => {
    * section 用于命令面板深链（外观 / 网络 / 关于…）。
    */
   function openSettings(
-    section?: 'appearance' | 'startup' | 'network' | 'performance' | 'about',
+    section?: 'appearance' | 'startup' | 'network' | 'performance' | 'shortcuts' | 'about',
   ): Tab {
     const ui = useUiStore()
     ui.spikeOpen = false
