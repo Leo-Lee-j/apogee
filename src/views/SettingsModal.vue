@@ -10,7 +10,7 @@ import {
   AppPopconfirm,
   AppSelect,
   AppSpace,
-  AppSwitch,
+  SettingToggleCard,
 } from '@/components/ui'
 import NaiveThemeScope from '@/components/NaiveThemeScope.vue'
 import { AppIcon } from '@/components/ui'
@@ -190,27 +190,26 @@ async function restartApp() {
           </AppAlert>
 
           <template v-if="activeSection === 'appearance'">
-            <header class="section-head">
-              <h1>外观</h1>
-              <p>控制应用主题。请求/响应分栏可在状态栏切换。</p>
-            </header>
-
             <section class="settings-group">
               <div class="group-heading">
                 <h2>界面</h2>
                 <p>主题立即生效，并作用于整个应用窗口。</p>
               </div>
-              <AppForm label-placement="left" :label-width="LABEL_WIDTH" size="medium">
-                <AppFormItem label="主题">
-                  <AppSelect
-                    class="control"
-                    size="medium"
-                    :value="ui.themeMode"
-                    :options="themeOptions"
-                    @update:value="(value: any) => { ui.themeMode = value; ui.applyTheme() }"
-                  />
-                </AppFormItem>
-              </AppForm>
+              <div class="choice-grid" role="radiogroup" aria-label="主题">
+                <button
+                  v-for="option in themeOptions"
+                  :key="option.value"
+                  type="button"
+                  class="choice-card"
+                  :class="{ selected: ui.themeMode === option.value }"
+                  role="radio"
+                  :aria-checked="ui.themeMode === option.value"
+                  @click="ui.themeMode = option.value as any; ui.applyTheme()"
+                >
+                  <span class="choice-title">{{ option.label }}</span>
+                  <span class="choice-description">{{ option.value === 'dark' ? '适合低光环境' : option.value === 'light' ? '清晰明亮的界面' : '跟随系统设置' }}</span>
+                </button>
+              </div>
             </section>
 
             <section class="settings-group">
@@ -226,26 +225,13 @@ async function restartApp() {
           </template>
 
           <template v-else-if="activeSection === 'startup'">
-            <header class="section-head">
-              <h1>启动与工作区</h1>
-              <p>控制启动后首先显示的界面，以及新建工作区的默认位置。</p>
-            </header>
-
             <section class="settings-group">
               <div class="group-heading">
                 <h2>启动</h2>
                 <p>关闭后每次启动都会回到工作区选择页。</p>
               </div>
               <AppForm label-placement="left" :label-width="LABEL_WIDTH" size="medium">
-                <AppFormItem label="打开上次工作区">
-                  <div class="setting-inline">
-                    <AppSwitch
-                      :value="app.settings.openLastWorkspaceOnStart"
-                      @update:value="setAutoOpen"
-                    />
-                    <span>启动时自动进入最近一次可用的工作区</span>
-                  </div>
-                </AppFormItem>
+                <SettingToggleCard title="打开上次工作区" description="启动时自动进入最近一次可用的工作区" :value="app.settings.openLastWorkspaceOnStart" @update:value="setAutoOpen" />
               </AppForm>
             </section>
 
@@ -272,11 +258,6 @@ async function restartApp() {
           </template>
 
           <template v-else-if="activeSection === 'network'">
-            <header class="section-head">
-              <h1>网络</h1>
-              <p>设置请求使用的代理、超时和证书校验策略。</p>
-            </header>
-
             <section class="settings-group">
               <div class="group-heading">
                 <h2>连接</h2>
@@ -317,12 +298,7 @@ async function restartApp() {
                     <span class="hint">整请求超时（含连接与下载）</span>
                   </div>
                 </AppFormItem>
-                <AppFormItem label="校验 TLS">
-                  <AppSwitch
-                    :value="app.settings.verifyTls"
-                    @update:value="(value: boolean) => setNetwork({ verifyTls: value })"
-                  />
-                </AppFormItem>
+                <SettingToggleCard title="校验 TLS" description="验证 HTTPS 证书链，关闭后允许自签名证书。" :value="app.settings.verifyTls" @update:value="(value: boolean) => setNetwork({ verifyTls: value })" />
               </AppForm>
               <AppAlert v-if="!app.settings.verifyTls" type="warning" :bordered="false">
                 关闭 TLS 校验后，连接可能被中间人窃听。仅用于明确知道风险的测试环境。
@@ -339,32 +315,14 @@ async function restartApp() {
           </template>
 
           <template v-else-if="activeSection === 'performance'">
-            <header class="section-head">
-              <h1>性能</h1>
-              <p>内存相关选项不影响请求语义，只改变本机资源占用。</p>
-            </header>
-
             <section class="settings-group">
               <div class="group-heading">
                 <h2>内存</h2>
                 <p>状态栏监测用于开发与自检；低内存模式适合长时间挂机。</p>
               </div>
               <AppForm label-placement="left" :label-width="LABEL_WIDTH" size="medium">
-                <AppFormItem label="显示内存监测">
-                  <AppSwitch
-                    :value="app.settings.showMemoryMonitor"
-                    @update:value="setMemoryMonitorVisible"
-                  />
-                </AppFormItem>
-                <AppFormItem label="低内存模式">
-                  <div class="setting-stack">
-                    <div class="setting-inline">
-                      <AppSwitch
-                        :value="app.settings.lowMemoryMode"
-                        @update:value="setLowMemoryMode"
-                      />
-                      <span>关闭 GPU 硬件加速，将在下次启动后生效</span>
-                    </div>
+                <SettingToggleCard title="显示内存监测" description="在状态栏显示当前应用的内存使用情况。" :value="app.settings.showMemoryMonitor" @update:value="setMemoryMonitorVisible" />
+                <SettingToggleCard title="低内存模式" description="关闭 GPU 硬件加速，将在下次启动后生效。" :value="app.settings.lowMemoryMode" @update:value="setLowMemoryMode">
                     <AppPopconfirm
                       positive-text="重启"
                       negative-text="取消"
@@ -378,18 +336,12 @@ async function restartApp() {
                       </template>
                       重启将应用已保存的设置，未保存的请求编辑可能丢失。
                     </AppPopconfirm>
-                  </div>
-                </AppFormItem>
+                </SettingToggleCard>
               </AppForm>
             </section>
           </template>
 
           <template v-else>
-            <header class="section-head">
-              <h1>关于</h1>
-              <p>版本与产品信息。</p>
-            </header>
-
             <section class="settings-group">
               <div class="group-heading">
                 <h2>应用</h2>
@@ -418,98 +370,92 @@ async function restartApp() {
 .settings-page {
   flex: 1 1 auto;
   display: grid;
-  grid-template-columns: 208px minmax(0, 1fr);
+  grid-template-columns: 180px minmax(0, 1fr);
   min-height: 0;
   overflow: hidden;
+  background: var(--a-bg-2);
 }
 .settings-nav {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 16px 10px;
+  gap: 3px;
+  padding: 20px 10px;
   border-right: 1px solid var(--a-border);
-  background: transparent;
+  background: var(--a-bg-3);
+  width: 180px;
 }
-.nav-heading { padding: 0 10px 14px; }
+.nav-heading { padding: 0 10px 16px; }
 .nav-title {
   color: var(--a-text);
   font-size: 16px;
   font-weight: var(--a-fw-semibold);
   line-height: 24px;
 }
-.nav-subtitle { margin-top: 2px; color: var(--a-text-dim); font-size: 12px; line-height: 18px; }
+.nav-subtitle { margin-top: 2px; color: var(--a-text-faint); font-size: 12px; line-height: 18px; }
 .settings-nav button {
-  height: 36px;
+  position: relative;
+  height: 34px;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 9px;
   padding: 0 12px;
   border: 0;
-  border-radius: var(--a-radius-md);
+  border-radius: 6px;
   background: transparent;
   color: var(--a-text-dim);
   font-size: 13px;
-  font-weight: var(--a-fw-medium);
+  font-weight: 500;
   text-align: left;
   cursor: pointer;
 }
 .settings-nav button:hover { background: var(--a-hover); color: var(--a-text); }
 .settings-nav button.active {
-  background: var(--a-hover);
-  color: var(--a-text);
-  box-shadow: inset 2px 0 0 var(--a-primary);
+  background: var(--a-selected);
+  color: var(--a-primary);
+  box-shadow: inset 0 0 0 1px var(--a-primary);
+  font-weight: var(--a-fw-semibold);
 }
 .settings-content {
   display: flex;
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  background: transparent;
+  background: var(--a-bg-2);
 }
 .settings-scroll {
   flex: 1 1 auto;
   min-height: 0;
-  max-width: 720px;
+  width: min(820px, 100%);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 26px;
   overflow: auto;
-  padding: 24px 28px 32px;
+  padding: 28px 32px 48px;
 }
 .settings-banner { margin-bottom: 4px; }
-.section-head { margin-bottom: 8px; }
-.section-head h1 {
-  margin: 0;
-  color: var(--a-text);
-  font-size: 18px;
-  font-weight: var(--a-fw-semibold);
-  line-height: 28px;
-}
-.section-head p {
-  margin: 4px 0 0;
-  color: var(--a-text-dim);
-  font-size: 13px;
-  line-height: 20px;
-}
 .settings-group {
   min-width: 0;
-  padding: 16px 0;
+  padding: 0 0 22px;
+  border: 0;
   border-bottom: 1px solid var(--a-border);
+  background: transparent;
+  border-radius: 0;
+  box-shadow: none;
 }
-.settings-group:last-child { border-bottom: 0; }
 .settings-group.muted .placeholder {
-  margin: 0;
+  margin: 4px 0 0;
   color: var(--a-text-faint);
   font-size: 13px;
   line-height: 20px;
 }
+.settings-group.muted { opacity: .68; }
 .group-heading { margin-bottom: 14px; }
 .group-heading h2 {
-  margin: 0 0 4px;
+  margin: 0 0 5px;
   color: var(--a-text);
   font-size: 14px;
   line-height: 20px;
-  font-weight: var(--a-fw-semibold);
+  font-weight: 500;
 }
 .group-heading p {
   margin: 0;
@@ -517,8 +463,8 @@ async function restartApp() {
   font-size: 13px;
   line-height: 20px;
 }
-.control { width: min(320px, 100%); }
-.control-wide { width: min(480px, 100%); }
+.control { width: min(328px, 100%); }
+.control-wide { width: min(472px, 100%); }
 .control-num { width: 140px; }
 .control-row {
   width: min(520px, 100%);
@@ -559,15 +505,19 @@ async function restartApp() {
 .about-list {
   margin: 0;
   display: grid;
-  gap: 10px;
-  max-width: 420px;
+  gap: 0;
+  max-width: 480px;
 }
 .about-list > div {
   display: grid;
   grid-template-columns: 96px minmax(0, 1fr);
   gap: 12px;
   align-items: baseline;
+  min-height: 36px;
+  padding: 8px 0;
+  border-top: 1px solid var(--a-border);
 }
+.about-list > div:first-child { border-top: 0; }
 .about-list dt {
   margin: 0;
   color: var(--a-text-dim);
@@ -581,10 +531,20 @@ async function restartApp() {
 }
 .about-list dd.plain { font-family: var(--a-font-ui); }
 .settings-group :deep(.n-form-item:last-child) { margin-bottom: 0; }
+.settings-group :deep(.n-form-item) { margin-bottom: 14px; }
 .settings-group :deep(.n-form-item-label) {
   color: var(--a-text-soft);
   font-weight: var(--a-fw-medium);
+  font-size: 13px;
 }
+.choice-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; max-width: 640px; }
+.choice-card { min-height: 68px; padding: 12px 14px; border: 1px solid var(--a-border-strong); border-radius: 6px; background: var(--a-bg-2); color: var(--a-text); text-align: left; cursor: pointer; }
+.choice-card:hover { background: var(--a-hover); }
+.choice-card.selected { background: var(--a-bg-3); border-color: var(--a-text-dim); }
+.choice-title { display: block; font-size: 13px; font-weight: 500; line-height: 18px; }
+.choice-description { display: block; margin-top: 4px; color: var(--a-text-dim); font-size: 12px; line-height: 16px; }
+.settings-group :deep(.n-form-item) { margin-bottom: 12px; }
+.settings-group :deep(.n-input), .settings-group :deep(.n-base-selection), .settings-group :deep(.n-button) { border-radius: 6px; }
 
 @media (max-width: 760px) {
   .settings-page {
@@ -601,7 +561,7 @@ async function restartApp() {
   .nav-heading { display: none; }
   .settings-nav button { flex: 0 0 auto; }
   .settings-nav button.active { box-shadow: inset 0 -2px 0 var(--a-primary); }
-  .settings-scroll { padding: 16px 16px 24px; }
+  .settings-scroll { width: 100%; padding: 22px 16px 32px; }
   .control-row { width: 100%; }
   .control-row :deep(.n-space) { flex-wrap: wrap; }
   .control-grow { flex: 1 1 100%; }

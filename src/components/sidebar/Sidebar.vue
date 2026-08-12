@@ -969,20 +969,14 @@ defineExpose({
   white-space: nowrap; cursor: pointer;
 }
 
-.row:hover { background: var(--a-hover); color: var(--a-text); border-radius: 6px; }
+.row:hover { background: var(--a-selected); color: var(--a-text); border-radius: 6px; box-shadow: inset 0 0 0 1px var(--a-primary); }
 .row.selected:not(.active) { box-shadow: inset 2px 0 0 var(--a-border-strong); }
 .row.folder { color: var(--a-text); font-weight: 600; }
-/*
- * 当前打开的接口（02 文档 §4.5 的「← 当前打开（高亮）」）。
- *
- * 底色 + 左侧 2px 主色条两个通道。只用底色不够：--a-selected 是 16% alpha 的
- * 叠加层，在 hover 态（7% 白）旁边份量差不明显，滚动时不容易一眼扫到 ——
- * 而「定位」按钮的全部意义就是让人一眼扫到它。
- * 用 box-shadow 画色条而不是 border-left，免得改变 padding 算出来的缩进。
- */
-.row.active { background: var(--a-selected); color: var(--a-text); border: 0; border-radius: 6px; box-shadow: inset 2px 0 0 var(--a-primary); }
-.row.active:hover { background: var(--a-hover); }
-.row.active .node-icon { color: var(--a-primary) !important; }
+/* 当前打开的接口与“新建请求”选项使用同一套轻量激活态。 */
+.row.active { background: var(--a-selected); color: var(--a-text); border: 0; border-radius: 6px; box-shadow: inset 0 0 0 1px var(--a-primary); }
+.row.active:hover { background: var(--a-selected); color: var(--a-text); }
+.row.active .node-icon,
+.row.active .node-icon.folder { color: var(--a-primary) !important; }
 .node-icon {
   display: flex;
   align-items: center;
