@@ -121,11 +121,19 @@ async function mountEditor() {
 
     if (!lightweight.value && language && searchModule) {
       const { foldGutter, foldKeymap, foldAll, unfoldAll } = language
+      const { search, searchKeymap, closeSearchPanel } = searchModule
       extensions.push(
         highlightActiveLine(),
         foldGutter(),
-        searchModule.search(),
-        keymap.of([...foldKeymap, { key: 'Mod-Alt-0', run: foldAll }, { key: 'Mod-Alt-9', run: unfoldAll }]),
+        search(),
+        keymap.of([
+          // searchKeymap 提供 Ctrl/Cmd+F；Escape 会关闭已打开的搜索面板。
+          ...searchKeymap,
+          { key: 'Escape', run: closeSearchPanel, preventDefault: true },
+          ...foldKeymap,
+          { key: 'Mod-Alt-0', run: foldAll },
+          { key: 'Mod-Alt-9', run: unfoldAll },
+        ]),
       )
     }
 
@@ -195,9 +203,38 @@ function toggleWrap() {
 }
 
 async function searchText() {
-  if (!view.value || lightweight.value) return
+  const currentView = view.value
+  if (!currentView || lightweight.value) return
   const { openSearchPanel } = await import('@codemirror/search')
-  openSearchPanel(view.value)
+  if (view.value === currentView) openSearchPanel(currentView)
+}
+
+async function closeSearch() {
+  const currentView = view.value
+  if (!currentView || lightweight.value) return
+  const { closeSearchPanel, searchPanelOpen } = await import('@codemirror/search')
+  if (view.value === currentView && searchPanelOpen(currentView.state)) {
+    closeSearchPanel(currentView)
+  }
+}
+
+function handleSearchKeydown(event: KeyboardEvent) {
+  if (!view.value || lightweight.value) return
+
+  const isFindShortcut = (event.ctrlKey || event.metaKey)
+    && !event.altKey
+    && event.key.toLowerCase() === 'f'
+
+  if (isFindShortcut) {
+    // 必须在同步事件阶段阻止默认行为，否则浏览器会先打开页面搜索。
+    event.preventDefault()
+    event.stopPropagation()
+    void searchText()
+  } else if (event.key === 'Escape') {
+    event.preventDefault()
+    event.stopPropagation()
+    void closeSearch()
+  }
 }
 
 async function toggleFolds(all: boolean) {
@@ -226,11 +263,21 @@ watch(() => [props.responseId, props.highlight, props.formatJson], () => {
   refresh()
 })
 
-defineExpose({ metrics })
+function canSearch() {
+  return !lightweight.value && view.value !== null
+}
+
+defineExpose({ metrics, canSearch, openSearch: searchText, closeSearch })
 </script>
 
 <template>
-  <div class="cm-wrap">
+  <div
+    class="cm-wrap"
+    role="region"
+    aria-label="响应文本结果"
+    tabindex="0"
+    @keydown.capture="handleSearchKeydown"
+  >
     <div v-if="mode !== 'raw'" class="tools" role="toolbar" aria-label="响应文本工具">
       <button type="button" :class="{ on: mode === 'pretty' }" @click="setMode('pretty')">美化</button>
       <button type="button" :class="{ on: mode === 'compact' }" @click="setMode('compact')">压缩</button>
@@ -263,6 +310,7 @@ defineExpose({ metrics })
 
 <style scoped>
 .cm-wrap { display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; }
+.cm-wrap:focus-visible { outline: 1px solid var(--a-focus); outline-offset: -1px; }
 .tools { flex: 0 0 auto; display: flex; align-items: center; gap: 2px; min-height: 30px; padding: 3px 8px; border-bottom: 1px solid var(--a-border); background: var(--a-bg-2); }
 .tools button { height: 24px; padding: 0 7px; border: 0; border-radius: var(--a-radius-sm); background: transparent; color: var(--a-text-dim); font: 11px var(--a-font-ui); cursor: pointer; }
 .tools button:hover { background: var(--a-hover); color: var(--a-text); }

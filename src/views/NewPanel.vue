@@ -8,7 +8,8 @@ import NaiveThemeScope from '@/components/NaiveThemeScope.vue'
 import { useTabsStore } from '@/stores/tabs'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { importCurl } from '@/features/curl'
-import { ipc, inTauri, type RequestSpec } from '@/ipc'
+import YapiImportPanel from '@/features/import/YapiImportPanel.vue'
+import { ipc, inTauri, type RequestSpec, type YapiImportResult } from '@/ipc'
 
 /**
  * 新建请求标签里的选项面板。
@@ -30,6 +31,7 @@ const importAlert = ref<{
 } | null>(null)
 const actionBusy = ref(false)
 const curlMode = ref(false)
+const yapiMode = ref(false)
 const curlCommand = ref('')
 const importWarnings = ref<string[]>([])
 const previewSpec = ref<RequestSpec | null>(null)
@@ -158,6 +160,7 @@ async function savedRequest() {
 }
 
 function openCurlImport() {
+  yapiMode.value = false
   curlMode.value = true
   actionError.value = ''
   void nextTick(() => panel.value?.querySelector<HTMLTextAreaElement>('.curl-input')?.focus())
@@ -194,6 +197,24 @@ async function applyCurlImport() {
   } finally {
     actionBusy.value = false
   }
+}
+
+function openYapiImport() {
+  curlMode.value = false
+  yapiMode.value = true
+  actionError.value = ''
+  importAlert.value = null
+}
+
+function finishYapiImport(result: YapiImportResult) {
+  yapiMode.value = false
+  const warningText = result.warnings.join('；')
+  importAlert.value = {
+    title: result.warnings.length ? '导入完成，存在转换提示' : '导入成功',
+    type: result.warnings.length ? 'warning' : 'success',
+    message: `已创建集合“${result.collectionName}”，导入 ${result.importedRequests} 个请求、${result.importedFolders} 个文件夹和 ${result.importedEnvironments} 个环境${warningText ? `；${warningText}` : ''}`,
+  }
+  actionNotice.value = `已导入 YApi 项目“${result.collectionName}”`
 }
 
 async function openPostmanImport() {
@@ -280,6 +301,15 @@ const GROUPS: { title: string; items: NewOption[] }[] = [
         desc: '把一条 curl 命令还原成请求',
         icon: 'clipboard',
         run: openCurlImport,
+      },
+      {
+        id: 'yapi',
+        title: '从 YApi 导入',
+        desc: '连接项目，预览后导入分类、接口和环境',
+        icon: 'import',
+        run: openYapiImport,
+        badge: 'v0.2',
+        reason: '使用实例地址和项目 Token 执行一次性导入。',
       },
       {
         id: 'file',
@@ -410,7 +440,13 @@ onMounted(async () => {
         {{ actionError }}
       </AppAlert>
 
-      <div v-if="curlMode" class="curl-form">
+      <YapiImportPanel
+        v-if="yapiMode"
+        @back="yapiMode = false"
+        @imported="finishYapiImport"
+      />
+
+      <div v-else-if="curlMode" class="curl-form">
         <div class="curl-workspace">
           <section class="curl-column">
             <label for="curl-command">cURL 命令</label>

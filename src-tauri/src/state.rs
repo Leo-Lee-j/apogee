@@ -41,6 +41,8 @@ pub struct AppState {
     semantic_meta: RwLock<HashMap<Uuid, ResponseSummary>>,
     /// 当前窗口绑定的工作区会话。启动入口阶段为 None。
     pub workspace: RwLock<Option<WorkspaceSession>>,
+    /// 尚未确认落盘的 YApi 导入计划。计划不包含项目 Token。
+    pub yapi_plans: RwLock<HashMap<Uuid, apogee_core::yapi::YapiImportPlan>>,
     /// 请求中注册表。key 是 ExecHandle.id（= 响应 id）。
     in_flight: RwLock<HashMap<Uuid, InFlight>>,
 }
@@ -54,6 +56,7 @@ impl AppState {
             meta: RwLock::new(Vec::new()),
             semantic_meta: RwLock::new(HashMap::new()),
             workspace: RwLock::new(None),
+            yapi_plans: RwLock::new(HashMap::new()),
             in_flight: RwLock::new(HashMap::new()),
         })
     }

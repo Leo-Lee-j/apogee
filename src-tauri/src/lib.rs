@@ -102,6 +102,9 @@ pub fn run() {
             commands::postman_import_file,
             commands::postman_import_workspace,
             commands::postman_import_environment_workspace,
+            commands::yapi_analyze_import,
+            commands::yapi_apply_import,
+            commands::yapi_discard_import,
         ])
         .setup(move |app| {
             let data_dir = app
@@ -729,6 +732,7 @@ mod commands {
                                 serde_json::json!({
                                     "id": id,
                                     "error": { "kind": "Internal", "message": error.to_string() },
+                                    "actualRequest": meta.actual_request.clone(),
                                 }),
                             );
                             return;
@@ -761,6 +765,7 @@ mod commands {
                                     serde_json::json!({
                                         "id": id,
                                         "error": { "kind": "Internal", "message": error.to_string() },
+                                    "actualRequest": meta.actual_request.clone(),
                                     }),
                                 );
                                 return;
@@ -778,12 +783,16 @@ mod commands {
                             serde_json::json!({ "id": id }),
                         );
                     }
-                    apogee_core::http::Outcome::Failed(error) => {
+                    apogee_core::http::Outcome::Failed {
+                        error,
+                        actual_request,
+                    } => {
                         cleanup(
                             "request:error",
                             serde_json::json!({
                                 "id": id,
                                 "error": error,
+                                "actualRequest": actual_request,
                             }),
                         );
                     }
@@ -1043,6 +1052,91 @@ mod commands {
                 })
             })
             .map_err(|error| error.to_string())
+    }
+
+    /// Imports a YApi project in two phases. Analyze performs network access and keeps
+    /// the transformed plan in Rust memory; only apply may modify the workspace.
+    #[tauri::command]
+    pub async fn yapi_analyze_import(
+        state: State<'_, Arc<AppState>>,
+        base_url: String,
+        token: String,
+    ) -> Result<apogee_core::yapi::YapiAnalyzeResult, AppError> {
+        let plan = apogee_core::yapi::analyze(&base_url, &token).await?;
+        let plan_id = Uuid::new_v4();
+        let summary = plan.summary(plan_id);
+        state
+            .yapi_plans
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(plan_id, plan);
+        Ok(summary)
+    }
+
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct YapiApplyOptions {
+        pub collection_name: Option<String>,
+        #[serde(default = "default_true")]
+        pub import_environments: bool,
+    }
+
+    fn default_true() -> bool {
+        true
+    }
+
+    #[tauri::command]
+    pub fn yapi_apply_import(
+        state: State<'_, Arc<AppState>>,
+        workspace_id: String,
+        session_id: String,
+        plan_id: String,
+        options: YapiApplyOptions,
+    ) -> Result<crate::workspace::YapiWorkspaceImportResult, String> {
+        let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
+        let plan_id = parse_id(&plan_id)?;
+        // 先校验会话，避免失效窗口消耗仍可在新会话使用的计划。
+        state
+            .with_workspace(workspace_id, session_id, |_| Ok(()))
+            .map_err(|error| error.to_string())?;
+        let plan = state
+            .yapi_plans
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(&plan_id)
+            .ok_or_else(|| "YApi 导入计划已失效，请重新分析项目".to_string())?;
+        let result = state.with_workspace(workspace_id, session_id, |repository| {
+            repository.import_yapi_plan(
+                &plan,
+                options.collection_name.as_deref(),
+                options.import_environments,
+            )
+        });
+        match result {
+            Ok(imported) => Ok(imported),
+            Err(error) => {
+                state
+                    .yapi_plans
+                    .write()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .insert(plan_id, plan);
+                Err(error.to_string())
+            }
+        }
+    }
+
+    #[tauri::command]
+    pub fn yapi_discard_import(
+        state: State<'_, Arc<AppState>>,
+        plan_id: String,
+    ) -> Result<(), String> {
+        let plan_id = parse_id(&plan_id)?;
+        state
+            .yapi_plans
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(&plan_id);
+        Ok(())
     }
 
     /// 读取当前工作区的扁平树。

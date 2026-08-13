@@ -90,6 +90,7 @@ export function useRequest() {
       tabs.patch(tabId, {
         response: settlement.event.response,
         error: null,
+        actualRequest: null,
         dirty: false,
       })
       if (inTauri && spec) {
@@ -97,8 +98,12 @@ export function useRequest() {
           .catch((error) => console.error('[history] 保存请求历史失败', error))
       }
     } else if (settlement.kind === 'error') {
-      // 错误进入 Tab 状态，由 ResponsePanel 渲染三段式错误，而不是只留在控制台。
-      tabs.patch(tabId, { response: null, error: settlement.event.error })
+      // 网络失败也保留后端在发送前构造的最终请求，供 ResponsePanel 显示。
+      tabs.patch(tabId, {
+        response: null,
+        error: settlement.event.error,
+        actualRequest: settlement.event.actualRequest ?? null,
+      })
     }
     sending.value = false
     active.value = null
@@ -153,7 +158,7 @@ export function useRequest() {
           message: '工作区尚未加载，无法发送请求',
           hints: [{ label: '检查工作区目录是否可读，并重试' }],
         }
-        tabs.patch(tab.id, { response: null, error })
+        tabs.patch(tab.id, { response: null, error, actualRequest: null })
         return
       }
     }
@@ -170,8 +175,8 @@ export function useRequest() {
     }
     const startedAt = Date.now()
 
-    // 新请求开始后清除上一次错误；旧响应先保留，直到新请求成功或失败。
-    tabs.patch(tab.id, { error: null })
+    // 新请求开始后清除上一次错误和快照；旧响应先保留，直到新请求成功或失败。
+    tabs.patch(tab.id, { error: null, actualRequest: null })
 
     sending.value = true
     armPendingTimeout()
@@ -184,7 +189,7 @@ export function useRequest() {
           message: '环境保存失败，未发送请求',
           hints: [{ label: '检查环境名称和工作区目录后重试' }],
         }
-        tabs.patch(tab.id, { response: null, error })
+        tabs.patch(tab.id, { response: null, error, actualRequest: null })
         sending.value = false
         active.value = null
         clearPendingTimeout()
@@ -208,7 +213,7 @@ export function useRequest() {
     } catch (error) {
       // invoke 本身失败（命令注册问题等）也进入同一套错误展示。
       const appError = normalizeError(error)
-      tabs.patch(tab.id, { response: null, error: appError })
+      tabs.patch(tab.id, { response: null, error: appError, actualRequest: null })
       console.error('[request] invoke sendRequest 失败', appError)
       sending.value = false
       active.value = null

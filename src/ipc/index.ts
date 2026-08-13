@@ -54,11 +54,15 @@ export interface Timing {
 export interface ActualRequest {
   method: string
   url: string
+  /** 已完成变量解析但尚未编码的路径参数值。 */
+  pathParams?: [string, string][]
   headers: [string, string][]
   /** 已知浏览器/协议通用 Header 名称，供实际请求表格默认隐藏。 */
   commonHeaderNames?: string[]
-  /** 仅小型内存请求体可用；文件和流式上传不会进入快照。 */
+  /** 内存型请求体的完整内容；文件和流式上传不会进入快照。 */
   body?: string
+  /** 流式 Body 无法读取原始字节时保留的字段名称和值。 */
+  bodyParams?: [string, string][]
 }
 
 /**
@@ -287,6 +291,34 @@ export function setWorkspaceSession(session: { workspaceId: string; sessionId: s
 // 命令（03 文档 §3.2）
 // ─────────────────────────────────────────────────────────────────────
 
+export interface YapiCategorySummary {
+  name: string
+  requestCount: number
+}
+
+export interface YapiAnalyzeResult {
+  planId: string
+  projectName: string
+  categories: YapiCategorySummary[]
+  requestCount: number
+  environmentCount: number
+  warnings: string[]
+}
+
+export interface YapiApplyOptions {
+  collectionName?: string
+  importEnvironments: boolean
+}
+
+export interface YapiImportResult {
+  collectionId: string
+  collectionName: string
+  importedRequests: number
+  importedFolders: number
+  importedEnvironments: number
+  warnings: string[]
+}
+
 export const ipc = {
   appSettingsLoad(): Promise<AppSettings> {
     return call('app_settings_load')
@@ -504,6 +536,15 @@ export const ipc = {
   postmanImportEnvironmentWorkspace(path: string): Promise<{ environment: Environment; warnings: string[] }> {
     return call('postman_import_environment_workspace', { ...sessionArgs(), path })
   },
+  yapiAnalyzeImport(baseUrl: string, token: string): Promise<YapiAnalyzeResult> {
+    return call('yapi_analyze_import', { baseUrl, token })
+  },
+  yapiApplyImport(planId: string, options: YapiApplyOptions): Promise<YapiImportResult> {
+    return call('yapi_apply_import', { ...sessionArgs(), planId, options })
+  },
+  yapiDiscardImport(planId: string): Promise<void> {
+    return call('yapi_discard_import', { planId })
+  },
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -525,6 +566,8 @@ export interface DoneEvent {
 export interface ErrorEvent {
   id: string
   error: AppError
+  /** 请求已组装后发生网络错误时携带，用于仍然展示实际请求。 */
+  actualRequest?: ActualRequest | null
 }
 
 export interface CancelledEvent {

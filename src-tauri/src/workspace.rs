@@ -39,6 +39,17 @@ const HISTORY_LIMIT: usize = 200;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct YapiWorkspaceImportResult {
+    pub collection_id: Uuid,
+    pub collection_name: String,
+    pub imported_requests: usize,
+    pub imported_folders: usize,
+    pub imported_environments: usize,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct HistoryEntry {
     pub id: Uuid,
     pub created_at_ms: u64,
@@ -597,6 +608,187 @@ impl WorkspaceRepository {
         self.snapshot()
     }
 
+    /// 将完整 YApi 导入计划先写入暂存目录，校验后一次发布集合与环境。
+    /// 发布清单失败时会移除已发布文件并恢复旧清单，不留下可见的半成品。
+    pub fn import_yapi_plan(
+        &self,
+        plan: &apogee_core::yapi::YapiImportPlan,
+        requested_name: Option<&str>,
+        import_environments: bool,
+    ) -> Result<YapiWorkspaceImportResult> {
+        use std::collections::HashMap;
+
+        if plan.requests.is_empty() {
+            bail!("YApi 项目中没有可导入的请求");
+        }
+        let mut manifest = self.read_manifest()?;
+        let base_name = requested_name
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .unwrap_or(&plan.project_name);
+        let collection_name = unique_name(
+            base_name,
+            manifest.collections.iter().map(|entry| entry.name.as_str()),
+        );
+        let collection_id = Uuid::new_v4();
+        let directory = format!("collections/{collection_id}");
+        let final_collection = self.root.join(&directory);
+        let staging_collection = self
+            .root
+            .join("collections")
+            .join(format!(".{collection_id}.yapi-import"));
+        let staging_environments = self
+            .root
+            .join(ENVIRONMENT_DIR)
+            .join(format!(".{collection_id}.yapi-import"));
+
+        fs::create_dir_all(&staging_collection)?;
+        let prepare = (|| -> Result<(usize, Vec<Environment>)> {
+            write_yaml(
+                &staging_collection.join(COLLECTION_MARKER),
+                &ContainerDocument {
+                    apogee: WORKSPACE_FORMAT_VERSION,
+                    id: collection_id,
+                    name: collection_name.clone(),
+                    auth: AuthConfig::Inherit,
+                    settings: RequestSettings::default(),
+                },
+            )?;
+
+            let mut folders = HashMap::<String, (Uuid, PathBuf)>::new();
+            for item in &plan.requests {
+                let mut parent = staging_collection.clone();
+                let mut path_key = String::new();
+                for folder_name in &item.folder {
+                    let folder_name = required_name(folder_name)?;
+                    if !path_key.is_empty() {
+                        path_key.push('/');
+                    }
+                    path_key.push_str(&folder_name);
+                    if let Some((_, path)) = folders.get(&path_key) {
+                        parent = path.clone();
+                        continue;
+                    }
+                    let id = Uuid::new_v4();
+                    let path = parent.join(id.to_string());
+                    fs::create_dir_all(&path)?;
+                    write_yaml(
+                        &path.join(FOLDER_MARKER),
+                        &ContainerDocument {
+                            apogee: WORKSPACE_FORMAT_VERSION,
+                            id,
+                            name: folder_name,
+                            auth: AuthConfig::Inherit,
+                            settings: RequestSettings::default(),
+                        },
+                    )?;
+                    folders.insert(path_key.clone(), (id, path.clone()));
+                    parent = path;
+                }
+                let request_id = Uuid::new_v4();
+                write_yaml(
+                    &parent.join(format!("{request_id}.yaml")),
+                    &PersistedRequest {
+                        apogee: WORKSPACE_FORMAT_VERSION,
+                        id: request_id,
+                        name: required_name(&item.name)?,
+                        spec: item.spec.clone(),
+                    },
+                )?;
+            }
+
+            // 重新读取全部暂存 YAML，防止序列化或磁盘错误进入正式工作区。
+            validate_import_tree(&staging_collection)?;
+
+            let mut environments = Vec::new();
+            if import_environments {
+                fs::create_dir_all(&staging_environments)?;
+                let existing_names: Vec<&str> = manifest
+                    .environments
+                    .iter()
+                    .map(|entry| entry.name.as_str())
+                    .collect();
+                let mut allocated_names: Vec<String> = Vec::new();
+                for source in &plan.environments {
+                    let name = unique_name(
+                        &source.name,
+                        existing_names
+                            .iter()
+                            .copied()
+                            .chain(allocated_names.iter().map(String::as_str)),
+                    );
+                    allocated_names.push(name.clone());
+                    let mut environment = source.clone();
+                    environment.id = Uuid::new_v4();
+                    environment.name = name;
+                    write_yaml(
+                        &staging_environments.join(format!("{}.yaml", environment.id)),
+                        &environment,
+                    )?;
+                    let _: Environment = read_yaml(
+                        &staging_environments.join(format!("{}.yaml", environment.id)),
+                    )?;
+                    environments.push(environment);
+                }
+            }
+            Ok((folders.len(), environments))
+        })();
+
+        let (imported_folders, environments) = match prepare {
+            Ok(value) => value,
+            Err(error) => {
+                let _ = fs::remove_dir_all(&staging_collection);
+                let _ = fs::remove_dir_all(&staging_environments);
+                return Err(error);
+            }
+        };
+
+        let old_manifest = manifest.clone();
+        let mut published_environments = Vec::new();
+        let publish = (|| -> Result<()> {
+            fs::rename(&staging_collection, &final_collection)
+                .with_context(|| "发布 YApi 集合失败")?;
+            for environment in &environments {
+                let staged = staging_environments.join(format!("{}.yaml", environment.id));
+                let target = self.environment_path(environment.id);
+                fs::rename(&staged, &target).with_context(|| "发布 YApi 环境失败")?;
+                published_environments.push(target);
+            }
+            manifest.collections.push(CollectionEntry {
+                id: collection_id,
+                name: collection_name.clone(),
+                directory,
+            });
+            manifest.environments.extend(environments.iter().map(|environment| EnvironmentEntry {
+                id: environment.id,
+                name: environment.name.clone(),
+            }));
+            write_yaml(&self.manifest_path(), &manifest)?;
+            // 只有完整快照可重读时才视为提交成功。
+            self.snapshot()?;
+            Ok(())
+        })();
+
+        let _ = fs::remove_dir_all(&staging_environments);
+        if let Err(error) = publish {
+            let _ = fs::remove_dir_all(&final_collection);
+            for path in published_environments {
+                let _ = fs::remove_file(path);
+            }
+            let _ = write_yaml(&self.manifest_path(), &old_manifest);
+            return Err(error);
+        }
+
+        Ok(YapiWorkspaceImportResult {
+            collection_id,
+            collection_name,
+            imported_requests: plan.requests.len(),
+            imported_folders,
+            imported_environments: environments.len(),
+            warnings: plan.warnings.clone(),
+        })
+    }
+
     pub fn create_folder(&self, parent_id: Uuid, name: String) -> Result<WorkspaceSnapshot> {
         let name = required_name(&name)?;
         let parent = self.locate(parent_id)?;
@@ -927,6 +1119,42 @@ fn merge_settings(base: &mut RequestSettings, override_with: &RequestSettings) {
     if override_with.proxy_url.is_some() { base.proxy_url = override_with.proxy_url.clone(); }
     if override_with.retry_count.is_some() { base.retry_count = override_with.retry_count; }
     if override_with.retry_backoff_ms.is_some() { base.retry_backoff_ms = override_with.retry_backoff_ms; }
+}
+
+fn unique_name<'a>(base: &str, existing: impl IntoIterator<Item = &'a str>) -> String {
+    let base = base.trim();
+    let base = if base.is_empty() { "YApi 项目" } else { base };
+    let names: std::collections::HashSet<&str> = existing.into_iter().collect();
+    if !names.contains(base) {
+        return base.to_string();
+    }
+    for number in 2.. {
+        let candidate = format!("{base} ({number})");
+        if !names.contains(candidate.as_str()) {
+            return candidate;
+        }
+    }
+    unreachable!()
+}
+
+fn validate_import_tree(root: &Path) -> Result<()> {
+    let _: ContainerDocument = read_yaml(&root.join(COLLECTION_MARKER))?;
+    fn visit(directory: &Path) -> Result<()> {
+        for entry in fs::read_dir(directory)? {
+            let entry = entry?;
+            let path = entry.path();
+            if entry.file_type()?.is_dir() {
+                let _: ContainerDocument = read_yaml(&path.join(FOLDER_MARKER))?;
+                visit(&path)?;
+            } else if path.extension().is_some_and(|extension| extension == "yaml")
+                && path.file_name().and_then(|name| name.to_str()).is_some_and(|name| !name.starts_with('_'))
+            {
+                let _: PersistedRequest = read_yaml(&path)?;
+            }
+        }
+        Ok(())
+    }
+    visit(root)
 }
 
 fn required_name(name: &str) -> Result<String> {

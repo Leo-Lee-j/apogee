@@ -1,7 +1,14 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, useId, watch } from 'vue'
 import { NPopover } from 'naive-ui'
-import { closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete'
+import {
+  autocompletion,
+  closeBrackets,
+  closeBracketsKeymap,
+  startCompletion,
+  type Completion,
+  type CompletionContext,
+} from '@codemirror/autocomplete'
 import { defaultKeymap, indentWithTab } from '@codemirror/commands'
 import { json } from '@codemirror/lang-json'
 import { defaultHighlightStyle, syntaxHighlighting } from '@codemirror/language'
@@ -55,6 +62,48 @@ const variables = computed(() => {
     preview: resolveVariablePreview(variable.key, values),
   }))
 })
+
+function variableCompletionOptions(query: string, replaceTemplate = false): Completion[] {
+  const search = query.trim()
+  // `*` 是候选弹窗的“显示全部”触发符，而不是实际会发送给后端的变量名。
+  const normalizedSearch = search === '*' ? '' : search.toLocaleLowerCase()
+
+  return variables.value
+    .filter((variable) => variable.key.toLocaleLowerCase().includes(normalizedSearch))
+    .map((variable) => {
+      const preview = variable.preview.error || variable.preview.value || '空值'
+      return {
+        label: variable.key,
+        type: 'variable',
+        detail: preview.length > 56 ? `${preview.slice(0, 55)}…` : preview,
+        ...(replaceTemplate ? { apply: `{{${variable.key}}}` } : {}),
+      }
+    })
+}
+
+function variableCompletionSource(context: CompletionContext) {
+  const wildcard = context.matchBefore(/\{\{\*\}\}/)
+  if (wildcard) {
+    const options = variableCompletionOptions('*', true)
+    return options.length
+      ? { from: wildcard.from, to: wildcard.to, options, filter: false }
+      : null
+  }
+
+  const template = context.matchBefore(/\{\{[^{}\r\n]*/)
+  if (!template) return null
+
+  const options = variableCompletionOptions(template.text.slice(2))
+  return options.length
+    ? { from: template.from + 2, to: template.to, options, filter: false }
+    : null
+}
+
+function isVariableCompletionTrigger(state: EditorState): boolean {
+  const cursor = state.selection.main.head
+  const beforeCursor = state.sliceDoc(Math.max(0, cursor - 5), cursor)
+  return beforeCursor.endsWith('{{') || beforeCursor.endsWith('{{*}}')
+}
 
 function hasCompleteVariableTemplate(source: string): boolean {
   // 后端会接受任意非空名称并在发送前解析；完整占位符的最终 JSON 结构取决于变量值。
@@ -145,6 +194,7 @@ function mountEditor() {
     highlightActiveLine(),
     json(),
     closeBrackets(),
+    autocompletion({ override: [variableCompletionSource] }),
     syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
     keymap.of([
       { key: 'Shift-Alt-f', run: () => { formatJson(2); return true } },
@@ -160,6 +210,12 @@ function mountEditor() {
     EditorView.updateListener.of((update) => {
       if (!update.docChanged || synchronizingExternalValue) return
       commit(update.state.doc.toString())
+      if (
+        update.transactions.some((transaction) => transaction.isUserEvent('input'))
+        && isVariableCompletionTrigger(update.state)
+      ) {
+        startCompletion(update.view)
+      }
     }),
     EditorView.theme({
       '&': {
@@ -169,6 +225,8 @@ function mountEditor() {
         // 与响应查看器共用结果字号设置；JSON 正文仍始终使用等宽字体。
         fontSize: 'var(--a-font-result)',
       },
+      // 覆盖 CodeMirror 基础主题的 1px dotted outline；外层裁剪后它会只剩底部虚线。
+      '&.cm-focused': { outline: 'none' },
       '.cm-scroller': { fontFamily: 'var(--a-font-editor)', lineHeight: 'var(--a-lh-result)' },
       '.cm-content': { padding: '10px 0 14px' },
       '.cm-line': { padding: '0 10px' },
@@ -182,6 +240,19 @@ function mountEditor() {
       '.cm-activeLineGutter': { backgroundColor: 'var(--a-hover)' },
       '.cm-selectionBackground, ::selection': { backgroundColor: 'var(--a-selected) !important' },
       '.cm-cursor': { borderLeftColor: 'var(--a-text)' },
+      '.cm-tooltip-autocomplete': {
+        border: '1px solid var(--a-border)',
+        borderRadius: 'var(--a-radius-sm)',
+        backgroundColor: 'var(--a-bg-2)',
+        color: 'var(--a-text)',
+        fontFamily: 'var(--a-font-ui)',
+      },
+      '.cm-tooltip-autocomplete > ul > li[aria-selected]': {
+        backgroundColor: 'var(--a-selected)',
+        color: 'var(--a-text)',
+      },
+      '.cm-completionLabel': { color: 'var(--a-primary)', fontFamily: 'var(--a-font-editor)' },
+      '.cm-completionDetail': { color: 'var(--a-text-faint)', fontFamily: 'var(--a-font-editor)' },
     }),
   ]
 
@@ -258,7 +329,8 @@ onBeforeUnmount(() => {
       检测到 <code v-pre>{{variable}}</code> 模板；发送前会按当前环境解析，因此此处不自动格式化或判定最终 JSON。
     </p>
     <p v-else :id="validationId" class="json-help">
-      可用“插入变量”添加 <code v-pre>{{variable}}</code>；格式化只会处理不含待解析变量且语法正确的 JSON。
+      输入 <code v-pre>{{</code> 或 <code v-pre>{{*}}</code> 可显示当前环境变量候选；也可用“插入变量”添加
+      <code v-pre>{{variable}}</code>。格式化只会处理不含待解析变量且语法正确的 JSON。
     </p>
   </section>
 </template>

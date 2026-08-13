@@ -72,12 +72,16 @@ pub struct Timing {
 
 /// 已经完成变量替换、URL 编码和请求组装的实际请求快照。
 ///
-/// 只保存轻量元数据和可直接读取的小型 body；文件/流式 body 不会被读入内存。
+/// 保存最终 URL、Header，以及可直接读取的完整内存 body；文件和流式 body
+/// 不会被读入内存。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ActualRequest {
     pub method: String,
     pub url: String,
+    /// 已完成变量解析但尚未编码的路径参数值。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub path_params: Vec<(String, String)>,
     pub headers: Vec<(String, String)>,
     /// 已知浏览器/协议通用 Header 名称。
     ///
@@ -87,6 +91,9 @@ pub struct ActualRequest {
     pub common_header_names: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub body: Option<String>,
+    /// 流式 Body 无法读取原始字节时保留的字段名称和值。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub body_params: Vec<(String, String)>,
 }
 
 /// 响应元信息。

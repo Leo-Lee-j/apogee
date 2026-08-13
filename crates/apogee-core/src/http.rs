@@ -14,7 +14,7 @@
 //!    把取消信号和网络 future 一起等。
 
 use crate::error::{AppError, ErrorKind, Hint};
-use crate::model::{ActualRequest, ResponseMeta, Timing};
+use crate::model::{ActualRequest, KeyValue, ResponseMeta, Timing};
 use crate::request::{ApiKeyIn, AuthConfig, Body, HttpVersion, RequestSpec, ResolvedSettings};
 use crate::response::Spool;
 use crate::vars::{resolve_request, Environment};
@@ -737,7 +737,27 @@ pub struct Progress {
 pub enum Outcome {
     Done(Box<ResponseMeta>),
     Cancelled,
-    Failed(AppError),
+    Failed {
+        error: AppError,
+        /// 请求已经组装完成时保留快照，让网络失败仍能查看最终发送内容。
+        actual_request: Option<ActualRequest>,
+    },
+}
+
+/// 组装失败时没有“实际请求”；组装之后的网络或下载失败必须带回该快照。
+#[derive(Debug)]
+struct ExecuteFailure {
+    error: AppError,
+    actual_request: Option<ActualRequest>,
+}
+
+impl From<AppError> for ExecuteFailure {
+    fn from(error: AppError) -> Self {
+        Self {
+            error,
+            actual_request: None,
+        }
+    }
 }
 
 /// 发一个请求，body 边收边写进 spool。
@@ -755,7 +775,10 @@ pub async fn execute(
     match execute_inner(id, spec, environment, spool, cancel, on_progress).await {
         Ok(Some(meta)) => Outcome::Done(Box::new(meta)),
         Ok(None) => Outcome::Cancelled,
-        Err(error) => Outcome::Failed(error),
+        Err(failure) => Outcome::Failed {
+            error: failure.error,
+            actual_request: failure.actual_request,
+        },
     }
 }
 
@@ -768,7 +791,7 @@ async fn execute_inner(
     spool: &Spool,
     mut cancel: tokio::sync::oneshot::Receiver<()>,
     on_progress: impl FnMut(Progress),
-) -> Result<Option<ResponseMeta>, AppError> {
+) -> Result<Option<ResponseMeta>, ExecuteFailure> {
     let prepare_start = Instant::now();
     // 解析在执行层入口完成，保证 URL、参数、Header、Body 和鉴权共享同一份
     // 环境快照。原始 spec 仍保留模板，不会被解析结果覆盖。
@@ -781,7 +804,7 @@ async fn execute_inner(
             .detail(error.to_string())
             .hint(Hint::new("检查请求方法、Header 和 Body 配置"))
     })?;
-    let actual_request = snapshot_request(&request);
+    let actual_request = snapshot_request(&request, &resolved);
     let prepare_ms = prepare_start.elapsed().as_secs_f64() * 1000.0;
 
     let t0 = Instant::now();
@@ -800,18 +823,24 @@ async fn execute_inner(
         _ = &mut cancel => return Ok(None),
         result = head => match result {
             Err(_elapsed) => {
-                return Err(AppError::new(
-                    ErrorKind::Timeout,
-                    format!("{} ms 内没有收到响应头", settings.timeout_ms),
-                )
-                .detail(format!("URL: {url}"))
-                .hint(Hint::with_action(
-                    "调高该请求的超时",
-                    "settings.request.timeout",
-                ))
-                .hint(Hint::new("确认服务地址可达、没被代理或防火墙拦住")))
+                return Err(ExecuteFailure {
+                    error: AppError::new(
+                        ErrorKind::Timeout,
+                        format!("{} ms 内没有收到响应头", settings.timeout_ms),
+                    )
+                    .detail(format!("URL: {url}"))
+                    .hint(Hint::with_action(
+                        "调高该请求的超时",
+                        "settings.request.timeout",
+                    ))
+                    .hint(Hint::new("确认服务地址可达、没被代理或防火墙拦住")),
+                    actual_request: Some(actual_request.clone()),
+                })
             }
-            Ok(Err(error)) => return Err(map_reqwest_error(&error, &url)),
+            Ok(Err(error)) => return Err(ExecuteFailure {
+                error: map_reqwest_error(&error, &url),
+                actual_request: Some(actual_request.clone()),
+            }),
             Ok(Ok(response)) => response,
         },
     };
@@ -823,7 +852,12 @@ async fn execute_inner(
     let (content_type, charset) = parse_content_type(response.headers());
     let declared_len = response.content_length();
 
-    let streamed = stream_to_spool(id, response, spool, declared_len, cancel, on_progress).await?;
+    let streamed = stream_to_spool(id, response, spool, declared_len, cancel, on_progress)
+        .await
+        .map_err(|error| ExecuteFailure {
+            error,
+            actual_request: Some(actual_request.clone()),
+        })?;
     let Some((size_bytes, truncated)) = streamed else {
         return Ok(None);
     };
@@ -915,9 +949,15 @@ fn is_known_official_header(name: &str) -> bool {
         || name.starts_with("sec-fetch-")
 }
 
-fn snapshot_request(request: &reqwest::Request) -> ActualRequest {
-    const MAX_SNAPSHOT_BODY: usize = 64 * 1024;
+/// 只保存实际会发送的行；输入中的 disabled 行不属于网络请求快照。
+fn snapshot_rows(rows: &[KeyValue]) -> Vec<(String, String)> {
+    rows.iter()
+        .filter(|row| row.enabled && !row.key.trim().is_empty())
+        .map(|row| (row.key.clone(), row.value.clone()))
+        .collect()
+}
 
+fn snapshot_request(request: &reqwest::Request, resolved: &RequestSpec) -> ActualRequest {
     let mut headers = request
         .headers()
         .iter()
@@ -967,16 +1007,23 @@ fn snapshot_request(request: &reqwest::Request) -> ActualRequest {
             names
         });
 
-    let body = body_bytes
-        .filter(|bytes| bytes.len() <= MAX_SNAPSHOT_BODY)
-        .map(|bytes| String::from_utf8_lossy(bytes).into_owned());
+    // `as_bytes` 只对内存 body 可用；文件和流式上传仍不会被读入快照。
+    let body = body_bytes.map(|bytes| String::from_utf8_lossy(bytes).into_owned());
+    let path_params = snapshot_rows(&resolved.path_params);
+    let body_params = match &resolved.body {
+        Body::FormData { rows } | Body::UrlEncoded { rows } => snapshot_rows(rows),
+        Body::Binary { path } => vec![("文件".into(), path.display().to_string())],
+        Body::None | Body::Json { .. } | Body::Text { .. } | Body::GraphQl { .. } => Vec::new(),
+    };
 
     ActualRequest {
         method: request.method().as_str().to_string(),
         url: request.url().as_str().to_string(),
+        path_params,
         common_header_names,
         headers,
         body,
+        body_params,
     }
 }
 

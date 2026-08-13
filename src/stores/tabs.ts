@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, shallowRef, computed, markRaw } from 'vue'
 import type {
+  ActualRequest,
   AppError,
   AuthConfig,
   Body,
@@ -45,6 +46,8 @@ export interface Tab {
   settings: RequestSettings
   /** 最近一次请求错误；成功发送后清除。 */
   error: AppError | null
+  /** 网络失败时保留的最终请求快照；成功请求从 response 中读取。 */
+  actualRequest?: ActualRequest | null
   /**
    * 这个标签对应的集合树节点 id。从侧边栏打开时带上，草稿标签（新建请求）没有。
    *
@@ -209,6 +212,7 @@ export const useTabsStore = defineStore('tabs', () => {
           preview: true,
           dirty: false,
           error: null,
+          actualRequest: null,
           response: null,
           newPanel: false,
           newRequestParentId: undefined,

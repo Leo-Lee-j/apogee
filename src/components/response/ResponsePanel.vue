@@ -18,13 +18,44 @@ import { IconCode, IconCopy, IconList, IconPreview, IconTime } from '@/component
 const CodeMirrorView = defineAsyncComponent(() => import('./CodeMirrorView.vue'))
 const JsonTreeView = defineAsyncComponent(() => import('./JsonTreeView.vue'))
 
-type Section = 'body' | 'headers' | 'cookies' | 'timing' | 'actual'
+type Section = 'body' | 'headers' | 'cookies' | 'timing' | 'actual' | 'error'
 type BodyView = 'pretty' | 'raw' | 'tree' | 'preview'
 type CodeTarget = 'windows' | 'powershell' | 'posix'
+type CodeMirrorSearchApi = {
+  canSearch: () => boolean
+  openSearch: () => Promise<void>
+  closeSearch: () => Promise<void>
+}
+
 const section = ref<Section>('body')
 const bodyView = ref<BodyView>('pretty')
 const codeTarget = ref<CodeTarget>('windows')
 const copyState = ref('')
+const codeMirrorView = ref<CodeMirrorSearchApi | null>(null)
+
+function handleResponseKeydown(event: KeyboardEvent) {
+  const codeView = codeMirrorView.value
+  if (
+    !codeView?.canSearch()
+    || section.value !== 'body'
+    || (bodyView.value !== 'pretty' && bodyView.value !== 'raw')
+  ) return
+
+  const isFindShortcut = (event.ctrlKey || event.metaKey)
+    && !event.altKey
+    && event.key.toLowerCase() === 'f'
+
+  if (isFindShortcut) {
+    // 响应视图 Tab 也在该容器内，必须在这里同步拦截浏览器默认搜索。
+    event.preventDefault()
+    event.stopPropagation()
+    void codeView.openSearch()
+  } else if (event.key === 'Escape') {
+    event.preventDefault()
+    event.stopPropagation()
+    void codeView.closeSearch()
+  }
+}
 
 const props = withDefaults(defineProps<{
   showCommonHeaders?: boolean
@@ -54,7 +85,11 @@ const canPreview = computed(() => {
   return contentType.includes('html') || contentType.startsWith('image/') || contentType.includes('svg')
 })
 const previewSrc = computed(() => resp.value ? responseUrl(resp.value.id) : '')
-const actualRequest = computed(() => resp.value?.actualRequest ?? null)
+const actualRequest = computed(() =>
+  requestError.value
+    ? tabs.active?.actualRequest ?? null
+    : resp.value?.actualRequest ?? null,
+)
 const actualHeaders = computed(() => {
   const request = actualRequest.value
   if (!request || props.showCommonHeaders) return request?.headers ?? []
@@ -97,6 +132,9 @@ const actualParams = computed(() => {
     }
   })
 })
+
+const actualPathParams = computed(() => actualRequest.value?.pathParams ?? [])
+const actualBodyParams = computed(() => actualRequest.value?.bodyParams ?? [])
 
 function quotePosix(value: string) {
   return `'${value.replaceAll("'", `'"'"'`)}'`
@@ -144,6 +182,12 @@ watch(() => resp.value?.id, () => {
   section.value = 'body'
   bodyView.value = isJson.value && resp.value?.syntaxHighlight ? 'pretty' : 'raw'
   copyState.value = ''
+}, { immediate: true })
+
+watch([requestError, actualRequest], () => {
+  if (!requestError.value) return
+  // 失败时优先落到可用于排查的最终请求；没有成功组装快照时保留错误详情。
+  section.value = actualRequest.value ? 'actual' : 'error'
 }, { immediate: true })
 
 /** 分级降级（02 文档 §4.4）。唯一的高亮阈值是 2MB。 */
@@ -213,11 +257,15 @@ async function copyText(text: string, success = '已复制') {
 </script>
 
 <template>
-  <section class="resp">
+  <section class="resp" @keydown.capture="handleResponseKeydown">
     <NaiveThemeScope>
     <div class="statusline">
       <template v-if="requestError">
         <strong class="response-title">响应</strong>
+        <nav v-if="actualRequest" class="sections" role="tablist" aria-label="请求失败信息">
+          <button type="button" role="tab" :aria-selected="section === 'error'" :class="{ on: section === 'error' }" @click="section = 'error'">错误</button>
+          <button type="button" role="tab" :aria-selected="section === 'actual'" :class="{ on: section === 'actual' }" @click="section = 'actual'">实际请求</button>
+        </nav>
         <span class="a-pill status neterr">请求失败</span>
         <span class="error-kind-inline">{{ requestError.kind }}</span>
       </template>
@@ -237,26 +285,26 @@ async function copyText(text: string, success = '已复制') {
       <span v-else class="hint">按 <kbd>Ctrl</kbd><kbd>Enter</kbd> 发送请求</span>
     </div>
 
-    <div v-if="resp && !requestError" class="subbar">
-      <div v-if="section === 'body'" class="body-views" role="tablist" aria-label="响应体视图">
+    <div v-if="(resp && !requestError) || (requestError && actualRequest && section === 'actual')" class="subbar">
+      <div v-if="resp && section === 'body'" class="body-views" role="tablist" aria-label="响应体视图">
         <button type="button" role="tab" :aria-selected="bodyView === 'pretty'" :disabled="!isJson || !resp.syntaxHighlight" :class="{ on: bodyView === 'pretty' }" @click="bodyView = 'pretty'"><AppIcon :component="IconCode" :size="14" />Body</button>
         <button type="button" role="tab" :aria-selected="bodyView === 'raw'" :class="{ on: bodyView === 'raw' }" @click="bodyView = 'raw'"><AppIcon :component="IconCode" :size="14" />原文</button>
         <button type="button" role="tab" :aria-selected="bodyView === 'tree'" :disabled="!isJson || !resp.indexed" :class="{ on: bodyView === 'tree' }" @click="bodyView = 'tree'"><AppIcon :component="IconList" :size="14" />树形</button>
         <button type="button" role="tab" :aria-selected="bodyView === 'preview'" :disabled="!canPreview" :class="{ on: bodyView === 'preview' }" @click="bodyView = 'preview'"><AppIcon :component="IconPreview" :size="14" />预览</button>
         <span class="format-label">{{ resp.contentType ?? '未知类型' }}<template v-if="resp.charset"> · {{ resp.charset }}</template></span>
       </div>
-      <span v-else class="section-label">{{ { headers: '响应 Headers', cookies: '响应 Cookies', timing: '请求耗时明细', actual: '最终发送到网络的请求' }[section] }}</span>
+      <span v-else class="section-label">{{ { body: '响应体', headers: '响应 Headers', cookies: '响应 Cookies', timing: '请求耗时明细', actual: '最终发送到网络的请求', error: '错误信息' }[section] }}</span>
       <span class="spacer" />
       <span v-if="copyState" class="copy-state" role="status">{{ copyState }}</span>
-      <span v-if="section !== 'actual'" class="tier" :title="`渲染分级：${resp.tier}`">{{ tierLabel[resp.tier] }}{{ resp.syntaxHighlight ? '' : ' · 无高亮' }}</span>
-      <AppTooltip v-if="section !== 'actual'">
+      <span v-if="resp && section !== 'actual'" class="tier" :title="`渲染分级：${resp.tier}`">{{ tierLabel[resp.tier] }}{{ resp.syntaxHighlight ? '' : ' · 无高亮' }}</span>
+      <AppTooltip v-if="resp && section !== 'actual'">
         <template #trigger><button type="button" class="icon-button" aria-label="复制当前响应内容" @click="copyResponse"><AppIcon :component="IconCopy" :size="15" /></button></template>
         复制当前内容
       </AppTooltip>
     </div>
 
     <div class="pane">
-      <div v-if="requestError" class="error-state" role="alert">
+      <div v-if="requestError && section !== 'actual'" class="error-state" role="alert">
         <h3>请求未完成</h3>
         <p class="error-message">{{ requestError.message }}</p>
         <p class="error-kind">错误类型：{{ requestError.kind }}</p>
@@ -271,9 +319,9 @@ async function copyText(text: string, success = '已复制') {
           </li>
         </ul>
       </div>
-      <template v-else-if="resp">
+      <template v-else-if="resp || actualRequest">
         <!-- >50MB：不渲染，只给摘要 + 出口（02 文档 §4.4 SummaryOnly 分级） -->
-        <div v-if="section === 'body' && resp.tier === 'summaryOnly' && bodyView !== 'raw'" class="summary">
+        <div v-if="resp && section === 'body' && resp.tier === 'summaryOnly' && bodyView !== 'raw'" class="summary">
           <p class="big">{{ fmtBytes(resp.sizeBytes) }} 响应体</p>
           <p class="dim">超过 50 MB，不在界面内渲染。这是设计行为，不是失败。</p>
           <div class="actions">
@@ -281,25 +329,26 @@ async function copyText(text: string, success = '已复制') {
           </div>
         </div>
         <CodeMirrorView
-          v-else-if="section === 'body' && (bodyView === 'pretty' || bodyView === 'raw')"
+          ref="codeMirrorView"
+          v-else-if="resp && section === 'body' && (bodyView === 'pretty' || bodyView === 'raw')"
           :response-id="resp.id"
           :total-bytes="resp.sizeBytes"
           :highlight="bodyView === 'pretty' && resp.syntaxHighlight"
           :format-json="bodyView === 'pretty'"
         />
-        <JsonTreeView v-else-if="section === 'body' && bodyView === 'tree'" :response-id="resp.id" />
-        <iframe v-else-if="section === 'body' && bodyView === 'preview'" class="preview" :src="previewSrc" title="响应预览" sandbox="" />
-        <div v-else-if="section === 'headers'" class="data-table" role="table" aria-label="响应 Headers">
+        <JsonTreeView v-else-if="resp && section === 'body' && bodyView === 'tree'" :response-id="resp.id" />
+        <iframe v-else-if="resp && section === 'body' && bodyView === 'preview'" class="preview" :src="previewSrc" title="响应预览" sandbox="" />
+        <div v-else-if="resp && section === 'headers'" class="data-table" role="table" aria-label="响应 Headers">
           <div class="data-row data-head" role="row"><span>名称</span><span>值</span></div>
           <div v-for="([name, value], index) in headers" :key="`${name}-${index}`" class="data-row" role="row"><code>{{ name }}</code><span class="selectable">{{ value }}</span></div>
           <p v-if="!headers.length" class="empty-inline">没有响应 Header。</p>
         </div>
-        <div v-else-if="section === 'cookies'" class="data-table cookie-table" role="table" aria-label="响应 Cookies">
+        <div v-else-if="resp && section === 'cookies'" class="data-table cookie-table" role="table" aria-label="响应 Cookies">
           <div class="data-row data-head" role="row"><span>名称</span><span>值</span><span>属性</span></div>
           <div v-for="cookie in cookies" :key="cookie.id" class="data-row" role="row"><code>{{ cookie.name }}</code><span class="selectable">{{ cookie.value }}</span><span class="cookie-attrs">{{ cookie.attributes || '—' }}</span></div>
           <p v-if="!cookies.length" class="empty-inline">此响应没有设置 Cookie。</p>
         </div>
-        <div v-else-if="section === 'timing'" class="timing-panel">
+        <div v-else-if="resp && section === 'timing'" class="timing-panel">
           <div v-for="row in timingRows" :key="row.label" class="timing-row" :class="{ unavailable: row.value == null }">
             <span>{{ row.label }}</span>
             <div class="timing-track"><span v-if="row.value != null" :style="{ width: `${Math.max(2, row.value / Math.max(resp.timing.totalMs, 1) * 100)}%` }" /></div>
@@ -308,7 +357,7 @@ async function copyText(text: string, success = '已复制') {
           <p class="timing-note">当前 HTTP 引擎只提供整体 TTFB；连接池复用时 DNS、TCP 和 TLS 阶段不会再次发生。</p>
           <div class="timing-total"><strong>总耗时</strong><strong>{{ fmtMs(resp.timing.totalMs) }}</strong></div>
         </div>
-        <div v-else-if="actualRequest" class="actual-panel">
+        <div v-else-if="actualRequest && section === 'actual'" class="actual-panel">
           <section class="actual-summary">
             <div class="actual-field">
               <span class="actual-label">请求类型</span>
@@ -325,9 +374,9 @@ async function copyText(text: string, success = '已复制') {
             </div>
           </section>
 
-          <section class="actual-section">
-            <header><strong>参数</strong><span>{{ actualParams.length }} 项</span></header>
-            <div v-if="actualParams.length" class="actual-params">
+          <section v-if="actualParams.length" class="actual-section">
+            <header><strong>Query 参数</strong><span>{{ actualParams.length }} 项</span></header>
+            <div class="actual-params">
               <div class="actual-param actual-param-head"><span>名称</span><span>值</span><span>实际编码</span></div>
               <div v-for="param in actualParams" :key="param.id" class="actual-param">
                 <code>{{ param.name }}</code>
@@ -335,20 +384,39 @@ async function copyText(text: string, success = '已复制') {
                 <code class="encoded-param a-selectable">{{ param.encoded }}</code>
               </div>
             </div>
-            <p v-else class="actual-none">此请求没有 Query 参数。</p>
           </section>
 
-          <section class="actual-section">
+          <section v-if="actualPathParams.length" class="actual-section">
+            <header><strong>Path 参数</strong><span>{{ actualPathParams.length }} 项</span></header>
+            <div class="actual-headers">
+              <div class="actual-header actual-header-head"><span>名称</span><span>值</span></div>
+              <div v-for="([name, value], index) in actualPathParams" :key="`${name}-${index}`" class="actual-header"><code>{{ name }}</code><span class="a-selectable">{{ value }}</span></div>
+            </div>
+          </section>
+
+          <section v-if="actualRequest.body != null || actualBodyParams.length" class="actual-section">
+            <header>
+              <strong>Body</strong>
+              <span v-if="actualRequest.body != null">{{ actualRequest.body.length }} 字符</span>
+              <span v-else>{{ actualBodyParams.length }} 项</span>
+            </header>
+            <pre v-if="actualRequest.body != null" class="actual-body a-selectable"><code>{{ actualRequest.body }}</code></pre>
+            <div v-else class="actual-headers">
+              <div class="actual-header actual-header-head"><span>名称</span><span>值</span></div>
+              <div v-for="([name, value], index) in actualBodyParams" :key="`${name}-${index}`" class="actual-header"><code>{{ name }}</code><span class="a-selectable">{{ value }}</span></div>
+            </div>
+          </section>
+
+          <section v-if="actualHeaders.length" class="actual-section">
             <header>
               <strong>Header</strong>
               <span>{{ actualHeaders.length }} 项</span>
               <span v-if="hiddenCommonHeaderCount" class="actual-hidden-note">已隐藏 {{ hiddenCommonHeaderCount }} 项通用 Header</span>
             </header>
-            <div v-if="actualHeaders.length" class="actual-headers">
+            <div class="actual-headers">
               <div class="actual-header actual-header-head"><span>名称</span><span>值</span></div>
               <div v-for="([name, value], index) in actualHeaders" :key="`${name}-${index}`" class="actual-header"><code>{{ name }}</code><span class="a-selectable">{{ value }}</span></div>
             </div>
-            <p v-else class="actual-none">{{ hiddenCommonHeaderCount ? '通用 Header 已隐藏；请在请求 Headers 中打开“显示通用 Header”。' : '此请求没有 Header。' }}</p>
           </section>
 
           <section class="actual-section code-section">
@@ -496,6 +564,7 @@ async function copyText(text: string, success = '已复制') {
 .actual-param-head { background: var(--a-bg-3); color: var(--a-text-faint); font-weight: var(--a-fw-medium); }
 .actual-param-head span { color: inherit; }
 .actual-none { margin: 0; padding: 10px; border: 1px solid var(--a-border); border-radius: var(--a-radius-sm); color: var(--a-text-faint); font-size: 11px; }
+.actual-body { min-height: 72px; max-height: 260px; margin: 0; padding: 10px; overflow: auto; border: 1px solid var(--a-border); border-radius: var(--a-radius-sm); background: var(--a-bg-1); color: var(--a-text-soft); font: 11px/18px var(--a-font-editor); white-space: pre-wrap; overflow-wrap: anywhere; }
 .actual-headers { overflow: hidden; border: 1px solid var(--a-border); border-radius: var(--a-radius-sm); }
 .actual-header { min-height: 28px; display: grid; grid-template-columns: minmax(150px, 28%) minmax(260px, 1fr); border-bottom: 1px solid var(--a-border); font-size: var(--a-font-result); }
 .actual-header:last-child { border-bottom: 0; }
@@ -509,7 +578,7 @@ async function copyText(text: string, success = '已复制') {
 .code-tabs button { height: 24px; padding: 0 8px; border: 0; border-radius: var(--a-radius-sm); background: transparent; color: var(--a-text-dim); font: 11px var(--a-font-ui); cursor: pointer; }
 .code-tabs button:hover { background: var(--a-hover); color: var(--a-text); }
 .code-tabs button.on { background: var(--a-selected); color: var(--a-primary); }
-.request-code { flex: 1 1 auto; min-height: 170px; max-height: 360px; margin: 0; padding: 12px; overflow: auto; border: 1px solid var(--a-border); border-radius: var(--a-radius-sm); background: var(--a-bg-1); color: var(--a-text-soft); font: 11px/18px var(--a-font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.request-code { flex: 1 1 auto; min-height: 170px; max-height: 360px; margin: 0; padding: 12px; overflow: auto; border: 1px solid var(--a-border); border-radius: var(--a-radius-sm); background: var(--a-bg-1); color: var(--a-text-soft); font: var(--a-fs-base) / var(--a-lh) var(--a-font-editor); white-space: pre-wrap; overflow-wrap: anywhere; }
 .actual-empty { flex: 1 1 auto; }
 @media (max-width: 700px) {
   .tier, .format-label { display: none; }

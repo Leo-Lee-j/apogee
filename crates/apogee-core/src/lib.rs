@@ -18,6 +18,7 @@ pub mod request;
 pub mod response;
 pub mod vars;
 pub mod workspace;
+pub mod yapi;
 
 pub use error::{AppError, ErrorKind, Hint};
 
