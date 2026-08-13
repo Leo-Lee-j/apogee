@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, ref } from 'vue'
+import { computed, defineAsyncComponent, ref, watch } from 'vue'
 import { open as openFileDialog } from '@tauri-apps/plugin-dialog'
 import type { AuthConfig, Body, KeyValue } from '@/ipc'
 import { useTabsStore, type Tab } from '@/stores/tabs'
@@ -16,7 +16,9 @@ import { IconFolderOpen } from '@/components/ui/icons'
 import NaiveThemeScope from '@/components/NaiveThemeScope.vue'
 import ParameterEditor from './ParameterEditor.vue'
 import VariableInput from './VariableInput.vue'
+import RequestDocumentation from './RequestDocumentation.vue'
 import { commonHeadersFor, isKnownOfficialHeader } from '@/features/commonHeaders'
+import { buildRequestDocumentation, type RequestDocViewModel } from '@/features/requestDocumentation'
 import { booleanSetting, httpVersionSetting, numberSetting, settingBooleanValue } from '@/features/requestSettings'
 
 /**
@@ -59,7 +61,21 @@ interface EditorSection {
 
 const tabs = useTabsStore()
 const tab = computed(() => tabs.active)
+const emptyDocumentation: RequestDocViewModel = {
+  title: '未命名请求',
+  method: 'GET',
+  url: '未设置 URL',
+  copyUrl: '',
+  dirty: false,
+  isEmpty: true,
+  sections: [],
+}
+const requestDocumentation = computed(() =>
+  tab.value ? buildRequestDocumentation(tab.value) : emptyDocumentation,
+)
 const current = ref<PanelTab>('Params')
+type PanelMode = 'edit' | 'documentation'
+const documentationMode = computed<PanelMode>(() => tab.value?.requestViewMode ?? 'edit')
 const props = withDefaults(defineProps<{
   showCommonHeaders?: boolean
 }>(), {
@@ -253,6 +269,12 @@ function patchVisibleHeaders(nextVisibleRows: KeyValue[]) {
 const bulkEditing = ref(false)
 const bulkDraft = ref('')
 
+watch(() => tab.value?.id, () => {
+  // A bulk draft belongs to the visible editor instance; changing requests
+  // must not carry it into another request's document view.
+  bulkEditing.value = false
+}, { immediate: true })
+
 const bulkKind = computed<RowField | null>(() => {
   if (current.value === 'Params') return 'params'
   if (current.value === 'Headers') return 'headers'
@@ -304,6 +326,14 @@ function applyBulkEdit() {
 
 function cancelBulkEdit() {
   bulkEditing.value = false
+}
+
+function setPanelMode(next: PanelMode) {
+  const activeTab = tab.value
+  if (!activeTab || next === documentationMode.value) return
+  // Keep an in-progress bulk draft local. Entering a read-only view must not
+  // turn a mode change into an implicit edit, dirty mark, or disk write.
+  tabs.patch(activeTab.id, { requestViewMode: next })
 }
 
 function selectTab(next: PanelTab) {
@@ -418,29 +448,58 @@ function patchVersion(value: string | number | null) {
 <template>
   <section class="req">
   <NaiveThemeScope>
-    <nav class="tabs" role="tablist">
-      <span v-for="t in TABS" :key="t" class="tab-item">
-        <button
-          type="button"
-          role="tab"
-          :aria-selected="current === t"
-          :class="{ on: current === t }"
-          @click="selectTab(t)"
-        >
-          {{ t }}
-        </button>
-      </span>
+    <div class="tabs">
+      <nav v-if="documentationMode === 'edit'" class="editor-tabs" role="tablist" aria-label="请求编辑项">
+        <span v-for="t in TABS" :key="t" class="tab-item">
+          <button
+            type="button"
+            role="tab"
+            :aria-selected="current === t"
+            :class="{ on: current === t }"
+            @click="selectTab(t)"
+          >
+            {{ t }}
+          </button>
+        </span>
+      </nav>
+      <div v-else class="documentation-mode-title" aria-label="接口文档状态">
+        <strong>接口文档</strong>
+        <span>当前配置 · 只读</span>
+      </div>
       <span class="spacer" />
-      <template v-if="bulkKind">
+      <template v-if="documentationMode === 'edit' && bulkKind">
         <template v-if="bulkEditing">
           <AppButton quaternary size="small" title="放弃本次批量编辑，返回表格" @click="cancelBulkEdit">取消</AppButton>
           <AppButton quaternary size="small" class="link" title="应用批量编辑，返回表格" @click="applyBulkEdit">完成</AppButton>
         </template>
         <AppButton v-else quaternary size="small" class="link" title="以纯文本批量编辑 key: value 列表" @click="openBulkEdit">批量编辑</AppButton>
       </template>
-    </nav>
+      <div class="mode-switch" role="group" aria-label="请求区查看模式">
+        <button
+          type="button"
+          class="mode-button"
+          :class="{ on: documentationMode === 'edit' }"
+          :aria-pressed="documentationMode === 'edit'"
+          :disabled="!tab"
+          title="编辑请求参数"
+          @click="setPanelMode('edit')"
+        >编辑</button>
+        <button
+          type="button"
+          class="mode-button"
+          :class="{ on: documentationMode === 'documentation' }"
+          :aria-pressed="documentationMode === 'documentation'"
+          :disabled="!tab"
+          title="查看当前请求的只读接口文档"
+          @click="setPanelMode('documentation')"
+        >文档</button>
+      </div>
+    </div>
 
     <div v-if="!tab" class="empty">先新建一个请求，再开始编辑。</div>
+    <div v-else-if="documentationMode === 'documentation'" class="body documentation-body">
+      <RequestDocumentation :documentation="requestDocumentation" :pending-bulk-edit="bulkEditing" />
+    </div>
     <div v-else class="body">
       <template v-if="current === 'Params' || current === 'Headers'">
         <section v-if="bulkEditing" class="parameter-table bulk-editor">
@@ -622,6 +681,18 @@ function patchVersion(value: string | number | null) {
   display: flex; align-items: center; gap: 2px; padding: 0 6px;
   border-bottom: 1px solid var(--a-border);
 }
+.editor-tabs { display: flex; align-items: center; gap: 2px; min-width: 0; overflow-x: auto; }
+.documentation-mode-title { display: inline-flex; align-items: baseline; gap: 8px; min-width: 0; white-space: nowrap; }
+.documentation-mode-title strong { color: var(--a-text); font-size: var(--a-fs-sm); font-weight: 600; }
+.documentation-mode-title span { color: var(--a-text-faint); font-size: var(--a-fs-xs); }
+.mode-switch { display: inline-flex; flex: 0 0 auto; gap: 1px; padding: 2px; border: 1px solid var(--a-border); border-radius: var(--a-radius-sm); background: var(--a-bg-3); }
+.mode-switch .mode-button {
+  height: calc(var(--a-h-control-xs) - 4px); padding: 0 8px; border: 0; border-radius: 3px;
+  background: transparent; color: var(--a-text-faint); font: var(--a-fs-xs)/var(--a-lh-xs) var(--a-font-ui); cursor: pointer;
+}
+.mode-switch .mode-button:hover:not(:disabled) { color: var(--a-text); background: var(--a-hover); }
+.mode-switch .mode-button.on { color: var(--a-primary); background: var(--a-selected); }
+.mode-switch .mode-button:disabled { cursor: not-allowed; opacity: .45; }
 .tabs button {
   background: transparent; border: none; color: var(--a-text-dim);
   font: var(--a-fs-sm)/var(--a-lh-sm) var(--a-font-ui); height: var(--a-h-control-xs); padding: 0 8px; border-radius: 4px; cursor: pointer;
@@ -647,6 +718,7 @@ function patchVersion(value: string | number | null) {
 .bulk-textarea:focus { outline: 2px solid var(--a-focus); outline-offset: -2px; border-color: var(--a-focus); }
 .bulk-hint { margin: 0 2px; color: var(--a-text-faint); font-size: var(--a-fs-xs); }
 .body { flex: 1 1 auto; overflow: auto; min-height: 0; padding: 8px; }
+.documentation-body { padding: 0; }
 .empty, .editor-empty { padding: 16px; color: var(--a-text-dim); font-size: var(--a-fs-sm); }
 .config-block {
   overflow: hidden;

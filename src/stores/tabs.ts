@@ -28,6 +28,7 @@ import { useUiStore } from '@/stores/ui'
  */
 
 export type TabState = 'active' | 'warm' | 'cold'
+export type RequestViewMode = 'edit' | 'documentation'
 export type TabKind = 'request' | 'settings' | 'workspace-stats' | 'container-config'
 
 export interface Tab {
@@ -64,6 +65,8 @@ export interface Tab {
   newPanel?: boolean
   /** 从侧栏发起新建请求时继承的集合/文件夹目标。 */
   newRequestParentId?: string
+  /** 请求主面板的临时查看模式；不进入 RequestSpec/YAML 持久化。 */
+  requestViewMode?: RequestViewMode
   /** 有未保存改动，标签上显示 `•` */
   dirty: boolean
   /** 临时标签（单击预览）：标题斜体，被下一次单击复用（02 文档 §4.5） */
@@ -214,6 +217,7 @@ export const useTabsStore = defineStore('tabs', () => {
           error: null,
           actualRequest: null,
           response: null,
+          requestViewMode: 'edit',
           newPanel: false,
           newRequestParentId: undefined,
         })
@@ -238,6 +242,7 @@ export const useTabsStore = defineStore('tabs', () => {
       dirty: false,
       preview: false,
       response: null,
+      requestViewMode: 'edit',
       newPanel: false,
       ...init,
     })
