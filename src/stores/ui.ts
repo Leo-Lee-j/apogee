@@ -84,6 +84,12 @@ export const useUiStore = defineStore('ui', () => {
   /** 默认左右分栏，让请求参数与响应结果在宽屏下并排显示。 */
   const layout = ref<LayoutMode>('side-by-side')
   const themeMode = ref<ThemeMode>('light')
+  /** 已应用的字体选择；供已挂载的编辑器请求重新量测。 */
+  const fontFamily = ref<FontFamilyMode>('system')
+  const editorFontFamily = ref<FontFamilyMode>('system')
+  /** 当前已应用的设置字号；供依赖定高的虚拟列表与布局同步使用。 */
+  const uiFontSize = ref(13)
+  const resultFontSize = ref(13)
   /** 请求区占比，可拖拽。默认 50%（02 文档 §3.2）。 */
   const requestRatio = ref(SPLIT_DEFAULT_RATIO)
 
@@ -151,6 +157,7 @@ export const useUiStore = defineStore('ui', () => {
   }
 
   function applyFont(font: FontFamilyMode) {
+    fontFamily.value = font
     if (typeof document === 'undefined') return
     const root = document.documentElement
     const uiFonts: Record<string, string> = {
@@ -170,6 +177,7 @@ export const useUiStore = defineStore('ui', () => {
    * 仅在用户显式选择时覆写，不影响响应查看器的 --a-font-mono。
    */
   function applyEditorFont(font: FontFamilyMode) {
+    editorFontFamily.value = font
     if (typeof document === 'undefined') return
     const root = document.documentElement
     const legacyAliases: Record<string, string> = { inter: 'Inter', segoe: 'Segoe UI', yahei: 'Microsoft YaHei UI' }
@@ -185,11 +193,44 @@ export const useUiStore = defineStore('ui', () => {
     const root = document.documentElement
     const boundedUiSize = Math.min(24, Math.max(11, Math.round(uiSize)))
     const boundedResultSize = Math.min(24, Math.max(11, Math.round(resultSize)))
-    root.style.setProperty('--a-fs-base', `${boundedUiSize}px`)
-    root.style.setProperty('--a-fs-sm', `${Math.max(10, boundedUiSize - 1)}px`)
-    root.style.setProperty('--a-fs-xs', `${Math.max(9, boundedUiSize - 2)}px`)
-    root.style.setProperty('--a-font-result', `${boundedResultSize}px`)
-    root.style.setProperty('--a-lh-result', `${Math.round(boundedResultSize * 1.54)}px`)
+    uiFontSize.value = boundedUiSize
+    resultFontSize.value = boundedResultSize
+    const set = (name: string, value: string) => root.style.setProperty(name, value)
+    const uiAt = (delta: number, minimum = 9) => Math.max(minimum, boundedUiSize + delta)
+    const resultAt = (delta: number, minimum = 8) => Math.max(minimum, boundedResultSize + delta)
+    const uiLineHeight = Math.max(18, boundedUiSize + 7)
+    const resultMedium = resultAt(-1, 10)
+    const resultSmall = resultAt(-2, 9)
+
+    // 普通界面、Naive UI 和请求编辑器共享这一档字号比例。
+    set('--a-fs-2xs', `${uiAt(-3)}px`)
+    set('--a-fs-xs', `${uiAt(-2)}px`)
+    set('--a-fs-sm', `${uiAt(-1, 10)}px`)
+    set('--a-fs-base', `${boundedUiSize}px`)
+    set('--a-fs-md', `${uiAt(1)}px`)
+    set('--a-fs-lg', `${uiAt(2)}px`)
+    set('--a-fs-xl', `${uiAt(3)}px`)
+    set('--a-fs-2xl', `${uiAt(5)}px`)
+    set('--a-fs-3xl', `${uiAt(10)}px`)
+    set('--a-fs-4xl', `${uiAt(11)}px`)
+    set('--a-lh-xs', `${Math.max(14, boundedUiSize + 3)}px`)
+    set('--a-lh-sm', `${Math.max(16, boundedUiSize + 5)}px`)
+    set('--a-lh', `${uiLineHeight}px`)
+    set('--a-lh-lg', `${uiLineHeight + 2}px`)
+    set('--a-lh-xl', `${uiLineHeight + 4}px`)
+    set('--a-fs-editor-xs', `${uiAt(-2)}px`)
+    set('--a-fs-editor-sm', `${uiAt(-1, 10)}px`)
+    set('--a-fs-editor-base', `${boundedUiSize}px`)
+    set('--a-lh-editor', `${uiLineHeight}px`)
+
+    // 响应正文及其数据/代码的字号独立于应用界面字号。
+    set('--a-fs-result-xs', `${resultAt(-3)}px`)
+    set('--a-fs-result-sm', `${resultSmall}px`)
+    set('--a-fs-result-md', `${resultMedium}px`)
+    set('--a-fs-result', `${boundedResultSize}px`)
+    set('--a-lh-result-sm', `${Math.max(16, Math.round(resultSmall * 1.64))}px`)
+    set('--a-lh-result', `${Math.max(18, Math.round(boundedResultSize * 1.54))}px`)
+    set('--a-font-result', 'var(--a-fs-result)')
   }
 
   function cycleLayout() {
@@ -205,7 +246,7 @@ export const useUiStore = defineStore('ui', () => {
   }
 
   return {
-    sidebarVisible, sidebarWidth, sidebarMaxW, layout, themeMode, requestRatio,
+    sidebarVisible, sidebarWidth, sidebarMaxW, layout, themeMode, fontFamily, editorFontFamily, uiFontSize, resultFontSize, requestRatio,
     historyOpen, saveAsOpen, settingsSection, shortcutPreferences, isShortcutEnabled, setShortcutEnabled, paletteOpen, spikeOpen, spikePanel,
     urlFocusSeq, focusUrl,
     systemDark, isDark, applyTheme, applyFont, applyEditorFont, applyFontSizes, cycleLayout, setLayout,

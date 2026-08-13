@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { h, ref, computed, shallowRef, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useTabsStore } from '@/stores/tabs'
+import { useUiStore } from '@/stores/ui'
 import { useWorkspaceStore } from '@/stores/workspace'
 import {
   AppAlert,
@@ -17,8 +18,8 @@ import NaiveThemeScope from '@/components/NaiveThemeScope.vue'
 import { toast } from '@/features/feedback'
 import { ipc, type KeyValue, type RequestSpec, type WorkspaceNode } from '@/ipc'
 import {
-  ROW_H,
   OVERSCAN,
+  sidebarRowHeightForUiSize,
   synthTree,
   visibleNodes,
   sortVisible,
@@ -67,6 +68,7 @@ const scrollTop = ref(0)
 const viewportH = ref(400)
 const scroller = ref<HTMLElement | null>(null)
 const tabs = useTabsStore()
+const ui = useUiStore()
 const workspace = useWorkspaceStore()
 const selectedId = ref<string | null>(null)
 type ActionKind = 'collection' | 'folder' | 'rename'
@@ -168,12 +170,21 @@ const visible = computed(() => sortVisible(visibleNodes(all.value, filter.value)
 const folderTargets = computed(() => all.value.filter((node) => node.isFolder))
 const firstCollectionId = computed(() => all.value.find((node) => node.kind === 'collection')?.id ?? null)
 
-const startIdx = computed(() => Math.max(0, Math.floor(scrollTop.value / ROW_H) - OVERSCAN))
+const rowHeight = computed(() => sidebarRowHeightForUiSize(ui.uiFontSize))
+const startIdx = computed(() => Math.max(0, Math.floor(scrollTop.value / rowHeight.value) - OVERSCAN))
 const endIdx = computed(() =>
-  Math.min(visible.value.length, Math.ceil((scrollTop.value + viewportH.value) / ROW_H) + OVERSCAN),
+  Math.min(visible.value.length, Math.ceil((scrollTop.value + viewportH.value) / rowHeight.value) + OVERSCAN),
 )
 const slice = computed(() => visible.value.slice(startIdx.value, endIdx.value))
-const totalH = computed(() => visible.value.length * ROW_H)
+const totalH = computed(() => visible.value.length * rowHeight.value)
+
+// 字号变更时保持视口所处的逻辑行，而不是把同一像素偏移误当作同一行。
+watch(rowHeight, (next, previous) => {
+  if (next === previous || previous <= 0) return
+  const nextScrollTop = scrollTop.value / previous * next
+  scrollTop.value = nextScrollTop
+  if (scroller.value) scroller.value.scrollTop = nextScrollTop
+})
 
 function onScroll(e: Event) {
   const el = e.target as HTMLElement
@@ -521,10 +532,11 @@ async function deleteItem() {
 function revealRow(row: number) {
   const el = scroller.value
   const vh = el?.clientHeight ?? viewportH.value
-  const top = row * ROW_H
-  if (top >= scrollTop.value && top + ROW_H <= scrollTop.value + vh) return
+  const height = rowHeight.value
+  const top = row * height
+  if (top >= scrollTop.value && top + height <= scrollTop.value + vh) return
   const max = Math.max(0, totalH.value - vh)
-  const next = Math.min(max, Math.max(0, top - Math.round((vh - ROW_H) / 2)))
+  const next = Math.min(max, Math.max(0, top - Math.round((vh - height) / 2)))
   scrollTop.value = next
   if (el) el.scrollTop = next
 }
@@ -578,7 +590,7 @@ defineExpose({
     total: all.value.length,
     visible: visible.value.length,
     rendered: slice.value.length,
-    rowHeight: ROW_H,
+    rowHeight: rowHeight.value,
     overscan: OVERSCAN,
     scrollHeight: totalH.value,
   }),
@@ -811,7 +823,7 @@ defineExpose({
           :class="{ folder: n.isFolder, active: n.id === activeNodeId, selected: n.id === selectedId }"
           :aria-current="n.id === activeNodeId ? 'true' : undefined"
           :style="{
-            transform: `translateY(${(startIdx + i) * ROW_H}px)`,
+            transform: `translateY(${(startIdx + i) * rowHeight}px)`,
             paddingLeft: `${8 + n.depth * 18}px`,
           }"
           @click="toggle(n)"
@@ -861,7 +873,7 @@ defineExpose({
   align-items: stretch;
   gap: 4px;
 }
-.head-tools { display: flex; align-items: center; gap: 3px; min-height: 30px; }
+.head-tools { display: flex; align-items: center; gap: 3px; min-height: var(--a-h-control-sm); }
 .head-button {
   flex: 0 0 auto;
   color: var(--a-text-dim);
@@ -873,16 +885,16 @@ defineExpose({
   flex: 0 0 auto;
   width: 100%;
   min-width: 0;
-  height: 36px;
+  height: var(--a-h-input-md);
   padding: 0;
   background: var(--a-bg-3);
   border-radius: var(--a-radius-md);
   color: var(--a-text);
-  font: 12px/1 var(--a-font-ui);
+  font: var(--a-fs-sm)/var(--a-lh-sm) var(--a-font-ui);
 }
 .filter :deep(.n-input__input-el) {
   color: var(--a-text);
-  font: 12px/1 var(--a-font-ui);
+  font: var(--a-fs-sm)/var(--a-lh-sm) var(--a-font-ui);
   padding: 0 6px;
 }
 .filter :deep(.n-input__border),
@@ -913,20 +925,20 @@ defineExpose({
 .delete-error { margin: 0 6px 4px; }
 .delete-confirmation { margin: 0; color: var(--a-text-soft); font: var(--a-fs-sm) / 1.6 var(--a-font-ui); }
 .action-modal { display: flex; flex-direction: column; gap: 10px; }
-.action-hint { margin: 0; color: var(--a-text-dim); font-size: 12px; line-height: 1.5; }
+.action-hint { margin: 0; color: var(--a-text-dim); font-size: var(--a-fs-sm); line-height: 1.5; }
 .action-error { margin-bottom: 2px; }
 .action-label {
   color: var(--a-text-dim);
-  font: var(--a-fw-medium) var(--a-fs-sm) / 1 var(--a-font-ui);
+  font: var(--a-fw-medium) var(--a-fs-sm) / var(--a-lh-sm) var(--a-font-ui);
 }
 .action-field {
   display: grid;
   gap: 7px;
   min-width: 0;
   color: var(--a-text-soft);
-  font: var(--a-fs-sm) / 1 var(--a-font-ui);
+  font: var(--a-fs-sm) / var(--a-lh-sm) var(--a-font-ui);
 }
-.action-field :deep(.n-input) { min-height: 38px; }
+.action-field :deep(.n-input) { min-height: var(--a-h-input-md); }
 .action-field :deep(.n-input-wrapper) { padding-inline: 12px; }
 .action-target-list {
   max-height: 200px;
@@ -942,13 +954,13 @@ defineExpose({
   gap: 6px;
   width: 100%;
   box-sizing: border-box;
-  height: 28px;
+  height: var(--a-h-sidebar-row);
   padding: 0 8px;
   border: 0;
   border-radius: var(--a-radius-sm);
   background: transparent;
   color: var(--a-text);
-  font: var(--a-fs-sm) / 1 var(--a-font-ui);
+  font: var(--a-fs-sm) / var(--a-lh-sm) var(--a-font-ui);
   text-align: left;
   cursor: pointer;
 }
@@ -956,16 +968,16 @@ defineExpose({
 .action-target-row.selected { background: var(--a-selected); }
 .action-target-icon { flex: 0 0 auto; display: inline-flex; color: var(--a-primary); }
 .action-target-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.action-target-empty { margin: 0; padding: 12px 8px; color: var(--a-text-faint); font-size: 12px; text-align: center; }
+.action-target-empty { margin: 0; padding: 12px 8px; color: var(--a-text-faint); font-size: var(--a-fs-sm); text-align: center; }
 
 /* scrollbar-gutter: stable —— 树加载/滚动条出现时内容区不会因 12px 滚动条而左右抖动。 */
 .scroller { flex: 1 1 auto; overflow-y: auto; overflow-x: hidden; min-height: 0; scrollbar-gutter: stable; }
 .spacer { position: relative; }
 .row {
-  position: absolute; left: 0; right: 0; height: 25px;
+  position: absolute; left: 0; right: 0; height: var(--a-h-sidebar-row);
   display: flex; align-items: center; gap: 5px;
   /* transform only positions the virtual row; the row owns vertical alignment. */
-  font: 12px/normal var(--a-font-ui); color: var(--a-text-dim);
+  font: var(--a-fs-sm)/var(--a-lh-sm) var(--a-font-ui); color: var(--a-text-dim);
   white-space: nowrap; cursor: pointer;
 }
 
@@ -986,7 +998,7 @@ defineExpose({
   color: var(--a-text-faint);
 }
 .node-icon.folder { color: var(--a-text-dim); }
-.m.method-badge { width: 40px; min-width: 40px; flex: 0 0 40px; height: 18px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 1px solid color-mix(in srgb, currentColor 22%, transparent); border-radius: 5px; font: 700 10px/18px var(--a-font-mono); letter-spacing: .02em; }
+.m.method-badge { width: 40px; min-width: 40px; flex: 0 0 40px; height: var(--a-h-pill); display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 1px solid color-mix(in srgb, currentColor 22%, transparent); border-radius: 5px; font: 700 var(--a-fs-2xs)/var(--a-lh-xs) var(--a-font-mono); letter-spacing: .02em; }
 .method-get { color: var(--a-get); background: var(--a-get-bg); }
 .method-post { color: var(--a-post); background: var(--a-post-bg); }
 .method-put { color: var(--a-put); background: var(--a-put-bg); }
@@ -1001,9 +1013,9 @@ defineExpose({
 }
 .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .item-menu-button {
-  flex: 0 0 24px;
-  width: 24px;
-  height: 24px;
+  flex: 0 0 var(--a-h-control-xs);
+  width: var(--a-h-control-xs);
+  height: var(--a-h-control-xs);
   margin-left: auto;
   padding: 0;
   color: var(--a-text-faint);
@@ -1014,7 +1026,7 @@ defineExpose({
 .item-menu-button:focus-visible { opacity: 1; }
 .item-menu-button:hover { color: var(--a-text); background: var(--a-bg-3); }
 :global(.node-menu-delete) { color: var(--a-error) !important; }
-.m { font: 700 10px/normal var(--a-font-mono); width: 40px; }
+.m { font: 700 var(--a-fs-2xs)/normal var(--a-font-mono); width: 40px; }
 .name {
   flex: 1 1 auto;
   min-width: 0;
@@ -1023,6 +1035,6 @@ defineExpose({
 }
 .foot {
   flex: 0 0 auto; padding: 3px 6px; border-top: 1px solid var(--a-border);
-  font: 10px/14px var(--a-font-mono); color: var(--a-text-faint);
+  font: var(--a-fs-2xs)/var(--a-lh-xs) var(--a-font-mono); color: var(--a-text-faint);
 }
 </style>

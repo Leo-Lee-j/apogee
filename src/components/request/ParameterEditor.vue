@@ -269,14 +269,15 @@ watch(() => props.rows, () => { pendingDelete.value = null })
 .parameter-editor--with-kind .parameter-header > :nth-child(4) { grid-column: 5; }
 .parameter-editor--with-kind .parameter-header > :nth-child(5) { grid-column: 4; }
 .parameter-header {
-  min-height: 34px;
+  min-height: max(34px, var(--a-h-control-sm));
   color: var(--a-text-faint);
-  font-size: 11px;
+  font-size: var(--a-fs-xs);
+  line-height: var(--a-lh-xs);
   border-bottom: 1px solid var(--a-border);
 }
 .parameter-row {
   position: relative;
-  min-height: 38px;
+  min-height: max(38px, var(--a-h-input-sm));
   background: transparent;
   border-bottom: 1px solid var(--a-border);
   transition: opacity 120ms ease, background-color 120ms ease;
@@ -294,9 +295,9 @@ watch(() => props.rows, () => { pendingDelete.value = null })
 .parameter-drag-handle {
   position: absolute;
   left: -16px;
-  top: 4px;
+  top: calc((100% - var(--a-h-input-sm)) / 2);
   width: 16px;
-  height: 30px;
+  height: var(--a-h-input-sm);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -323,8 +324,12 @@ watch(() => props.rows, () => { pendingDelete.value = null })
   background: transparent;
 }
 .parameter-row :deep(.n-input__input-el),
-.parameter-row :deep(.n-input__textarea-el) { font-family: var(--a-font-editor); }
+.parameter-row :deep(.n-input__textarea-el) {
+  font-family: var(--a-font-editor);
+  font-size: var(--a-fs-editor-sm);
+  line-height: var(--a-lh-sm);
+}
 .parameter-row :deep(.n-input__border) { border-color: transparent !important; }
 .parameter-row :deep(.n-input),
-.parameter-row :deep(.n-input__input-el) { height: 32px; min-height: 32px; }
+.parameter-row :deep(.n-input__input-el) { height: max(32px, var(--a-h-input-sm)); min-height: max(32px, var(--a-h-input-sm)); }
 </style>

@@ -126,6 +126,7 @@ export const useAppStore = defineStore('app', () => {
     try {
       settings.value = await ipc.appSettingsSave(next)
       const ui = useUiStore()
+      ui.applyFont(settings.value.fontFamily)
       ui.applyEditorFont(settings.value.editorFontFamily)
       ui.applyFontSizes(settings.value.uiFontSize, settings.value.resultFontSize)
       lastError.value = null

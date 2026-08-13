@@ -441,18 +441,18 @@ defineExpose({ runAll })
 
 <style scoped>
 .s2 { display: flex; flex-direction: column; height: 100%; min-height: 0; overflow: auto; padding: 12px; gap: 12px; }
-h2 { margin: 0 0 4px; font-size: 15px; }
-.sub { margin: 0 0 8px; font-size: 12px; color: var(--a-text-dim); }
+h2 { margin: 0 0 4px; font-size: var(--a-fs-lg); }
+.sub { margin: 0 0 8px; font-size: var(--a-fs-sm); color: var(--a-text-dim); }
 .bar { display: flex; align-items: center; gap: 10px; }
 .bar button {
-  height: 28px; padding: 0 14px; background: var(--a-primary);
+  height: var(--a-h-control-sm); padding: 0 14px; background: var(--a-primary);
   border: none; border-radius: var(--a-radius-md); color: var(--a-on-primary);
   font: inherit; cursor: pointer;
 }
 .bar button:disabled { opacity: 0.5; cursor: default; }
-.stage { font-size: 12px; color: var(--a-warn); }
-.saved { font: 11px/1 var(--a-font-mono); color: var(--a-text-faint); }
-.grid { border-collapse: collapse; font: 11px/1.6 var(--a-font-mono); }
+.stage { font-size: var(--a-fs-sm); color: var(--a-warn); }
+.saved { font: var(--a-fs-xs)/var(--a-lh-xs) var(--a-font-mono); color: var(--a-text-faint); }
+.grid { border-collapse: collapse; font: var(--a-fs-xs)/1.6 var(--a-font-mono); }
 .grid th, .grid td {
   border: 1px solid var(--a-border); padding: 3px 6px; text-align: right; white-space: nowrap;
 }
@@ -461,11 +461,11 @@ h2 { margin: 0 0 4px; font-size: 15px; }
 .grid .hi { background: var(--a-selected); font-weight: var(--a-fw-semibold); }
 .pass { color: var(--a-ok); }
 .fail { color: var(--a-error); }
-.err { color: var(--a-error); font-size: 10px; white-space: normal; max-width: 240px; }
+.err { color: var(--a-error); font-size: var(--a-fs-2xs); white-space: normal; max-width: 240px; }
 .probe {
   border: 1px dashed var(--a-border-strong); border-radius: var(--a-radius-md);
   min-height: 220px; display: flex; flex-direction: column;
 }
-.label { margin: 0; padding: 4px 8px; font-size: 11px; color: var(--a-text-faint); border-bottom: 1px dashed var(--a-border); }
-.idle { padding: 12px; color: var(--a-text-faint); font-size: 12px; }
+.label { margin: 0; padding: 4px 8px; font-size: var(--a-fs-xs); color: var(--a-text-faint); border-bottom: 1px dashed var(--a-border); }
+.idle { padding: 12px; color: var(--a-text-faint); font-size: var(--a-fs-sm); }
 </style>

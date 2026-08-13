@@ -2,9 +2,10 @@
 import { ref, shallowRef, nextTick, onBeforeUnmount } from 'vue'
 import { ipc, inTauri } from '@/ipc'
 import { useTabsStore } from '@/stores/tabs'
+import { useUiStore } from '@/stores/ui'
 import Sidebar from '@/components/sidebar/Sidebar.vue'
 import S3FullTree from './S3FullTree.vue'
-import { ROW_H, OVERSCAN, synthTree, visibleNodes, type FlatNode } from '@/components/sidebar/tree'
+import { OVERSCAN, sidebarRowHeightForUiSize, synthTree, visibleNodes, type FlatNode } from '@/components/sidebar/tree'
 
 /**
  * # Spike S3 量测台：自研虚拟树的帧率与首渲
@@ -144,6 +145,8 @@ interface Cell {
   totalNodes: number
   visibleNodes: number
   renderedRows: number
+  /** 实际传给被测组件的动态行高，必须与 Sidebar 的 CSS 行高一致。 */
+  rowHeightPx: number
   /** 合成扁平数组的耗时。正式实现里这段在 Rust 侧，单列出来避免算进前端预算。 */
   dataPrepMs: number
   /** O(N) 的 visible 过滤，重复 VISIBLE_FILTER_REPEATS 次取平均（单次低于计时器精度） */
@@ -207,6 +210,7 @@ const probeRef = ref<{
 } | null>(null)
 
 const tabs = useTabsStore()
+const ui = useUiStore()
 
 // ── 通用工具 ──────────────────────────────────────────────────────────
 
@@ -480,6 +484,7 @@ async function runCell(
     totalNodes: 0,
     visibleNodes: 0,
     renderedRows: 0,
+    rowHeightPx: 0,
     dataPrepMs: 0,
     visibleFilterMs: 0,
     patchMs: 0,
@@ -547,15 +552,16 @@ async function runCell(
 
     const stats = inst.stats()
     cell.renderedRows = stats.rendered
+    cell.rowHeightPx = stats.rowHeight
     cell.scrollHeightPx = stats.scrollHeight
 
     // ⑤ 滚动帧率 + 同窗口的 LoAF
     startLoaf()
-    cell.scroll = await measureScroll(el, SCROLL_STEP_ROWS * ROW_H, budgetMs)
+    cell.scroll = await measureScroll(el, SCROLL_STEP_ROWS * stats.rowHeight, budgetMs)
     cell.loaf = stopLoaf()
 
     // ⑥ 单步滚动的主线程成本。帧间隔饱和时这是唯一能看出余量的数字。
-    cell.stepCost = await measureStepCost(inst, el, SCROLL_STEP_ROWS * ROW_H)
+    cell.stepCost = await measureStepCost(inst, el, SCROLL_STEP_ROWS * stats.rowHeight)
 
     // ⑦ 展开/折叠（只测产品实现；对照组没有这条路径）
     if (impl === 'virtual') {
@@ -725,7 +731,7 @@ function buildReport(
     subject: {
       component: 'src/components/sidebar/Sidebar.vue',
       sharedModule: 'src/components/sidebar/tree.ts',
-      rowHeightPx: ROW_H,
+      rowHeightPx: virtual5000?.rowHeightPx || sidebarRowHeightForUiSize(ui.uiFontSize),
       overscanRows: OVERSCAN,
       control: 'src/spike/S3FullTree.vue（全量 v-for，不虚拟化）',
     },
@@ -733,7 +739,7 @@ function buildReport(
     method: {
       scrollFrames: SCROLL_FRAMES,
       scrollStepRows: SCROLL_STEP_ROWS,
-      scrollStepPx: SCROLL_STEP_ROWS * ROW_H,
+      scrollStepPx: SCROLL_STEP_ROWS * (virtual5000?.rowHeightPx || sidebarRowHeightForUiSize(ui.uiFontSize)),
       scrollDriver: '主线程：每帧写 scroller.scrollTop（比合成器驱动更悲观）',
       frameBudgetMs: budgetMs,
       frameBudgetSource: '本机显示器实测 rAF 中位间隔',
@@ -890,19 +896,19 @@ defineExpose({ runAll })
 <style scoped>
 .s3 { display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; }
 header { flex: 0 0 auto; padding: 8px 10px; border-bottom: 1px solid var(--a-border); }
-h2 { margin: 0 0 4px; font: 600 13px/1.3 var(--a-font-ui); color: var(--a-text); }
-.sub { margin: 0 0 6px; font: 11px/1.5 var(--a-font-ui); color: var(--a-text-dim); }
+h2 { margin: 0 0 4px; font: 600 var(--a-fs-base)/1.3 var(--a-font-ui); color: var(--a-text); }
+.sub { margin: 0 0 6px; font: var(--a-fs-xs)/1.5 var(--a-font-ui); color: var(--a-text-dim); }
 .bar { display: flex; align-items: center; gap: 10px; }
 .bar button {
-  height: 24px; padding: 0 10px; background: var(--a-bg-3);
+  height: var(--a-h-control-xs); padding: 0 10px; background: var(--a-bg-3);
   border: 1px solid var(--a-border); border-radius: var(--a-radius-md);
   color: var(--a-text); font: inherit; cursor: pointer;
 }
 .bar button:disabled { opacity: 0.5; cursor: default; }
-.stage, .saved { font: 11px/1 var(--a-font-mono); color: var(--a-text-faint); }
+.stage, .saved { font: var(--a-fs-xs)/var(--a-lh-xs) var(--a-font-mono); color: var(--a-text-faint); }
 
 .body { flex: 1 1 auto; display: flex; gap: 8px; min-height: 0; padding: 8px; }
-.grid { flex: 1 1 auto; border-collapse: collapse; font: 11px/1.4 var(--a-font-mono); align-self: flex-start; }
+.grid { flex: 1 1 auto; border-collapse: collapse; font: var(--a-fs-xs)/1.4 var(--a-font-mono); align-self: flex-start; }
 .grid th, .grid td {
   padding: 2px 6px; border-bottom: 1px solid var(--a-border);
   text-align: right; white-space: nowrap; color: var(--a-text-dim);
@@ -919,5 +925,5 @@ h2 { margin: 0 0 4px; font: 600 13px/1.3 var(--a-font-ui); color: var(--a-text);
   display: flex; overflow: hidden;
   border: 1px solid var(--a-border); border-radius: var(--a-radius-md);
 }
-.hint { margin: 0; padding: 6px; font: 11px/1.5 var(--a-font-ui); color: var(--a-text-faint); }
+.hint { margin: 0; padding: 6px; font: var(--a-fs-xs)/1.5 var(--a-font-ui); color: var(--a-text-faint); }
 </style>

@@ -597,8 +597,8 @@ onMounted(async () => {
 }
 .x {
   flex: 0 0 auto;
-  width: 24px;
-  height: 24px;
+  width: var(--a-h-control-xs);
+  height: var(--a-h-control-xs);
   padding: 0;
   color: var(--a-text-dim);
 }
@@ -633,7 +633,7 @@ onMounted(async () => {
 .curl-column > label, .preview-label { color: var(--a-text-dim); font: var(--a-fw-medium) var(--a-fs-sm) var(--a-font-ui); }
 .preview-label { display: flex; justify-content: space-between; align-items: center; }
 .preview-state { color: var(--a-primary); font-size: var(--a-fs-xs); font-weight: var(--a-fw-normal); }
-.curl-input { flex: 1 1 auto; min-height: 180px; resize: none; box-sizing: border-box; background: var(--a-bg-3); border: 1px solid var(--a-border); border-radius: var(--a-radius-md); color: var(--a-text); padding: 10px; font: var(--a-fs-sm)/1.6 var(--a-font-mono); }
+.curl-input { flex: 1 1 auto; min-height: 180px; resize: none; box-sizing: border-box; background: var(--a-bg-3); border: 1px solid var(--a-border); border-radius: var(--a-radius-md); color: var(--a-text); padding: 10px; font: var(--a-fs-editor-sm)/1.6 var(--a-font-editor); }
 .curl-input:focus { outline: 2px solid var(--a-focus); outline-offset: -2px; }
 .preview-tabs { flex: 1 1 auto; min-height: 180px; display: flex; flex-direction: column; }
 .preview-tabs :deep(.n-tabs-nav) { flex: 0 0 auto; margin-bottom: 6px; }
@@ -694,10 +694,10 @@ onMounted(async () => {
 .badge {
   flex: 0 0 auto;
   border-radius: var(--a-radius-pill);
-  font: var(--a-fw-medium) var(--a-fs-xs) / 16px var(--a-font-ui);
+  font: var(--a-fw-medium) var(--a-fs-xs) / var(--a-lh-xs) var(--a-font-ui);
   white-space: nowrap;
 }
-.action-notice { flex: 0 0 auto; min-height: 36px; margin: 0 16px 4px; box-sizing: border-box; }
+.action-notice { flex: 0 0 auto; min-height: var(--a-h-control); margin: 0 16px 4px; box-sizing: border-box; }
 .action-error { flex: 0 0 auto; margin: 0 16px 4px; }
 kbd {
   padding: 0 4px;
@@ -705,7 +705,7 @@ kbd {
   border: 1px solid var(--a-border-strong);
   border-radius: var(--a-radius-sm);
   color: var(--a-text-dim);
-  font: var(--a-fs-xs) / 15px var(--a-font-mono);
+  font: var(--a-fs-xs) / var(--a-lh-xs) var(--a-font-mono);
 }
 .card kbd { background: var(--a-bg-2); }
 .ft {

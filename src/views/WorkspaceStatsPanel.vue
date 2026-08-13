@@ -64,13 +64,13 @@ const items = computed(() => [
   overflow: auto;
 }
 .stats-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
-.stats-head h1 { margin: 0; color: var(--a-text); font-size: 18px; font-weight: var(--a-fw-semibold); line-height: 28px; }
+.stats-head h1 { margin: 0; color: var(--a-text); font-size: var(--a-fs-2xl); font-weight: var(--a-fw-semibold); line-height: var(--a-lh-xl); }
 .stats-head p { margin: 2px 0 0; color: var(--a-text-dim); font-size: var(--a-fs-sm); }
 .stats-head > :last-child { color: var(--a-primary); }
 .stat-grid { display: grid; grid-template-columns: repeat(4, minmax(120px, 1fr)); gap: 12px; max-width: 760px; }
 .stat-item { display: grid; grid-template-columns: auto 1fr; align-items: center; column-gap: 8px; min-height: 92px; padding: 16px; border: 1px solid var(--a-border); border-radius: var(--a-radius-sm); background: var(--a-bg-2); }
 .stat-item > :first-child { color: var(--a-text-faint); }
-.stat-value { color: var(--a-text); font: var(--a-fw-semibold) 24px/1 var(--a-font-mono); }
+.stat-value { color: var(--a-text); font: var(--a-fw-semibold) var(--a-fs-4xl)/1 var(--a-font-mono); }
 .stat-label { grid-column: 1 / -1; margin-top: 12px; color: var(--a-text-dim); font-size: var(--a-fs-sm); }
 .variables-row { display: flex; align-items: center; justify-content: space-between; max-width: 760px; margin-top: 16px; padding: 14px 16px; border-top: 1px solid var(--a-border); color: var(--a-text-dim); font-size: var(--a-fs-sm); }
 .variables-row strong { color: var(--a-text); font-family: var(--a-font-mono); font-size: var(--a-fs-lg); }

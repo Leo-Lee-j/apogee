@@ -94,7 +94,7 @@ const app = useAppStore()
 }
 .opening-text {
   color: var(--a-text-dim);
-  font: 13px var(--a-font-ui);
+  font: var(--a-fs-base) var(--a-font-ui);
 }
 @keyframes opening-spin {
   to { transform: rotate(360deg); }

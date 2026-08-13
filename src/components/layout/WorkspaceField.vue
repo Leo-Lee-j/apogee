@@ -7,9 +7,9 @@ defineProps<{ label: string; hint?: string }>()
 </template>
 
 <style scoped>
-.workspace-field { display: grid; gap: var(--workspace-field-gap, 5px); min-width: 0; color: var(--a-text-dim); font-size: 12px; }
-.workspace-field-label { line-height: 18px; }
-.workspace-field-hint { color: var(--a-text-faint); font-size: 11px; line-height: 16px; }
+.workspace-field { display: grid; gap: var(--workspace-field-gap, 5px); min-width: 0; color: var(--a-text-dim); font-size: var(--a-fs-sm); }
+.workspace-field-label { line-height: var(--a-lh-sm); }
+.workspace-field-hint { color: var(--a-text-faint); font-size: var(--a-fs-xs); line-height: var(--a-lh-xs); }
 .workspace-field :deep(.n-input), .workspace-field :deep(.n-input-number), .workspace-field :deep(.n-select) { width: 100%; }
-.workspace-field :deep(.n-input__input-el), .workspace-field :deep(.n-input-number-input__input) { height: 32px; min-height: 32px; line-height: 32px; }
+.workspace-field :deep(.n-input__input-el), .workspace-field :deep(.n-input-number-input__input) { height: var(--a-h-input-md); min-height: var(--a-h-input-md); line-height: var(--a-lh); }
 </style>

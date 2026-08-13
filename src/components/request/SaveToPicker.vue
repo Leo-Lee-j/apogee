@@ -175,11 +175,10 @@ async function createCollection() {
 .save-picker { display: flex; flex-direction: column; gap: 8px; }
 .field-label {
   color: var(--a-text-dim);
-  font: var(--a-fw-medium) var(--a-fs-sm) / 1 var(--a-font-ui);
+  font: var(--a-fw-medium) var(--a-fs-sm) / var(--a-lh-sm) var(--a-font-ui);
 }
-/* 名称输入框沿用应用统一的字段输入样式（与 Sidebar / EnvironmentControls 一致）：
-   不单独设置时 naive-ui 默认 36px/10px padding，与其它字段并排时明显矮一截。 */
-.save-picker :deep(.n-input) { min-height: 38px; }
+/* 名称输入框使用共享控件尺寸，保证高字号下仍保留垂直留白。 */
+.save-picker :deep(.n-input) { min-height: var(--a-h-input-md); }
 .save-picker :deep(.n-input-wrapper) { padding-inline: 12px; }
 .error { flex: 0 0 auto; }
 .target-list {
@@ -196,13 +195,13 @@ async function createCollection() {
   gap: 6px;
   width: 100%;
   box-sizing: border-box;
-  height: 28px;
+  height: var(--a-h-sidebar-row);
   padding: 0 8px;
   border: 0;
   border-radius: var(--a-radius-sm);
   background: transparent;
   color: var(--a-text);
-  font: var(--a-fs-sm) / 1 var(--a-font-ui);
+  font: var(--a-fs-sm) / var(--a-lh-sm) var(--a-font-ui);
   text-align: left;
   cursor: pointer;
 }

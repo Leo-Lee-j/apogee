@@ -32,37 +32,43 @@ const bootMarks: Partial<BootMetrics> = {}
 app.mount('#app')
 bootMarks.mountMs = performance.now() - t0
 
-// 主题在挂载后立刻应用：CSS 变量切换是同步的，不会有闪烁
+// 未读取持久化设置前先应用明确的默认值；Tauri 窗口仍保持隐藏，随后会在
+// initialize() 完成前覆盖为用户配置，因而不会把默认字体闪给用户。
 const ui = useUiStore()
 ui.applyTheme()
 ui.applyFont('system')
+ui.applyEditorFont('system')
+ui.applyFontSizes(13, 13)
 
-// 入口首帧只加载轻量工作区注册表。只有用户选择工作区后才挂载请求编辑器。
-if (inTauri) void useAppStore().initialize()
+// 暴露同一个可变对象，量测台可在异步初始化完成后读取完整数据。
+;(window as unknown as { __apogeeBoot: unknown }).__apogeeBoot = bootMarks
 
-bootMarks.readyMs = performance.now() - t0
+async function completeBoot() {
+  // 持久化的字体、字号和主题必须在 appReady 前恢复；Rust 在 appReady 后才显示窗口。
+  if (inTauri) await useAppStore().initialize()
+  bootMarks.readyMs = performance.now() - t0
 
-// 首帧真正画完之后再让 Rust 显示窗口（03 文档 §4.1）。
-// 用双 rAF 而不是 nextTick：nextTick 只保证 Vue 更新完，像素还没上屏。
-if (inTauri) {
-  requestAnimationFrame(() =>
-    requestAnimationFrame(() => {
-      bootMarks.firstPaintMs = performance.now() - t0
-      void ipc.appReady({
-        mountMs: bootMarks.mountMs!,
-        readyMs: bootMarks.readyMs!,
-        firstPaintMs: bootMarks.firstPaintMs,
-      }).catch(() => {
-        /* 兜底逻辑在 Rust 侧（3s 强制显示），这里失败也不阻塞 */
-      })
-    }),
+  // 首帧真正画完之后再让 Rust 显示窗口（03 文档 §4.1）。
+  // 用双 rAF 而不是 nextTick：nextTick 只保证 Vue 更新完，像素还没上屏。
+  if (inTauri) {
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        bootMarks.firstPaintMs = performance.now() - t0
+        void ipc.appReady({
+          mountMs: bootMarks.mountMs!,
+          readyMs: bootMarks.readyMs!,
+          firstPaintMs: bootMarks.firstPaintMs,
+        }).catch(() => {
+          /* 兜底逻辑在 Rust 侧（3s 强制显示），这里失败也不阻塞 */
+        })
+      }),
+    )
+  }
+
+  // eslint-disable-next-line no-console
+  console.info(
+    `[Apogee] 变体=${__S5_VARIANT__} 挂载=${bootMarks.mountMs!.toFixed(1)}ms 就绪=${bootMarks.readyMs!.toFixed(1)}ms`,
   )
 }
 
-// 暴露启动量测，便于 Spike 与「性能自检」面板读取（PRD §5.2）
-;(window as unknown as { __apogeeBoot: unknown }).__apogeeBoot = bootMarks
-
-// eslint-disable-next-line no-console
-console.info(
-  `[Apogee] 变体=${__S5_VARIANT__} 挂载=${bootMarks.mountMs!.toFixed(1)}ms 就绪=${bootMarks.readyMs!.toFixed(1)}ms`,
-)
+void completeBoot()

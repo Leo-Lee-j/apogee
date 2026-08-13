@@ -141,17 +141,29 @@
   --a-radius-lg: 12px;
   --a-radius-pill: 12px;
 
-  /* ── 尺寸（02 文档 §3.2）── */
-  --a-h-titlebar: 40px;
-  --a-h-tabbar: 36px;
-  --a-h-urlbar: 40px;
-  --a-h-toolbar: 40px;
-  --a-h-statusbar: 24px;
+  /* ── 尺寸（02 文档 §3.2）──
+     文本设置会改变行高，因此所有承载文字的 chrome、控件和虚拟行都从同一组
+     令牌取尺寸，避免在 24px 应用字号下发生裁切。默认值保持既有密度。 */
+  --a-h-control-xs: max(24px, calc(var(--a-lh-xs) + 8px));
+  --a-h-control-sm: max(32px, calc(var(--a-lh-sm) + 14px));
+  --a-h-control: max(36px, calc(var(--a-lh) + 16px));
+  --a-h-input-sm: max(30px, calc(var(--a-lh-sm) + 12px));
+  --a-h-input-md: var(--a-h-control);
+  --a-h-input-lg: max(40px, calc(var(--a-lh) + 20px));
+  --a-h-pill: max(18px, calc(var(--a-lh-xs) + 2px));
+  --a-h-sidebar-row: max(28px, calc(var(--a-lh-sm) + 8px));
+  --a-h-list-row: max(38px, calc(var(--a-lh-sm) + 20px));
+  --a-h-result-row: max(30px, calc(var(--a-lh-result) + 10px));
+  --a-h-titlebar: max(40px, calc(var(--a-lh) + 14px));
+  --a-h-tabbar: max(36px, var(--a-h-control-sm));
+  --a-h-urlbar: max(52px, calc(var(--a-h-control) + 16px));
+  --a-h-toolbar: max(40px, var(--a-h-control-sm));
+  --a-h-statusbar: max(24px, calc(var(--a-lh-sm) + 6px));
   --a-w-sidebar: 296px;
   /* S3 虚拟树对照实验保持固定测量宽度，不随产品默认布局变化。 */
   --a-w-sidebar-bench: 240px;
-  --a-row: 32px;
-  --a-row-compact: 28px;
+  --a-row: var(--a-h-input-md);
+  --a-row-compact: var(--a-h-sidebar-row);
 
   /* ── 排版（02 文档 §7.3）──
      固定 px，不用 clamp。Inter 放首位但不下载字体文件，装了就用、没装回落系统字体。 */
@@ -160,13 +172,39 @@
   --a-font-mono: 'JetBrains Mono', 'Cascadia Code', 'SF Mono', Consolas, monospace;
   /* 请求编辑器默认继承等宽栈；设置页可只覆盖这一令牌而不影响响应查看器。 */
   --a-font-editor: var(--a-font-mono);
+
+  /* UI 字号基于“应用界面字号”动态更新；默认值保持既有 10–24px 层级。 */
+  --a-fs-2xs: 10px;
   --a-fs-xs: 11px;
   --a-fs-sm: 12px;
   --a-fs-base: 13px;
+  --a-fs-md: 14px;
   --a-fs-lg: 15px;
+  --a-fs-xl: 16px;
+  --a-fs-2xl: 18px;
+  --a-fs-3xl: 23px;
+  --a-fs-4xl: 24px;
+  --a-lh-xs: 16px;
+  --a-lh-sm: 18px;
   --a-lh: 20px;
-  --a-font-result: 13px;
+  --a-lh-lg: 22px;
+  --a-lh-xl: 24px;
+
+  /* 请求编辑器沿用应用字号，但其字体族仍由“请求编辑器字体”单独控制。 */
+  --a-fs-editor-xs: var(--a-fs-xs);
+  --a-fs-editor-sm: var(--a-fs-sm);
+  --a-fs-editor-base: var(--a-fs-base);
+  --a-lh-editor: var(--a-lh);
+
+  /* 查询结果字号独立于界面字号，覆盖正文、树、数据表和结果代码。 */
+  --a-fs-result-xs: 10px;
+  --a-fs-result-sm: 11px;
+  --a-fs-result-md: 12px;
+  --a-fs-result: 13px;
+  --a-lh-result-sm: 18px;
   --a-lh-result: 20px;
+  /* 兼容旧调用，新的代码统一使用 --a-fs-result。 */
+  --a-font-result: var(--a-fs-result);
   --a-fw-normal: 400;
   --a-fw-medium: 500;
   --a-fw-semibold: 600;
@@ -305,11 +343,11 @@ input, textarea, [contenteditable], .a-selectable { user-select: text; }
 .a-pill {
   display: inline-flex;
   align-items: center;
-  height: 18px;
+  height: var(--a-h-pill);
   padding: 0 6px;
   border-radius: var(--a-radius-pill);
   border: 1px solid currentColor;
-  font: var(--a-fw-semibold) var(--a-fs-xs) / 1 var(--a-font-mono);
+  font: var(--a-fw-semibold) var(--a-fs-xs) / var(--a-lh-xs) var(--a-font-mono);
   letter-spacing: 0.02em;
   white-space: nowrap;
 }

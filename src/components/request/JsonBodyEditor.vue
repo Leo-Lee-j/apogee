@@ -15,6 +15,7 @@ import { defaultHighlightStyle, syntaxHighlighting } from '@codemirror/language'
 import { EditorState } from '@codemirror/state'
 import { EditorView, highlightActiveLine, keymap, lineNumbers } from '@codemirror/view'
 import { resolveVariablePreview } from '@/features/variablePreview'
+import { useUiStore } from '@/stores/ui'
 import { useWorkspaceStore } from '@/stores/workspace'
 
 /**
@@ -40,6 +41,7 @@ type Validation =
   | { state: 'template' }
   | { state: 'invalid'; message: string }
 
+const ui = useUiStore()
 const workspace = useWorkspaceStore()
 const host = ref<HTMLDivElement | null>(null)
 const view = shallowRef<EditorView | null>(null)
@@ -222,12 +224,12 @@ function mountEditor() {
         height: '100%',
         backgroundColor: 'var(--a-bg-3)',
         color: 'var(--a-text)',
-        // 与响应查看器共用结果字号设置；JSON 正文仍始终使用等宽字体。
-        fontSize: 'var(--a-font-result)',
+        // 请求编辑器跟随应用界面字号，字体族由“请求编辑器字体”单独控制。
+        fontSize: 'var(--a-fs-editor-base)',
       },
       // 覆盖 CodeMirror 基础主题的 1px dotted outline；外层裁剪后它会只剩底部虚线。
       '&.cm-focused': { outline: 'none' },
-      '.cm-scroller': { fontFamily: 'var(--a-font-editor)', lineHeight: 'var(--a-lh-result)' },
+      '.cm-scroller': { fontFamily: 'var(--a-font-editor)', lineHeight: 'var(--a-lh-editor)' },
       '.cm-content': { padding: '10px 0 14px' },
       '.cm-line': { padding: '0 10px' },
       '.cm-gutters': {
@@ -269,6 +271,10 @@ watch(() => props.value, (value) => {
   replaceEditorDocument(value)
 })
 watch(validation, () => syncEditorAccessibility(), { flush: 'post' })
+// CodeMirror 会缓存行高与视口；请求编辑器字号或字体改变后主动重测。
+watch([() => ui.uiFontSize, () => ui.editorFontFamily], () => {
+  requestAnimationFrame(() => view.value?.requestMeasure())
+})
 
 onMounted(mountEditor)
 onBeforeUnmount(() => {
@@ -351,28 +357,29 @@ onBeforeUnmount(() => {
   flex: 0 0 auto;
   align-items: center;
   gap: 7px;
-  min-height: 34px;
+  min-height: max(34px, var(--a-h-control-sm));
   padding: 0 8px 0 10px;
   border-bottom: 1px solid var(--a-border);
   background: var(--a-bg-2);
-  font-size: 12px;
+  font-size: var(--a-fs-sm);
+  line-height: var(--a-lh-sm);
 }
 .json-toolbar strong { font-weight: var(--a-fw-medium); }
 .json-toolbar-spacer { flex: 1 1 auto; }
 .json-toolbar button {
-  height: 24px;
+  height: var(--a-h-control-xs);
   padding: 0 7px;
   border: 0;
   border-radius: var(--a-radius-sm);
   background: transparent;
   color: var(--a-text-dim);
-  font: 11px var(--a-font-ui);
+  font: var(--a-fs-xs)/var(--a-lh-xs) var(--a-font-ui);
   cursor: pointer;
 }
 .json-toolbar button:hover:not(:disabled) { background: var(--a-hover); color: var(--a-text); }
 .json-toolbar button:focus-visible { outline: 2px solid var(--a-focus); outline-offset: -1px; }
 .json-toolbar button:disabled { color: var(--a-text-faint); cursor: not-allowed; opacity: .65; }
-.json-state { font-size: 11px; }
+.json-state { font-size: var(--a-fs-xs); }
 .json-state.valid { color: var(--a-success); }
 .json-state.empty { color: var(--a-text-faint); }
 .json-state.template { color: var(--a-primary); }
@@ -385,7 +392,7 @@ onBeforeUnmount(() => {
   top: 10px;
   left: 42px;
   color: var(--a-text-faint);
-  font: var(--a-font-result) / var(--a-lh-result) var(--a-font-editor);
+  font: var(--a-fs-editor-base) / var(--a-lh-editor) var(--a-font-editor);
   pointer-events: none;
   white-space: pre;
 }
@@ -394,7 +401,7 @@ onBeforeUnmount(() => {
   margin: 0;
   padding: 7px 10px;
   border-top: 1px solid var(--a-border);
-  font-size: 11px;
+  font-size: var(--a-fs-xs);
   line-height: 1.45;
 }
 .json-error { color: var(--a-error); background: color-mix(in srgb, var(--a-error) 7%, var(--a-bg-2)); }
@@ -407,7 +414,7 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 10px;
   width: 100%;
-  min-height: 32px;
+  min-height: var(--a-h-control-sm);
   padding: 4px 6px;
   border: 0;
   border-radius: var(--a-radius-sm);
@@ -422,7 +429,7 @@ onBeforeUnmount(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.variable-menu code { color: var(--a-primary); font: 11px var(--a-font-editor); }
-.variable-menu span { color: var(--a-text-faint); font: 11px var(--a-font-editor); }
+.variable-menu code { color: var(--a-primary); font: var(--a-fs-editor-xs)/var(--a-lh-xs) var(--a-font-editor); }
+.variable-menu span { color: var(--a-text-faint); font: var(--a-fs-editor-xs)/var(--a-lh-xs) var(--a-font-editor); }
 .variable-menu span.invalid { color: var(--a-error); }
 </style>

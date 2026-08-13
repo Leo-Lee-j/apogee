@@ -618,13 +618,13 @@ function patchVersion(value: string | number | null) {
 <style scoped>
 .req { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; overflow: hidden; }
 .tabs {
-  height: var(--a-h-toolbar); flex: 0 0 auto;
+  min-height: var(--a-h-toolbar); flex: 0 0 auto;
   display: flex; align-items: center; gap: 2px; padding: 0 6px;
   border-bottom: 1px solid var(--a-border);
 }
 .tabs button {
   background: transparent; border: none; color: var(--a-text-dim);
-  font: inherit; height: 24px; padding: 0 8px; border-radius: 4px; cursor: pointer;
+  font: var(--a-fs-sm)/var(--a-lh-sm) var(--a-font-ui); height: var(--a-h-control-xs); padding: 0 8px; border-radius: 4px; cursor: pointer;
 }
 .tabs button:hover { background: var(--a-hover); color: var(--a-text); }
 .tabs button.on { color: var(--a-primary); background: var(--a-selected); box-shadow: none; border-radius: 6px; }
@@ -639,15 +639,15 @@ function patchVersion(value: string | number | null) {
 .bulk-textarea {
   flex: 1 1 auto; min-height: 240px; width: 100%; box-sizing: border-box;
   background: var(--a-bg-3); border: 1px solid var(--a-border); border-radius: var(--a-radius-md);
-  color: var(--a-text); caret-color: var(--a-text); padding: 10px; font: 12px/1.6 var(--a-font-editor);
+  color: var(--a-text); caret-color: var(--a-text); padding: 10px; font: var(--a-fs-editor-sm)/1.6 var(--a-font-editor);
   /* 原生 textarea + 全局自定义滚动条的组合在 WebView2 下偶发光标消失，
      显式声明 text 光标强制 WebView 重绘指针。 */
   cursor: text;
 }
 .bulk-textarea:focus { outline: 2px solid var(--a-focus); outline-offset: -2px; border-color: var(--a-focus); }
-.bulk-hint { margin: 0 2px; color: var(--a-text-faint); font-size: 11px; }
+.bulk-hint { margin: 0 2px; color: var(--a-text-faint); font-size: var(--a-fs-xs); }
 .body { flex: 1 1 auto; overflow: auto; min-height: 0; padding: 8px; }
-.empty, .editor-empty { padding: 16px; color: var(--a-text-dim); font-size: 12px; }
+.empty, .editor-empty { padding: 16px; color: var(--a-text-dim); font-size: var(--a-fs-sm); }
 .config-block {
   overflow: hidden;
   border: 1px solid var(--a-border);
@@ -657,52 +657,53 @@ function patchVersion(value: string | number | null) {
 .config-block + .config-block { margin-top: 8px; }
 .parameter-group { overflow: hidden; border: 1px solid var(--a-border); border-radius: var(--a-radius-md); background: var(--a-bg-2); }
 .parameter-group + .parameter-group { margin-top: 8px; }
-.parameter-group > .section-head span { margin-left: auto; color: var(--a-text-faint); font-size: 11px; font-weight: 400; }
+.parameter-group > .section-head span { margin-left: auto; color: var(--a-text-faint); font-size: var(--a-fs-xs); font-weight: 400; }
 .common-header-toggle {
-  flex: 0 0 auto; height: 24px; padding: 0 7px; border: 1px solid var(--a-border);
+  flex: 0 0 auto; height: var(--a-h-control-xs); padding: 0 7px; border: 1px solid var(--a-border);
   border-radius: var(--a-radius-sm); background: transparent; color: var(--a-text-dim);
-  font: 11px var(--a-font-ui); cursor: pointer;
+  font: var(--a-fs-xs)/var(--a-lh-xs) var(--a-font-ui); cursor: pointer;
 }
 .common-header-toggle:hover { border-color: var(--a-primary); color: var(--a-primary); }
 .common-header-toggle[aria-pressed='true'] { border-color: var(--a-primary); background: var(--a-selected); color: var(--a-primary); }
 .common-headers { border-bottom: 1px solid var(--a-border); background: color-mix(in srgb, var(--a-bg-1) 48%, transparent); }
 .common-header-table { overflow-x: auto; }
 .common-header-row {
-  min-height: 28px; display: grid; grid-template-columns: minmax(120px, 28%) minmax(180px, 1fr) 84px;
-  border-bottom: 1px solid var(--a-border); color: var(--a-text-soft); font-size: 11px;
+  min-height: var(--a-h-input-sm); display: grid; grid-template-columns: minmax(120px, 28%) minmax(180px, 1fr) 84px;
+  border-bottom: 1px solid var(--a-border); color: var(--a-text-soft); font: var(--a-fs-xs)/var(--a-lh-xs) var(--a-font-ui);
 }
 .common-header-row:last-child { border-bottom: 0; }
 .common-header-row > * { min-width: 0; padding: 5px 9px; overflow-wrap: anywhere; border-right: 1px solid var(--a-border); }
 .common-header-row > :last-child { border-right: 0; color: var(--a-text-faint); }
-.common-header-row code { color: var(--a-post); font: 11px/18px var(--a-font-editor); }
+.common-header-row code { color: var(--a-post); font: var(--a-fs-editor-xs)/var(--a-lh-xs) var(--a-font-editor); }
 .common-header-head { background: var(--a-bg-3); color: var(--a-text-faint); font-weight: var(--a-fw-medium); }
 .common-header-head span { color: inherit; }
-.common-header-empty { margin: 0; padding: 9px 10px; color: var(--a-text-faint); font-size: 11px; }
+.common-header-empty { margin: 0; padding: 9px 10px; color: var(--a-text-faint); font-size: var(--a-fs-xs); }
 .parameter-table { min-width: 0; overflow-x: auto; padding: 8px; }
 .config-head, .section-head {
   display: flex; align-items: center; gap: 8px;
-  min-height: 34px; padding: 0 10px;
+  min-height: max(34px, var(--a-h-control-sm)); padding: 0 10px;
   border-bottom: 1px solid var(--a-border);
   background: var(--a-bg-2);
-  font-size: 12px;
+  font-size: var(--a-fs-sm);
+  line-height: var(--a-lh-sm);
 }
 .section-head strong { font-weight: 600; }
 .body-type-head { justify-content: space-between; }
 .hint-title { cursor: help; border-bottom: 1px dotted var(--a-text-faint); }
-.app-data-table :deep(.n-data-table-th) { font-size: 11px; color: var(--a-text-faint); }
-.app-data-table :deep(.n-data-table-td) { height: 38px; padding: 0 6px; }
+.app-data-table :deep(.n-data-table-th) { font-size: var(--a-fs-xs); color: var(--a-text-faint); }
+.app-data-table :deep(.n-data-table-td) { height: calc(var(--a-h-input-md) + 2px); padding: 0 6px; line-height: var(--a-lh-sm); }
 .app-data-table :deep(.n-data-table-th),
 .app-data-table :deep(.n-data-table-td) {
   border-right: 0 !important;
   border-bottom: 0 !important;
 }
 .app-data-table :deep(.n-input),
-.app-data-table :deep(.n-input__input-el) { height: 32px; min-height: 32px; }
+.app-data-table :deep(.n-input__input-el) { height: var(--a-h-input-sm); min-height: var(--a-h-input-sm); }
 .description-input { flex: 1 1 0; width: 0; min-width: 0; }
 .description-input .app-input { width: 100%; }
 .row-delete { flex: 0 0 28px; align-self: center; color: var(--a-text-faint); }
 .row-delete.n-button--error-type { color: var(--a-error); }
-.kv { width: 100%; border-collapse: collapse; font-size: 12px; }
+.kv { width: 100%; border-collapse: collapse; font-size: var(--a-fs-sm); }
 .kv th {
   text-align: left; font-weight: 500; color: var(--a-text-faint);
   padding: 4px 6px; border-bottom: 1px solid var(--a-border); position: sticky; top: 0;
@@ -713,54 +714,54 @@ function patchVersion(value: string | number | null) {
 .c { width: 28px; text-align: center; }
 .cell {
   width: 100%; height: var(--a-row); background: transparent; border: none;
-  color: var(--a-text); font: 12px/1 var(--a-font-editor); padding: 0 6px;
+  color: var(--a-text); font: var(--a-fs-editor-sm)/var(--a-lh-editor) var(--a-font-editor); padding: 0 6px;
 }
 .cell:focus { background: var(--a-bg-3); outline: 2px solid var(--a-focus); outline-offset: -2px; }
-.del { width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; background: transparent; border: none; color: var(--a-text-faint); cursor: pointer; }
+.del { width: var(--a-h-control-xs); height: var(--a-h-control-xs); display: inline-flex; align-items: center; justify-content: center; background: transparent; border: none; color: var(--a-text-faint); cursor: pointer; }
 .del:hover { color: var(--a-error); }
 .body-editor { display: flex; flex-direction: column; min-height: 100%; }
 .body-content { display: flex; flex: 1 1 auto; flex-direction: column; gap: 8px; min-height: 0; padding: 8px; }
 .body-parameter-table { min-width: 0; overflow-x: auto; }
 .body-types { display: flex; align-items: center; gap: 14px; flex: 0 0 auto; }
-.body-type { display: inline-flex; align-items: center; gap: 4px; color: var(--a-text-dim); font-size: 12px; cursor: pointer; }
+.body-type { display: inline-flex; align-items: center; gap: 4px; color: var(--a-text-dim); font-size: var(--a-fs-sm); cursor: pointer; }
 .body-type:has(input:checked) { color: var(--a-text); }
 .payload {
   flex: 1 1 auto; min-height: 180px; width: 100%; resize: none;
   box-sizing: border-box; background: var(--a-bg-3); border: 1px solid var(--a-border);
   border-radius: var(--a-radius-md); color: var(--a-text); padding: 10px;
-  font: 12px/1.5 var(--a-font-editor);
+  font: var(--a-fs-editor-sm)/1.5 var(--a-font-editor);
 }
 .payload :deep(.n-input-wrapper) { padding: 0; }
-.payload :deep(.n-input__textarea-el) { min-height: 180px; padding: 10px; font: 12px/1.5 var(--a-font-editor); }
+.payload :deep(.n-input__textarea-el) { min-height: 180px; padding: 10px; font: var(--a-fs-editor-sm)/1.5 var(--a-font-editor); }
 .payload:focus, .content-type input:focus { border-color: var(--a-focus); outline: 2px solid var(--a-focus); outline-offset: -2px; }
-.content-type { display: flex; align-items: center; gap: 8px; color: var(--a-text-dim); font-size: 12px; }
+.content-type { display: flex; align-items: center; gap: 8px; color: var(--a-text-dim); font-size: var(--a-fs-sm); }
 .content-type input {
-  flex: 1; height: 26px; box-sizing: border-box; background: var(--a-bg-3);
+  flex: 1; height: var(--a-h-input-sm); box-sizing: border-box; background: var(--a-bg-3);
   border: 1px solid var(--a-border); border-radius: var(--a-radius-md); color: var(--a-text);
-  padding: 0 7px; font: 12px var(--a-font-editor);
+  padding: 0 7px; font: var(--a-fs-editor-sm)/var(--a-lh-sm) var(--a-font-editor);
 }
 .binary-path { display: flex; align-items: center; gap: 8px; }
 .binary-path :deep(.n-input) { flex: 1 1 auto; min-width: 0; }
 .body-table { border: 1px solid var(--a-border); }
 .select-cell { appearance: auto; }
-.field-stack { display: flex; flex-direction: column; gap: 5px; color: var(--a-text-dim); font-size: 12px; }
+.field-stack { display: flex; flex-direction: column; gap: 5px; color: var(--a-text-dim); font-size: var(--a-fs-sm); }
 .field-stack > input, .field-stack > select, .auth-editor select {
-  min-height: 30px; box-sizing: border-box; background: var(--a-bg-3); border: 1px solid var(--a-border);
-  border-radius: var(--a-radius-md); color: var(--a-text); padding: 4px 8px; font: 12px var(--a-font-editor);
+  min-height: var(--a-h-input-sm); box-sizing: border-box; background: var(--a-bg-3); border: 1px solid var(--a-border);
+  border-radius: var(--a-radius-md); color: var(--a-text); padding: 4px 8px; font: var(--a-fs-editor-sm)/var(--a-lh-sm) var(--a-font-editor);
 }
 .graphql-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 8px; min-height: 220px; }
 .graphql-grid :deep(.n-input) { min-height: 180px; background: var(--a-bg-3); }
-.graphql-grid :deep(.n-input__textarea-el) { min-height: 180px; padding: 8px; font: 12px/1.5 var(--a-font-editor); }
+.graphql-grid :deep(.n-input__textarea-el) { min-height: 180px; padding: 8px; font: var(--a-fs-editor-sm)/1.5 var(--a-font-editor); }
 .graphql-grid label:last-child { grid-column: 1 / -1; }
 .auth-editor { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(240px, 2fr); align-content: start; gap: 12px; padding: 12px; }
 .auth-editor > .auth-kind { margin: -12px -12px 0; padding: 12px; border-bottom: 1px solid var(--a-border); }
 .auth-kind { grid-column: 1 / -1; max-width: 280px; }
 .auth-editor .editor-empty { padding: 0; grid-column: 1 / -1; }
 .request-settings { overflow: hidden; }
-.request-settings .section-head span { margin-left: auto; color: var(--a-text-faint); font-size: 11px; font-weight: 400; }
+.request-settings .section-head span { margin-left: auto; color: var(--a-text-faint); font-size: var(--a-fs-xs); font-weight: 400; }
 .settings-grid { display: grid; grid-template-columns: repeat(2, minmax(180px, 1fr)); gap: 14px; padding: 12px; align-content: start; }
 .settings-grid :deep(.n-input-number), .settings-grid :deep(.n-select) { width: 100%; }
-.todo { padding: 12px; color: var(--a-text-dim); font-size: 12px; }
+.todo { padding: 12px; color: var(--a-text-dim); font-size: var(--a-fs-sm); }
 @media (max-width: 720px) {
   .graphql-grid, .auth-editor, .settings-grid { grid-template-columns: 1fr; }
   .graphql-grid label:last-child, .auth-kind { grid-column: 1; }

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, shallowRef, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { fetchResponseRange } from '@/ipc'
+import { useUiStore } from '@/stores/ui'
 import type { EditorView } from '@codemirror/view'
 
 /**
@@ -18,6 +19,8 @@ import type { EditorView } from '@codemirror/view'
  * 高亮阈值 2MB（02 文档 §4.4）：超过就只保留行号，不做语法高亮。
  * 语法高亮的成本随文本长度线性上升，是大响应体卡顿的主要来源之一。
  */
+
+const ui = useUiStore()
 
 const props = defineProps<{
   responseId: string
@@ -102,16 +105,16 @@ async function mountEditor() {
       ...(wrap.value ? [EditorView.lineWrapping] : []),
       EditorView.editable.of(false),
       EditorView.theme({
-        '&': { height: '100%', fontSize: 'var(--a-font-result)' },
+        '&': { height: '100%', fontSize: 'var(--a-fs-result)' },
         '.cm-scroller': { fontFamily: 'var(--a-font-mono)', lineHeight: 'var(--a-lh-result)' },
         '.cm-gutters': { background: 'var(--a-bg-2)', border: 'none', color: 'var(--a-text-faint)' },
         '.cm-activeLine': { background: 'var(--a-hover)' },
         '.cm-panels': { backgroundColor: 'var(--a-bg-2)', color: 'var(--a-text)', borderBottom: '1px solid var(--a-border)' },
-        '.cm-panels input, .cm-panels button': { fontFamily: 'var(--a-font-ui)', fontSize: '12px' },
-        '.cm-search label': { display: 'inline-flex', alignItems: 'center', gap: '4px', color: 'var(--a-text-dim)', lineHeight: '24px' },
-        '.cm-textfield': { height: '24px', padding: '0 6px', backgroundColor: 'var(--a-bg-3)', color: 'var(--a-text)', border: '1px solid var(--a-border)', borderRadius: 'var(--a-radius-sm)', outline: 'none' },
+        '.cm-panels input, .cm-panels button': { fontFamily: 'var(--a-font-ui)', fontSize: 'var(--a-fs-sm)', lineHeight: 'var(--a-lh-sm)' },
+        '.cm-search label': { display: 'inline-flex', alignItems: 'center', gap: '4px', minHeight: 'var(--a-h-control-xs)', color: 'var(--a-text-dim)', lineHeight: 'var(--a-lh-xs)' },
+        '.cm-textfield': { height: 'var(--a-h-control-xs)', padding: '0 6px', backgroundColor: 'var(--a-bg-3)', color: 'var(--a-text)', border: '1px solid var(--a-border)', borderRadius: 'var(--a-radius-sm)', outline: 'none' },
         '.cm-textfield:focus': { borderColor: 'var(--a-focus)', boxShadow: 'var(--a-focus-halo)' },
-        '.cm-button': { appearance: 'none', height: '24px', padding: '0 8px', backgroundColor: 'var(--a-bg-3)', backgroundImage: 'none', color: 'var(--a-text-soft)', border: '1px solid var(--a-border)', borderRadius: 'var(--a-radius-sm)', boxShadow: 'none' },
+        '.cm-button': { appearance: 'none', height: 'var(--a-h-control-xs)', padding: '0 8px', backgroundColor: 'var(--a-bg-3)', backgroundImage: 'none', color: 'var(--a-text-soft)', border: '1px solid var(--a-border)', borderRadius: 'var(--a-radius-sm)', boxShadow: 'none', lineHeight: 'var(--a-lh-xs)' },
         '.cm-button:hover': { backgroundColor: 'var(--a-hover)', color: 'var(--a-text)' },
         '.cm-search input[type="checkbox"]': { width: '14px', height: '14px', margin: '0', accentColor: 'var(--a-primary)', verticalAlign: 'middle' },
         '.cm-searchMatch': { backgroundColor: 'var(--a-selected)', outline: '1px solid var(--a-primary)' },
@@ -262,6 +265,10 @@ watch(() => [props.responseId, props.highlight, props.formatJson], () => {
   mode.value = props.formatJson ? 'pretty' : 'raw'
   refresh()
 })
+// CSS 变量会即时改变字形，但 CodeMirror 的视口高度缓存需要显式重测。
+watch(() => ui.resultFontSize, () => {
+  requestAnimationFrame(() => view.value?.requestMeasure())
+})
 
 function canSearch() {
   return !lightweight.value && view.value !== null
@@ -311,18 +318,18 @@ defineExpose({ metrics, canSearch, openSearch: searchText, closeSearch })
 <style scoped>
 .cm-wrap { display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; }
 .cm-wrap:focus-visible { outline: 1px solid var(--a-focus); outline-offset: -1px; }
-.tools { flex: 0 0 auto; display: flex; align-items: center; gap: 2px; min-height: 30px; padding: 3px 8px; border-bottom: 1px solid var(--a-border); background: var(--a-bg-2); }
-.tools button { height: 24px; padding: 0 7px; border: 0; border-radius: var(--a-radius-sm); background: transparent; color: var(--a-text-dim); font: 11px var(--a-font-ui); cursor: pointer; }
+.tools { flex: 0 0 auto; display: flex; align-items: center; gap: 2px; min-height: var(--a-h-control-sm); padding: 3px 8px; border-bottom: 1px solid var(--a-border); background: var(--a-bg-2); }
+.tools button { height: var(--a-h-control-xs); padding: 0 7px; border: 0; border-radius: var(--a-radius-sm); background: transparent; color: var(--a-text-dim); font: var(--a-fs-xs)/var(--a-lh-xs) var(--a-font-ui); cursor: pointer; }
 .tools button:hover { background: var(--a-hover); color: var(--a-text); }
 .tools button.on { background: var(--a-selected); color: var(--a-primary); }
 .cm-host { flex: 1 1 auto; min-height: 0; overflow: hidden; }
-.state { padding: 12px; font-size: 12px; color: var(--a-text-dim); }
+.state { padding: 12px; font-size: var(--a-fs-sm); color: var(--a-text-dim); }
 .state.err { color: var(--a-error); }
 .dim { color: var(--a-text-faint); }
 .foot {
   flex: 0 0 auto; padding: 3px 8px;
   border-top: 1px solid var(--a-border);
   background: var(--a-bg-2);
-  font: 11px/16px var(--a-font-mono); color: var(--a-text-faint);
+  font: var(--a-fs-xs)/var(--a-lh-xs) var(--a-font-mono); color: var(--a-text-faint);
 }
 </style>

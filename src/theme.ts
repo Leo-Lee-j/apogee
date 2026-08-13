@@ -55,12 +55,12 @@ const commonDark = {
   borderRadius: '12px',
   borderRadiusSmall: '8px',
 
-  // 固定 px，不用 clamp —— 理由见 tokens.css 文件头。
+  // 字体与字号统一从 tokens.css 读取，设置变更后无需重建主题对象。
   fontFamily: 'var(--a-font-ui)',
   fontFamilyMono: 'var(--a-font-mono)',
   fontSize: 'var(--a-fs-base)',
   fontSizeSmall: 'var(--a-fs-sm)',
-  lineHeight: '20px',
+  lineHeight: 'var(--a-lh)',
 } as const
 
 /** 与 tokens.css `:root[data-theme='light']` 对齐。 */
@@ -96,23 +96,26 @@ const commonLight = {
 /** 组件级只覆写必要的部分。改得越多，样式计算越慢。 */
 const components = {
   Input: {
-    heightSmall: '30px',
+    heightSmall: 'var(--a-h-input-sm)',
     paddingSmall: '0 10px',
-    fontSizeSmall: '12px',
-    lineHeight: '20px',
+    fontSizeSmall: 'var(--a-fs-sm)',
+    lineHeight: 'var(--a-lh)',
     borderRadius: '12px',
-    heightMedium: '36px',
+    heightMedium: 'var(--a-h-input-md)',
     paddingMedium: '0 10px',
-    fontSizeMedium: '13px',
+    fontSizeMedium: 'var(--a-fs-base)',
+    heightLarge: 'var(--a-h-input-lg)',
+    paddingLarge: '0 12px',
+    fontSizeLarge: 'var(--a-fs-md)',
   },
   Button: {
-    heightSmall: '32px',
+    heightSmall: 'var(--a-h-control-sm)',
     paddingSmall: '0 12px',
-    fontSizeSmall: '12px',
+    fontSizeSmall: 'var(--a-fs-sm)',
     borderRadiusSmall: '12px',
-    heightMedium: '36px',
+    heightMedium: 'var(--a-h-control)',
     paddingMedium: '0 14px',
-    fontSizeMedium: '13px',
+    fontSizeMedium: 'var(--a-fs-base)',
     borderRadiusMedium: '12px',
     textColorPrimary: '#0c0e12',
     textColorHoverPrimary: '#0c0e12',
@@ -127,34 +130,34 @@ const components = {
   Card: {
     borderRadius: '12px',
     paddingSmall: '12px',
-    fontSizeSmall: '12px',
-    titleFontSizeSmall: '13px',
+    fontSizeSmall: 'var(--a-fs-sm)',
+    titleFontSizeSmall: 'var(--a-fs-base)',
   },
   Form: {
-    lineHeight: '20px',
-    labelFontSizeLeftSmall: '12px',
-    labelFontSizeTopSmall: '12px',
+    lineHeight: 'var(--a-lh)',
+    labelFontSizeLeftSmall: 'var(--a-fs-sm)',
+    labelFontSizeTopSmall: 'var(--a-fs-sm)',
   },
   Alert: {
-    fontSize: '12px',
-    lineHeight: '20px',
+    fontSize: 'var(--a-fs-sm)',
+    lineHeight: 'var(--a-lh)',
     borderRadius: '6px',
     padding: '8px 10px',
   },
   Tabs: {
-    tabFontSizeSmall: '12px',
+    tabFontSizeSmall: 'var(--a-fs-sm)',
     tabGapSmallLine: '2px',
     tabPaddingSmallLine: '0 8px',
   },
   Select: {
     peers: {
       InternalSelection: {
-        fontSizeSmall: '12px',
-        heightSmall: '30px',
+        fontSizeSmall: 'var(--a-fs-sm)',
+        heightSmall: 'var(--a-h-input-sm)',
         borderRadius: '12px',
         paddingSingle: '0 8px',
-        fontSizeMedium: '13px',
-        heightMedium: '36px',
+        fontSizeMedium: 'var(--a-fs-base)',
+        heightMedium: 'var(--a-h-input-md)',
       },
     },
   },

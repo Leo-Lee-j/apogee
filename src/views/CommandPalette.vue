@@ -91,11 +91,10 @@ function focusInput() {
 .palette-panel :deep(.n-card) { overflow: hidden; }
 .palette-panel :deep(.n-card__content) { padding: 0; }
 .palette-input { width: 100%; }
-.palette-input :deep(.n-input-wrapper) { padding: 7px 12px; }
-.palette-input :deep(.n-input__input-el) { height: 32px; }
+.palette-input :deep(.n-input-wrapper) { padding: 0 12px; }
 .commands { max-height: 360px; overflow: auto; padding: 5px; }
-.commands button { width: 100%; height: 36px; display: flex; align-items: center; justify-content: space-between; padding: 0 9px; background: transparent; border: 0; border-radius: var(--a-radius-sm); color: var(--a-text); font: var(--a-fs-sm) var(--a-font-ui); cursor: pointer; }
+.commands button { width: 100%; min-height: var(--a-h-control); display: flex; align-items: center; justify-content: space-between; padding: 0 9px; background: transparent; border: 0; border-radius: var(--a-radius-sm); color: var(--a-text); font: var(--a-fs-sm)/var(--a-lh-sm) var(--a-font-ui); cursor: pointer; }
 .commands button.selected { background: var(--a-selected); color: var(--a-primary); }
-.commands kbd { color: var(--a-text-faint); font: var(--a-fs-xs) var(--a-font-mono); }
+.commands kbd { color: var(--a-text-faint); font: var(--a-fs-xs)/var(--a-lh-xs) var(--a-font-mono); }
 .commands p { padding: 18px; text-align: center; color: var(--a-text-faint); }
 </style>

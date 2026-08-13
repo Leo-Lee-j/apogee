@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { ROW_H, methodColor, visibleNodes, type FlatNode } from '@/components/sidebar/tree'
+import { useUiStore } from '@/stores/ui'
+import { sidebarRowHeightForUiSize, methodColor, visibleNodes, type FlatNode } from '@/components/sidebar/tree'
 
 /**
  * Spike S3 的**对照组**：不做虚拟滚动，`v-for` 把所有可见行一次性铺进 DOM。
@@ -14,6 +15,8 @@ import { ROW_H, methodColor, visibleNodes, type FlatNode } from '@/components/si
  */
 
 const props = defineProps<{ nodes: FlatNode[] }>()
+const ui = useUiStore()
+const rowHeight = computed(() => sidebarRowHeightForUiSize(ui.uiFontSize))
 
 const scroller = ref<HTMLElement | null>(null)
 const visible = computed(() => visibleNodes(props.nodes))
@@ -25,9 +28,9 @@ defineExpose({
     visible: visible.value.length,
     // 全量渲染下「实渲染」恒等于「可见」—— 这正是它的代价所在
     rendered: visible.value.length,
-    rowHeight: ROW_H,
+    rowHeight: rowHeight.value,
     overscan: 0,
-    scrollHeight: visible.value.length * ROW_H,
+    scrollHeight: visible.value.length * rowHeight.value,
   }),
   /**
    * 与 Sidebar 同名同义，供 S3 测单步滚动成本。
@@ -72,9 +75,9 @@ defineExpose({
 .scroller { flex: 1 1 auto; overflow-y: auto; min-height: 0; }
 /* 与 Sidebar 的行样式一致，只是靠文档流堆叠而不是 absolute + translateY */
 .row {
-  height: 22px; display: flex; align-items: center; gap: 5px;
-  /* transform only positions the virtual row; the row owns vertical alignment. */
-  font: 12px/normal var(--a-font-ui); color: var(--a-text-dim);
+  height: var(--a-h-sidebar-row); display: flex; align-items: center; gap: 5px;
+  /* 与 Sidebar 的行高令牌相同，确保对照组只差“是否虚拟化”。 */
+  font: var(--a-fs-sm)/var(--a-lh-sm) var(--a-font-ui); color: var(--a-text-dim);
   white-space: nowrap; cursor: pointer;
 }
 .row.folder { color: var(--a-text); }
@@ -92,7 +95,7 @@ defineExpose({
   height: auto;
   line-height: normal;
 }
-.m { font: 600 10px/normal var(--a-font-mono); width: 42px; }
+.m { font: 600 var(--a-fs-2xs)/var(--a-lh-xs) var(--a-font-mono); width: 42px; }
 .name {
   flex: 1 1 auto;
   min-width: 0;

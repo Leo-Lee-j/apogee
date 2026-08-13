@@ -57,17 +57,17 @@ async function submit() {
 .dialog-backdrop { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; background: rgba(7, 10, 16, .48); }
 .dialog { width: min(440px, calc(100vw - 32px)); padding: 20px; border: 1px solid var(--a-border-strong); border-radius: var(--a-radius-lg); background: var(--a-bg-2); box-shadow: var(--a-shadow-lg); }
 header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
-h2 { margin: 0; font-size: 15px; }
-header button { width: 28px; height: 28px; border: 0; background: transparent; color: var(--a-text-dim); font: 20px/1 var(--a-font-ui); cursor: pointer; }
+h2 { margin: 0; font-size: var(--a-fs-lg); }
+header button { width: max(28px, var(--a-h-control-xs)); height: max(28px, var(--a-h-control-xs)); border: 0; background: transparent; color: var(--a-text-dim); font: 20px/1 var(--a-font-ui); cursor: pointer; }
 label { display: block; margin-top: 14px; }
-label > span { display: block; margin-bottom: 6px; color: var(--a-text-dim); font-size: 12px; }
-input { width: 100%; height: 34px; padding: 0 10px; border: 1px solid var(--a-border-strong); border-radius: var(--a-radius-md); outline: 0; background: var(--a-bg-3); color: var(--a-text); font: inherit; }
+label > span { display: block; margin-bottom: 6px; color: var(--a-text-dim); font-size: var(--a-fs-sm); }
+input { width: 100%; height: var(--a-h-input-md); padding: 0 10px; border: 1px solid var(--a-border-strong); border-radius: var(--a-radius-md); outline: 0; background: var(--a-bg-3); color: var(--a-text); font: inherit; }
 input:focus { border-color: var(--a-focus); box-shadow: var(--a-focus-halo); }
 .path-picker { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
-button { height: 32px; padding: 0 14px; border: 1px solid var(--a-border-strong); border-radius: var(--a-radius-md); background: var(--a-bg-3); color: var(--a-text); font: inherit; cursor: pointer; }
+button { height: var(--a-h-control-sm); padding: 0 14px; border: 1px solid var(--a-border-strong); border-radius: var(--a-radius-md); background: var(--a-bg-3); color: var(--a-text); font: inherit; cursor: pointer; }
 button:hover { background: var(--a-hover); }
 button.primary { border-color: var(--a-primary); background: var(--a-primary); color: var(--a-on-primary); }
 button:disabled { cursor: default; opacity: .5; }
-.error { margin: 12px 0 0; color: var(--a-error); font-size: 12px; }
+.error { margin: 12px 0 0; color: var(--a-error); font-size: var(--a-fs-sm); }
 footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 22px; }
 </style>

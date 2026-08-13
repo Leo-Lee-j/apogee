@@ -110,9 +110,9 @@ onMounted(() => {
 .history-card { width: min(860px, calc(100vw - 32px)); }
 .toolbar { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-bottom: 8px; }
 .history-list { max-height: min(62vh, 560px); overflow: auto; border-top: 1px solid var(--a-border); }
-.history-row { width: 100%; display: grid; grid-template-columns: 64px minmax(180px, 1fr) 52px 130px 142px; align-items: center; gap: 8px; min-height: 38px; padding: 5px 8px; background: transparent; border: 0; border-bottom: 1px solid var(--a-border); color: var(--a-text); text-align: left; cursor: pointer; font: var(--a-fs-sm) var(--a-font-ui); }
+.history-row { width: 100%; display: grid; grid-template-columns: 64px minmax(180px, 1fr) 52px 130px 142px; align-items: center; gap: 8px; min-height: var(--a-h-list-row); padding: 5px 8px; background: transparent; border: 0; border-bottom: 1px solid var(--a-border); color: var(--a-text); text-align: left; cursor: pointer; font: var(--a-fs-sm)/var(--a-lh-sm) var(--a-font-ui); }
 .history-row:hover { background: var(--a-hover); }
-.method { color: var(--a-primary); font: var(--a-fw-semibold) var(--a-fs-xs) var(--a-font-mono); }
+.method { color: var(--a-primary); font: var(--a-fw-semibold) var(--a-fs-xs)/var(--a-lh-xs) var(--a-font-mono); }
 .url { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--a-font-mono); }
 .status.bad { color: var(--a-error); }
 .meta, time { color: var(--a-text-faint); white-space: nowrap; }

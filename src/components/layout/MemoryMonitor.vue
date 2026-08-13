@@ -96,7 +96,7 @@ onBeforeUnmount(stopSampling)
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  height: 22px;
+  height: var(--a-h-control-xs);
   padding: 0 5px;
   border: 0;
   border-radius: var(--a-radius-sm);
@@ -121,7 +121,7 @@ onBeforeUnmount(stopSampling)
   background: var(--a-bg-2);
   box-shadow: var(--a-shadow-md);
   color: var(--a-text);
-  font-size: 12px;
+  font-size: var(--a-fs-sm);
   opacity: 0;
   pointer-events: none;
   transform: translateY(3px);
@@ -130,10 +130,10 @@ onBeforeUnmount(stopSampling)
 .memory-monitor-wrap:hover .memory-popover,
 .memory-monitor-wrap:focus-within .memory-popover { opacity: 1; pointer-events: auto; transform: translateY(0); }
 .memory-heading, .memory-part { display: flex; align-items: baseline; justify-content: space-between; gap: 20px; }
-.memory-heading { font-size: 13px; font-weight: var(--a-fw-semibold); }
+.memory-heading { font-size: var(--a-fs-base); font-weight: var(--a-fw-semibold); }
 .memory-heading strong, .memory-part strong { font-family: var(--a-font-mono); font-variant-numeric: tabular-nums; }
-.memory-caption { margin: 5px 0 8px; color: var(--a-text-faint); line-height: 18px; }
-.memory-mode { margin: -2px 0 8px; color: var(--a-ok); font-size: 12px; line-height: 18px; }
+.memory-caption { margin: 5px 0 8px; color: var(--a-text-faint); line-height: var(--a-lh-sm); }
+.memory-mode { margin: -2px 0 8px; color: var(--a-ok); font-size: var(--a-fs-sm); line-height: var(--a-lh-sm); }
 .memory-parts { display: grid; gap: 5px; padding-top: 8px; border-top: 1px solid var(--a-border); }
 .memory-part { color: var(--a-text-dim); }
 .memory-part strong { color: var(--a-text); font-weight: var(--a-fw-medium); }

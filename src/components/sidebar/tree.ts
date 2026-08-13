@@ -11,8 +11,20 @@
  *   - 展开/折叠只改 `visible` 计算，不重建数组
  */
 
-/** 行高（px）。虚拟滚动靠定高换取 O(1) 的索引换算，不做动态测高。 */
+/** 默认行高（px）。虚拟滚动靠定高换取 O(1) 的索引换算，不做动态测高。 */
 export const ROW_H = 28
+
+/**
+ * 与 tokens.css 的 --a-h-sidebar-row 使用完全相同的公式。
+ *
+ * CSS 负责每行的视觉高度，虚拟列表必须用同一高度计算 spacer、切片和位移；
+ * 否则调大“应用界面字号”后会出现滚动空洞、重叠或定位偏移。
+ */
+export function sidebarRowHeightForUiSize(uiSize: number) {
+  const boundedSize = Math.min(24, Math.max(11, Math.round(uiSize)))
+  const smallLineHeight = Math.max(16, boundedSize + 5)
+  return Math.max(ROW_H, smallLineHeight + 8)
+}
 
 /** 可视区上下各多渲染的行数。缓冲越大越不容易露白，代价是每帧多算几行。 */
 export const OVERSCAN = 10

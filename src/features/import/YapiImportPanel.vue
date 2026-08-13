@@ -198,8 +198,8 @@ async function applyImport() {
 h3 { margin: 0; color: var(--a-text); font: var(--a-fw-semibold) var(--a-fs-base)/1.4 var(--a-font-ui); }
 .help, .preview-head p { margin: 3px 0 0; color: var(--a-text-dim); font: var(--a-fs-sm)/1.5 var(--a-font-ui); }
 .fields, .options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
-label { display: grid; gap: 5px; color: var(--a-text-dim); font: var(--a-fw-medium) var(--a-fs-sm)/1.4 var(--a-font-ui); }
-input[type='url'], input[type='password'], input:not([type]) { width: 100%; box-sizing: border-box; padding: 8px 9px; border: 1px solid var(--a-border); border-radius: var(--a-radius-sm); background: var(--a-bg-2); color: var(--a-text); font: var(--a-fs-sm)/1.4 var(--a-font-ui); }
+label { display: grid; gap: 5px; color: var(--a-text-dim); font: var(--a-fw-medium) var(--a-fs-sm)/var(--a-lh-sm) var(--a-font-ui); }
+input[type='url'], input[type='password'], input:not([type]) { width: 100%; min-height: var(--a-h-input-md); box-sizing: border-box; padding: 0 9px; border: 1px solid var(--a-border); border-radius: var(--a-radius-sm); background: var(--a-bg-2); color: var(--a-text); font: var(--a-fs-sm)/var(--a-lh-sm) var(--a-font-ui); }
 input:focus { outline: 2px solid var(--a-focus); outline-offset: -1px; }
 input:disabled { opacity: .65; cursor: not-allowed; }
 .preview-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
@@ -214,7 +214,7 @@ input:disabled { opacity: .65; cursor: not-allowed; }
 .category-list div span:last-child { flex: 0 0 auto; color: var(--a-text-faint); }
 .category-list p { margin: 0; padding: 10px; color: var(--a-text-faint); font-size: var(--a-fs-sm); }
 ul { margin: 5px 0 0; padding-left: 18px; }
-.check-row { grid-template-columns: auto 1fr; align-items: center; align-self: end; min-height: 34px; }
+.check-row { grid-template-columns: auto 1fr; align-items: center; align-self: end; min-height: calc(var(--a-h-control-sm) + 2px); }
 .check-row input { margin: 0; accent-color: var(--a-primary); }
 .actions { flex: 0 0 auto; display: flex; justify-content: space-between; gap: 8px; }
 @media (max-width: 720px) { .fields, .options { grid-template-columns: minmax(0, 1fr); } }

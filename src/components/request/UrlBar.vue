@@ -282,11 +282,12 @@ defineExpose({
 
 <style scoped>
 .urlbar {
-  --url-control-height: 36px;
-  --url-inner-height: 30px;
+  --url-control-height: var(--a-h-control);
+  /* request-editor 为 border-box：上下边框 2px + 上下 padding 6px。 */
+  --url-inner-height: calc(var(--url-control-height) - 8px);
   --url-radius: 12px;
   --url-inner-radius: 8px;
-  height: 52px;
+  height: var(--a-h-urlbar);
   flex: 0 0 auto;
   position: relative;
   display: flex;
@@ -307,7 +308,7 @@ defineExpose({
   align-items: center;
   min-width: 0;
   height: 100%;
-  overflow: hidden;
+  overflow: visible;
   border: 1px solid var(--a-border);
   border-radius: var(--url-radius);
   background: var(--a-bg-2);
@@ -423,18 +424,46 @@ defineExpose({
   color: var(--a-text-soft);
   font-family: var(--a-font-mono);
   font-size: var(--a-fs-xs);
+  line-height: var(--a-lh-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.url { flex: 1 1 auto; min-width: 0; height: 100%; background: transparent; }
-.url :deep(.n-input-wrapper) { height: 100%; align-items: center; }
-.url :deep(.n-input__input) { height: 100%; display: flex; align-items: center; }
-.url :deep(.n-input__input-el) {
-  height: 100%;
+.request-editor :deep(.url) {
+  box-sizing: border-box;
+  flex: 1 1 0;
+  align-self: center;
+  width: 0;
+  min-width: 0;
+  height: var(--url-inner-height) !important;
+  min-height: 0 !important;
+  max-height: var(--url-inner-height);
+  background: transparent;
+}
+.request-editor :deep(.url .n-input-wrapper) {
+  box-sizing: border-box;
+  height: var(--url-inner-height) !important;
+  min-height: 0 !important;
+  max-height: var(--url-inner-height);
+  align-items: center;
   padding-block: 0;
-  line-height: 20px;
+}
+.request-editor :deep(.url .n-input__input) {
+  box-sizing: border-box;
+  height: var(--url-inner-height) !important;
+  min-height: 0 !important;
+  max-height: var(--url-inner-height);
+  display: flex;
+  align-items: center;
+}
+.request-editor :deep(.url .n-input__input-el) {
+  box-sizing: border-box;
+  height: 100% !important;
+  min-height: 0 !important;
+  max-height: 100%;
+  padding-block: 0;
+  line-height: var(--a-lh-editor);
   font-family: var(--a-font-editor);
-  font-size: var(--a-fs-base);
+  font-size: var(--a-fs-editor-base);
 }
 .send, .save {
   min-width: 54px;

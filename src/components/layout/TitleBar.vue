@@ -50,7 +50,7 @@ function renderWorkspaceLabel(option: DropdownOption) {
         alignItems: 'center',
         gap: '8px',
         width: '260px',
-        height: '24px',
+        height: 'var(--a-h-control-xs)',
         color: 'var(--a-primary)',
       },
     }, [
@@ -67,7 +67,7 @@ function renderWorkspaceLabel(option: DropdownOption) {
       columnGap: '16px',
       width: 'min(420px, calc(100vw - 48px))',
       minWidth: '260px',
-      height: '24px',
+      height: 'var(--a-h-control-xs)',
       overflow: 'hidden',
     },
   }, [
@@ -75,8 +75,8 @@ function renderWorkspaceLabel(option: DropdownOption) {
       style: {
         overflow: 'hidden',
         color: 'var(--a-text)',
-        fontSize: '13px',
-        lineHeight: '24px',
+        fontSize: 'var(--a-fs-base)',
+        lineHeight: 'var(--a-lh)',
         textOverflow: 'ellipsis',
         whiteSpace: 'nowrap',
       },
@@ -87,8 +87,8 @@ function renderWorkspaceLabel(option: DropdownOption) {
         display: 'block',
         overflow: 'hidden',
         color: 'var(--a-text-dim)',
-        fontSize: '11px',
-        lineHeight: '24px',
+        fontSize: 'var(--a-fs-xs)',
+        lineHeight: 'var(--a-lh-xs)',
         textAlign: 'right',
         textOverflow: 'ellipsis',
         whiteSpace: 'nowrap',
@@ -228,7 +228,7 @@ onBeforeUnmount(() => stopWatching?.())
   border: 1px solid transparent;
   color: var(--a-text-dim);
   font: inherit;
-  height: 32px;
+  height: max(32px, var(--a-h-control-sm));
   border-radius: var(--a-radius-md);
   cursor: pointer;
   transition: background var(--a-dur) var(--a-ease);
@@ -243,7 +243,7 @@ onBeforeUnmount(() => stopWatching?.())
   font-size: var(--a-fs-sm);
 }
 .palette kbd {
-  font: var(--a-fs-xs) / 1 var(--a-font-mono);
+  font: var(--a-fs-xs) / var(--a-lh-xs) var(--a-font-mono);
   background: var(--a-bg-1); border: 1px solid var(--a-border);
   border-radius: var(--a-radius-sm); padding: 2px 4px;
 }

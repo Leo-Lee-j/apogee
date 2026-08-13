@@ -172,26 +172,26 @@ function statusText(status: string) {
 .close-mark { top: 17px; transform: rotate(45deg); }
 .close-mark::after { content: ''; position: absolute; inset: 0; transform: rotate(90deg); background: currentColor; }
 .launcher-content { width: min(700px, calc(100% - 40px)); margin: 0 auto; padding-top: max(52px, 8vh); }
-.brand { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 32px; color: var(--a-text); font-size: 23px; font-weight: 600; }
+.brand { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 32px; color: var(--a-text); font-size: var(--a-fs-3xl); font-weight: 600; }
 .brand img { display: block; border-radius: var(--a-radius-md); box-shadow: var(--a-shadow-sm); }
 .workspace-list { overflow: hidden; border: 1px solid var(--a-border); border-radius: var(--a-radius-md); background: var(--a-bg-2); box-shadow: var(--a-shadow-sm); }
-.workspace-row { width: 100%; min-height: 58px; display: flex; align-items: center; gap: 10px; padding: 9px 14px; border: 0; border-bottom: 1px solid var(--a-border); background: transparent; color: var(--a-text); font: inherit; text-align: left; cursor: pointer; transition: background 150ms ease, color 150ms ease; }
+.workspace-row { width: 100%; min-height: max(58px, calc(var(--a-lh) + var(--a-lh-sm) + 18px)); display: flex; align-items: center; gap: 10px; padding: 9px 14px; border: 0; border-bottom: 1px solid var(--a-border); background: transparent; color: var(--a-text); font: inherit; text-align: left; cursor: pointer; transition: background 150ms ease, color 150ms ease; }
 .workspace-row[aria-disabled='true'] { cursor: default; }
 .workspace-row:last-child { border-bottom: 0; }
 .workspace-row:hover, .workspace-row.focused { background: var(--a-hover); }
 .workspace-row:focus-visible { outline: 1px solid var(--a-focus); outline-offset: -1px; }
-.workspace-row.command { min-height: 48px; color: var(--a-text-soft); }
+.workspace-row.command { min-height: max(48px, calc(var(--a-lh) + 18px)); color: var(--a-text-soft); }
 .workspace-row.command :deep(.n-icon) { color: var(--a-primary); }
 .workspace-row.unavailable { color: var(--a-text-dim); }
 .workspace-copy { min-width: 0; display: flex; flex: 1; flex-direction: column; gap: 2px; }
-.workspace-copy strong { overflow: hidden; font-size: 14px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-.path { overflow: hidden; color: var(--a-text-dim); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.status { color: var(--a-error); font-size: 12px; }
+.workspace-copy strong { overflow: hidden; font-size: var(--a-fs-md); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.path { overflow: hidden; color: var(--a-text-dim); font-size: var(--a-fs-sm); text-overflow: ellipsis; white-space: nowrap; }
+.status { color: var(--a-error); font-size: var(--a-fs-sm); }
 .row-action { flex: 0 0 28px; width: 28px; height: 28px; display: grid; place-items: center; border: 0; border-radius: var(--a-radius-sm); background: transparent; color: var(--a-text-dim); cursor: pointer; opacity: 0; }
 .workspace-row:hover .row-action, .workspace-row:focus-within .row-action { opacity: 1; }
 .row-action:hover { background: var(--a-hover-strong); color: var(--a-text); }
 .spinner { width: 14px; height: 14px; border: 2px solid var(--a-border-strong); border-top-color: var(--a-primary); border-radius: 50%; animation: spin .7s linear infinite; }
-.launcher-error { margin: 12px 0 0; color: var(--a-error); font-size: 12px; text-align: center; }
+.launcher-error { margin: 12px 0 0; color: var(--a-error); font-size: var(--a-fs-sm); text-align: center; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (max-height: 620px) { .launcher-content { padding-top: 34px; } }
 </style>

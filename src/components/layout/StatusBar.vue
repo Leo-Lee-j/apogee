@@ -71,7 +71,7 @@ const proxyLabel = computed(() => {
   padding: 0 10px;
   background: var(--a-bg-2);
   border-top: 1px solid var(--a-border);
-  font-size: 12px; color: var(--a-text-dim);
+  font-size: var(--a-fs-sm); line-height: var(--a-lh-sm); color: var(--a-text-dim);
 }
 .ok { color: var(--a-ok); }
 /* 分隔符是纯装饰，用 ghost 档；它不承载信息，按 WCAG 装饰元素豁免对比度。 */
@@ -79,8 +79,8 @@ const proxyLabel = computed(() => {
 .dim { color: var(--a-text-faint); }
 .spacer { flex: 1 1 auto; }
 .layout-toggle {
-  width: 26px;
-  height: 22px;
+  width: max(26px, var(--a-h-control-xs));
+  height: var(--a-h-control-xs);
   display: inline-flex;
   align-items: center;
   justify-content: center;

@@ -114,7 +114,7 @@ const kindColor: Record<string, string> = {
 
 <style scoped>
 .tree { flex: 1 1 auto; min-height: 0; overflow: auto; }
-.rows { font: var(--a-font-result)/var(--a-lh-result) var(--a-font-mono); }
+.rows { font: var(--a-fs-result)/var(--a-lh-result) var(--a-font-mono); }
 .row { display: flex; gap: 4px; height: var(--a-lh-result); align-items: center; cursor: default; white-space: nowrap; }
 .row:hover { background: var(--a-hover); }
 .caret { width: 12px; color: var(--a-text-faint); }
@@ -123,8 +123,8 @@ const kindColor: Record<string, string> = {
 .colon { color: var(--a-text-faint); }
 .count { color: var(--a-text-faint); }
 .val { overflow: hidden; text-overflow: ellipsis; }
-.state { padding: 12px; font-size: 12px; color: var(--a-text-dim); }
+.state { padding: 12px; font-size: var(--a-fs-sm); color: var(--a-text-dim); }
 .state.err { color: var(--a-error); }
 .dim { color: var(--a-text-faint); }
-.note { padding: 8px; font: 11px/16px var(--a-font-ui); color: var(--a-text-faint); }
+.note { padding: 8px; font: var(--a-fs-xs)/var(--a-lh-xs) var(--a-font-ui); color: var(--a-text-faint); }
 </style>

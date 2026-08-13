@@ -239,7 +239,7 @@ defineExpose({
   align-items: center;
   gap: 10px;
   width: 100%;
-  min-height: 32px;
+  min-height: var(--a-h-control-sm);
   padding: 4px 6px;
   border: 0;
   border-radius: var(--a-radius-sm);
@@ -256,7 +256,7 @@ defineExpose({
   border-radius: var(--a-radius-sm);
   background: color-mix(in srgb, var(--a-primary) 8%, var(--a-bg-3));
   color: var(--a-primary-hover);
-  font: 12px/18px var(--a-font-mono);
+  font: var(--a-fs-editor-sm)/var(--a-lh-sm) var(--a-font-editor);
   font-weight: var(--a-fw-medium);
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -264,7 +264,7 @@ defineExpose({
 .variable-value {
   overflow: hidden;
   color: var(--a-text-faint);
-  font: 11px var(--a-font-mono);
+  font: var(--a-fs-editor-xs)/var(--a-lh-xs) var(--a-font-editor);
   text-overflow: ellipsis;
   white-space: nowrap;
 }

@@ -527,9 +527,9 @@ function onKeydown(e: KeyboardEvent) {
 .spike-head { flex: 0 0 auto; display: flex; gap: 6px; padding: 6px 8px; border-bottom: 1px solid var(--a-border); }
 .spike-head button:disabled { opacity: 0.5; cursor: default; }
 .spike-head button {
-  height: 24px; padding: 0 10px; background: var(--a-bg-3);
+  height: var(--a-h-control-xs); padding: 0 10px; background: var(--a-bg-3);
   border: 1px solid var(--a-border); border-radius: var(--a-radius-md); color: var(--a-text);
-  font: inherit; cursor: pointer;
+  font: var(--a-fs-sm)/var(--a-lh-sm) var(--a-font-ui); cursor: pointer;
 }
 .spike-head button:hover { background: var(--a-hover); }
 </style>

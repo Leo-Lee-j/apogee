@@ -30,12 +30,14 @@
       body {
         background: #0c0e12;
         color: #f1f5f9;
-        font: 13px/20px 'Inter', 'Segoe UI', -apple-system, 'PingFang SC', 'Microsoft YaHei UI', sans-serif;
+        font-family: var(--a-font-ui, 'Inter', 'Segoe UI', -apple-system, 'PingFang SC', 'Microsoft YaHei UI', sans-serif);
+        font-size: var(--a-fs-base, 13px);
+        line-height: var(--a-lh, 20px);
         overflow: hidden;
       }
       #boot {
         display: flex; align-items: center; justify-content: center;
-        height: 100%; color: #94a3b8; font-size: 12px;
+        height: 100%; color: #94a3b8; font-size: var(--a-fs-sm, 12px); line-height: var(--a-lh-sm, 18px);
       }
     </style>
   </head>
