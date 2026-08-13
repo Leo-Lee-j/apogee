@@ -616,7 +616,7 @@ function patchVersion(value: string | number | null) {
 </template>
 
 <style scoped>
-.req { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.req { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; overflow: hidden; }
 .tabs {
   height: var(--a-h-toolbar); flex: 0 0 auto;
   display: flex; align-items: center; gap: 2px; padding: 0 6px;

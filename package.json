@@ -24,6 +24,7 @@
     "licenses:check": "cargo deny check"
   },
   "dependencies": {
+    "@codemirror/autocomplete": "6.20.3",
     "@codemirror/commands": "6.10.4",
     "@codemirror/lang-json": "6.0.2",
     "@codemirror/language": "6.12.4",

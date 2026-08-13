@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, useId, watch } from 'vue'
 import { NPopover } from 'naive-ui'
+import { closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete'
 import { defaultKeymap, indentWithTab } from '@codemirror/commands'
 import { json } from '@codemirror/lang-json'
 import { defaultHighlightStyle, syntaxHighlighting } from '@codemirror/language'
@@ -143,10 +144,12 @@ function mountEditor() {
     lineNumbers(),
     highlightActiveLine(),
     json(),
+    closeBrackets(),
     syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
     keymap.of([
       { key: 'Shift-Alt-f', run: () => { formatJson(2); return true } },
       indentWithTab,
+      ...closeBracketsKeymap,
       ...defaultKeymap,
     ]),
     EditorView.contentAttributes.of({
@@ -166,7 +169,6 @@ function mountEditor() {
         // 与响应查看器共用结果字号设置；JSON 正文仍始终使用等宽字体。
         fontSize: 'var(--a-font-result)',
       },
-      '&.cm-focused': { outline: '2px solid var(--a-focus)', outlineOffset: '-2px' },
       '.cm-scroller': { fontFamily: 'var(--a-font-editor)', lineHeight: 'var(--a-lh-result)' },
       '.cm-content': { padding: '10px 0 14px' },
       '.cm-line': { padding: '0 10px' },
