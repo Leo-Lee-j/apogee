@@ -158,6 +158,8 @@
   --a-font-ui: 'Inter', 'Segoe UI', -apple-system, BlinkMacSystemFont, 'PingFang SC',
     'Microsoft YaHei UI', sans-serif;
   --a-font-mono: 'JetBrains Mono', 'Cascadia Code', 'SF Mono', Consolas, monospace;
+  /* 请求编辑器默认继承等宽栈；设置页可只覆盖这一令牌而不影响响应查看器。 */
+  --a-font-editor: var(--a-font-mono);
   --a-fs-xs: 11px;
   --a-fs-sm: 12px;
   --a-fs-base: 13px;

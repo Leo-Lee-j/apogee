@@ -165,6 +165,21 @@ export const useUiStore = defineStore('ui', () => {
     root.style.setProperty('--a-font-ui', family)
   }
 
+  /**
+   * 请求编辑区的独立字体。默认沿用原本的等宽栈，使既有配置视觉上零变化；
+   * 仅在用户显式选择时覆写，不影响响应查看器的 --a-font-mono。
+   */
+  function applyEditorFont(font: FontFamilyMode) {
+    if (typeof document === 'undefined') return
+    const root = document.documentElement
+    const legacyAliases: Record<string, string> = { inter: 'Inter', segoe: 'Segoe UI', yahei: 'Microsoft YaHei UI' }
+    const requested = (legacyAliases[font] ?? font).trim()
+    const family = !requested || requested === 'system'
+      ? 'var(--a-font-mono)'
+      : `'${requested.replace(/["']/g, '')}', var(--a-font-mono)`
+    root.style.setProperty('--a-font-editor', family)
+  }
+
   function applyFontSizes(uiSize: number, resultSize: number) {
     if (typeof document === 'undefined') return
     const root = document.documentElement
@@ -193,7 +208,7 @@ export const useUiStore = defineStore('ui', () => {
     sidebarVisible, sidebarWidth, sidebarMaxW, layout, themeMode, requestRatio,
     historyOpen, saveAsOpen, settingsSection, shortcutPreferences, isShortcutEnabled, setShortcutEnabled, paletteOpen, spikeOpen, spikePanel,
     urlFocusSeq, focusUrl,
-    systemDark, isDark, applyTheme, applyFont, applyFontSizes, cycleLayout, setLayout,
+    systemDark, isDark, applyTheme, applyFont, applyEditorFont, applyFontSizes, cycleLayout, setLayout,
     setSidebarWidth, resetSidebarWidth, syncViewport,
     setRequestRatio, resetRequestRatio,
   }

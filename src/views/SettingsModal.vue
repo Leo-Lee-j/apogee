@@ -65,6 +65,10 @@ const languageOptions = [
 const fontOptions = ref([
   { label: '系统默认', value: 'system' },
 ])
+const editorFontOptions = computed(() => [
+  { label: '内置等宽字体（默认）', value: 'system' },
+  ...fontOptions.value.filter((option) => option.value !== 'system'),
+])
 const proxyOptions = [
   { label: '系统代理', value: 'system' },
   { label: '手动配置', value: 'manual' },
@@ -247,6 +251,12 @@ async function setFont(value: FontFamilyMode) {
   await persist({ fontFamily: value })
 }
 
+async function setEditorFont(value: FontFamilyMode) {
+  if (!value.trim()) return
+  ui.applyEditorFont(value)
+  await persist({ editorFontFamily: value })
+}
+
 async function setFontSize(key: 'uiFontSize' | 'resultFontSize', value: number | null) {
   if (value == null) return
   const size = Math.min(24, Math.max(11, Math.round(value)))
@@ -356,6 +366,11 @@ async function restartApp() {
                 <AppSelect width="620px" size="medium" :value="app.settings.fontFamily" :options="fontOptions" :render-label="renderFontOption" filterable tag clearable placeholder="选择字体" @update:value="(value: string | null) => setFont(value || 'system')" />
               </div>
               <div class="font-preview" :style="{ fontFamily: fontCssValue(app.settings.fontFamily) }">中文预览 Aa 123</div>
+              <div class="setting-row">
+                <div class="setting-copy"><h3>请求编辑器字体</h3><p>控制 URL、参数、请求 Headers 和 Body；不影响响应查看器。默认使用内置等宽字体。</p></div>
+                <AppSelect width="620px" size="medium" :value="app.settings.editorFontFamily" :options="editorFontOptions" :render-label="renderFontOption" filterable tag clearable placeholder="选择请求编辑器字体" @update:value="(value: string | null) => setEditorFont(value || 'system')" />
+              </div>
+              <div class="font-preview" :style="{ fontFamily: app.settings.editorFontFamily === 'system' ? 'var(--a-font-mono)' : fontCssValue(app.settings.editorFontFamily) }">参数名：Authorization　值：Bearer token</div>
               <div class="setting-row">
                 <div class="setting-copy"><h3>应用界面字号</h3><p>控制菜单、按钮和设置文字。</p></div>
                 <AppInputNumber :value="app.settings.uiFontSize" :min="11" :max="24" :step="1" :show-button="true" @update:value="(value: number | null) => setFontSize('uiFontSize', value)">

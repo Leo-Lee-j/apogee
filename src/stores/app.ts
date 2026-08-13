@@ -13,7 +13,7 @@ export const useAppStore = defineStore('app', () => {
   const busyWorkspaceId = ref<string | null>(null)
   const lastError = ref<AppError | null>(null)
   const createDialogOpen = ref(false)
-  const settings = ref<AppSettings>({ settingsVersion: 1, defaultWorkspaceRoot: '', openLastWorkspaceOnStart: false, showMemoryMonitor: true, lowMemoryMode: false, proxyMode: 'system', proxyUrl: '', timeoutMs: 30000, verifyTls: true, themeMode: 'light', language: 'system', fontFamily: 'system', uiFontSize: 13, resultFontSize: 13 })
+  const settings = ref<AppSettings>({ settingsVersion: 1, defaultWorkspaceRoot: '', openLastWorkspaceOnStart: false, showMemoryMonitor: true, lowMemoryMode: false, proxyMode: 'system', proxyUrl: '', timeoutMs: 30000, verifyTls: true, themeMode: 'light', language: 'system', fontFamily: 'system', editorFontFamily: 'system', uiFontSize: 13, resultFontSize: 13 })
   let initialized = false
 
   async function refresh() {
@@ -34,6 +34,7 @@ export const useAppStore = defineStore('app', () => {
       ui.themeMode = settings.value.themeMode
       ui.applyTheme()
       ui.applyFont(settings.value.fontFamily)
+      ui.applyEditorFont(settings.value.editorFontFamily)
       ui.applyFontSizes(settings.value.uiFontSize, settings.value.resultFontSize)
       if (typeof document !== 'undefined') {
         const systemLanguage = typeof navigator !== 'undefined' && navigator.language.toLowerCase().startsWith('en') ? 'en-US' : 'zh-CN'
@@ -124,7 +125,9 @@ export const useAppStore = defineStore('app', () => {
   async function saveSettings(next: AppSettings) {
     try {
       settings.value = await ipc.appSettingsSave(next)
-      useUiStore().applyFontSizes(settings.value.uiFontSize, settings.value.resultFontSize)
+      const ui = useUiStore()
+      ui.applyEditorFont(settings.value.editorFontFamily)
+      ui.applyFontSizes(settings.value.uiFontSize, settings.value.resultFontSize)
       lastError.value = null
       return true
     } catch (error) {

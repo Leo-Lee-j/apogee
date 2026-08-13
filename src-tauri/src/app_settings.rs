@@ -30,6 +30,9 @@ pub struct AppSettings {
     pub language: String,
     #[serde(default = "default_font_family")]
     pub font_family: String,
+    /// 请求编辑区使用的字体；"system" 保持内置等宽回退栈，兼容旧配置。
+    #[serde(default = "default_editor_font_family")]
+    pub editor_font_family: String,
     #[serde(default = "default_ui_font_size")]
     pub ui_font_size: u8,
     #[serde(default = "default_result_font_size")]
@@ -40,17 +43,40 @@ fn default_show_memory_monitor() -> bool {
     true
 }
 
-fn default_proxy_mode() -> String { "system".to_string() }
-fn default_timeout_ms() -> u64 { 30_000 }
-fn default_verify_tls() -> bool { true }
-fn default_theme_mode() -> String { "light".to_string() }
-fn default_language() -> String { "system".to_string() }
-fn default_font_family() -> String { "system".to_string() }
-fn default_ui_font_size() -> u8 { 13 }
-fn default_result_font_size() -> u8 { 13 }
+fn default_proxy_mode() -> String {
+    "system".to_string()
+}
+fn default_timeout_ms() -> u64 {
+    30_000
+}
+fn default_verify_tls() -> bool {
+    true
+}
+fn default_theme_mode() -> String {
+    "light".to_string()
+}
+fn default_language() -> String {
+    "system".to_string()
+}
+fn default_font_family() -> String {
+    "system".to_string()
+}
+fn default_editor_font_family() -> String {
+    "system".to_string()
+}
+fn default_ui_font_size() -> u8 {
+    13
+}
+fn default_result_font_size() -> u8 {
+    13
+}
 
 fn normalize_font_size(value: u8, default: u8) -> u8 {
-    if (11..=24).contains(&value) { value } else { default }
+    if (11..=24).contains(&value) {
+        value
+    } else {
+        default
+    }
 }
 
 pub struct AppSettingsRepository {
@@ -84,6 +110,7 @@ impl AppSettingsRepository {
                 theme_mode: default_theme_mode(),
                 language: default_language(),
                 font_family: default_font_family(),
+                editor_font_family: default_editor_font_family(),
                 ui_font_size: default_ui_font_size(),
                 result_font_size: default_result_font_size(),
             };
@@ -94,14 +121,18 @@ impl AppSettingsRepository {
         // Version 0 was written when "system" was the implicit theme default.
         // Migrate that implicit value once; an explicit choice made after this
         // version is preserved because saves carry settings_version = 1.
-        let needs_theme_migration = settings.settings_version == 0 && settings.theme_mode == "system";
+        let needs_theme_migration =
+            settings.settings_version == 0 && settings.theme_mode == "system";
         if needs_theme_migration {
             settings.theme_mode = "light".to_string();
         }
         let original_root = settings.default_workspace_root.clone();
         settings.default_workspace_root = clean_windows_path(&settings.default_workspace_root);
         fs::create_dir_all(&settings.default_workspace_root)?;
-        if settings.default_workspace_root != original_root || needs_theme_migration || settings.settings_version == 0 {
+        if settings.default_workspace_root != original_root
+            || needs_theme_migration
+            || settings.settings_version == 0
+        {
             self.save(&settings)?;
         }
         Ok(settings)
@@ -130,8 +161,12 @@ impl AppSettingsRepository {
             theme_mode: settings.theme_mode.clone(),
             language: settings.language.clone(),
             font_family: settings.font_family.clone(),
+            editor_font_family: settings.editor_font_family.clone(),
             ui_font_size: normalize_font_size(settings.ui_font_size, default_ui_font_size()),
-            result_font_size: normalize_font_size(settings.result_font_size, default_result_font_size()),
+            result_font_size: normalize_font_size(
+                settings.result_font_size,
+                default_result_font_size(),
+            ),
         };
         fs::create_dir_all(&self.app_data_dir)?;
         let temporary = self

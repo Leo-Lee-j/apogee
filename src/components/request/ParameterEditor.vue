@@ -322,6 +322,8 @@ watch(() => props.rows, () => { pendingDelete.value = null })
   --n-padding-right: 0px;
   background: transparent;
 }
+.parameter-row :deep(.n-input__input-el),
+.parameter-row :deep(.n-input__textarea-el) { font-family: var(--a-font-editor); }
 .parameter-row :deep(.n-input__border) { border-color: transparent !important; }
 .parameter-row :deep(.n-input),
 .parameter-row :deep(.n-input__input-el) { height: 32px; min-height: 32px; }

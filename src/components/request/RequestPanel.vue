@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, defineAsyncComponent, ref } from 'vue'
 import { open as openFileDialog } from '@tauri-apps/plugin-dialog'
 import type { AuthConfig, Body, KeyValue } from '@/ipc'
 import { useTabsStore, type Tab } from '@/stores/tabs'
@@ -26,6 +26,7 @@ import { booleanSetting, httpVersionSetting, numberSetting, settingBooleanValue 
  * 所有编辑都复制数组后通过 tabs.patch 整体替换，保证界面和发送状态同步。
  */
 const TABS = ['Params', 'Headers', 'Body', 'Auth', 'Settings'] as const
+const JsonBodyEditor = defineAsyncComponent(() => import('./JsonBodyEditor.vue'))
 type PanelTab = (typeof TABS)[number]
 type RowField = 'params' | 'pathParams' | 'headers'
 type BodyType = Body['type']
@@ -509,15 +510,20 @@ function patchVersion(value: string | number | null) {
 
         <div class="body-content">
           <div v-if="bodyType === 'none'" class="editor-empty">此请求不发送请求体。</div>
+        <JsonBodyEditor
+          v-else-if="bodyType === 'json'"
+          :value="bodyContent"
+          @update:value="body.type === 'json' && patchTab({ body: { type: 'json', content: $event } })"
+        />
         <VariableInput
-          v-else-if="bodyType === 'json' || bodyType === 'text'"
+          v-else-if="bodyType === 'text'"
           class="payload"
           :value="bodyContent"
           multiline
           :placeholder="bodyPlaceholder"
           spellcheck="false"
           aria-label="请求体内容"
-          @update:value="body.type === 'json' ? patchTab({ body: { type: 'json', content: $event } }) : body.type === 'text' && patchTab({ body: { ...body, content: $event } })"
+          @update:value="body.type === 'text' && patchTab({ body: { ...body, content: $event } })"
         />
         <label v-if="bodyType === 'text'" class="content-type">
           Content-Type
@@ -633,7 +639,7 @@ function patchVersion(value: string | number | null) {
 .bulk-textarea {
   flex: 1 1 auto; min-height: 240px; width: 100%; box-sizing: border-box;
   background: var(--a-bg-3); border: 1px solid var(--a-border); border-radius: var(--a-radius-md);
-  color: var(--a-text); caret-color: var(--a-text); padding: 10px; font: 12px/1.6 var(--a-font-mono);
+  color: var(--a-text); caret-color: var(--a-text); padding: 10px; font: 12px/1.6 var(--a-font-editor);
   /* 原生 textarea + 全局自定义滚动条的组合在 WebView2 下偶发光标消失，
      显式声明 text 光标强制 WebView 重绘指针。 */
   cursor: text;
@@ -668,7 +674,7 @@ function patchVersion(value: string | number | null) {
 .common-header-row:last-child { border-bottom: 0; }
 .common-header-row > * { min-width: 0; padding: 5px 9px; overflow-wrap: anywhere; border-right: 1px solid var(--a-border); }
 .common-header-row > :last-child { border-right: 0; color: var(--a-text-faint); }
-.common-header-row code { color: var(--a-post); font: 11px/18px var(--a-font-mono); }
+.common-header-row code { color: var(--a-post); font: 11px/18px var(--a-font-editor); }
 .common-header-head { background: var(--a-bg-3); color: var(--a-text-faint); font-weight: var(--a-fw-medium); }
 .common-header-head span { color: inherit; }
 .common-header-empty { margin: 0; padding: 9px 10px; color: var(--a-text-faint); font-size: 11px; }
@@ -707,7 +713,7 @@ function patchVersion(value: string | number | null) {
 .c { width: 28px; text-align: center; }
 .cell {
   width: 100%; height: var(--a-row); background: transparent; border: none;
-  color: var(--a-text); font: 12px/1 var(--a-font-mono); padding: 0 6px;
+  color: var(--a-text); font: 12px/1 var(--a-font-editor); padding: 0 6px;
 }
 .cell:focus { background: var(--a-bg-3); outline: 2px solid var(--a-focus); outline-offset: -2px; }
 .del { width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; background: transparent; border: none; color: var(--a-text-faint); cursor: pointer; }
@@ -722,16 +728,16 @@ function patchVersion(value: string | number | null) {
   flex: 1 1 auto; min-height: 180px; width: 100%; resize: none;
   box-sizing: border-box; background: var(--a-bg-3); border: 1px solid var(--a-border);
   border-radius: var(--a-radius-md); color: var(--a-text); padding: 10px;
-  font: 12px/1.5 var(--a-font-mono);
+  font: 12px/1.5 var(--a-font-editor);
 }
 .payload :deep(.n-input-wrapper) { padding: 0; }
-.payload :deep(.n-input__textarea-el) { min-height: 180px; padding: 10px; font: 12px/1.5 var(--a-font-mono); }
+.payload :deep(.n-input__textarea-el) { min-height: 180px; padding: 10px; font: 12px/1.5 var(--a-font-editor); }
 .payload:focus, .content-type input:focus { border-color: var(--a-focus); outline: 2px solid var(--a-focus); outline-offset: -2px; }
 .content-type { display: flex; align-items: center; gap: 8px; color: var(--a-text-dim); font-size: 12px; }
 .content-type input {
   flex: 1; height: 26px; box-sizing: border-box; background: var(--a-bg-3);
   border: 1px solid var(--a-border); border-radius: var(--a-radius-md); color: var(--a-text);
-  padding: 0 7px; font: 12px var(--a-font-mono);
+  padding: 0 7px; font: 12px var(--a-font-editor);
 }
 .binary-path { display: flex; align-items: center; gap: 8px; }
 .binary-path :deep(.n-input) { flex: 1 1 auto; min-width: 0; }
@@ -740,11 +746,11 @@ function patchVersion(value: string | number | null) {
 .field-stack { display: flex; flex-direction: column; gap: 5px; color: var(--a-text-dim); font-size: 12px; }
 .field-stack > input, .field-stack > select, .auth-editor select {
   min-height: 30px; box-sizing: border-box; background: var(--a-bg-3); border: 1px solid var(--a-border);
-  border-radius: var(--a-radius-md); color: var(--a-text); padding: 4px 8px; font: 12px var(--a-font-mono);
+  border-radius: var(--a-radius-md); color: var(--a-text); padding: 4px 8px; font: 12px var(--a-font-editor);
 }
 .graphql-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 8px; min-height: 220px; }
 .graphql-grid :deep(.n-input) { min-height: 180px; background: var(--a-bg-3); }
-.graphql-grid :deep(.n-input__textarea-el) { min-height: 180px; padding: 8px; font: 12px/1.5 var(--a-font-mono); }
+.graphql-grid :deep(.n-input__textarea-el) { min-height: 180px; padding: 8px; font: 12px/1.5 var(--a-font-editor); }
 .graphql-grid label:last-child { grid-column: 1 / -1; }
 .auth-editor { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(240px, 2fr); align-content: start; gap: 12px; padding: 12px; }
 .auth-editor > .auth-kind { margin: -12px -12px 0; padding: 12px; border-bottom: 1px solid var(--a-border); }

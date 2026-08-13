@@ -177,6 +177,8 @@ export interface AppSettings {
   themeMode: 'dark' | 'light' | 'system'
   language: 'system' | 'zh-CN' | 'en-US'
   fontFamily: string
+  /** 请求 URL、参数、请求头和请求体编辑器使用的字体。 */
+  editorFontFamily: string
   uiFontSize: number
   resultFontSize: number
 }

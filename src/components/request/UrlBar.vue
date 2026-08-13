@@ -433,7 +433,7 @@ defineExpose({
   height: 100%;
   padding-block: 0;
   line-height: 20px;
-  font-family: var(--a-font-mono);
+  font-family: var(--a-font-editor);
   font-size: var(--a-fs-base);
 }
 .send, .save {
