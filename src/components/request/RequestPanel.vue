@@ -481,9 +481,9 @@ function patchVersion(value: string | number | null) {
           :class="{ on: documentationMode === 'edit' }"
           :aria-pressed="documentationMode === 'edit'"
           :disabled="!tab"
-          title="编辑请求参数"
+          title="调试请求参数"
           @click="setPanelMode('edit')"
-        >编辑</button>
+        >调试</button>
         <button
           type="button"
           class="mode-button"
