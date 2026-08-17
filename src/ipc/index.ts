@@ -530,11 +530,11 @@ export const ipc = {
   postmanImportFile(path: string): Promise<{ name: string; requests: Array<{ name: string; folder: string[]; spec: RequestSpec }>; warnings: string[] }> {
     return call('postman_import_file', { path })
   },
-  postmanImportWorkspace(path: string): Promise<{ collectionId: string; importedRequests: number; importedFolders: number; warnings: string[] }> {
-    return call('postman_import_workspace', { ...sessionArgs(), path })
+  postmanImportWorkspace(path: string, importId: string): Promise<{ collectionId: string; importedRequests: number; importedFolders: number; warnings: string[] }> {
+    return call('postman_import_workspace', { ...sessionArgs(), path, importId })
   },
-  postmanImportEnvironmentWorkspace(path: string): Promise<{ environment: Environment; warnings: string[] }> {
-    return call('postman_import_environment_workspace', { ...sessionArgs(), path })
+  postmanImportEnvironmentWorkspace(path: string, importId: string): Promise<{ environment: Environment; warnings: string[] }> {
+    return call('postman_import_environment_workspace', { ...sessionArgs(), path, importId })
   },
   yapiAnalyzeImport(baseUrl: string, token: string): Promise<YapiAnalyzeResult> {
     return call('yapi_analyze_import', { baseUrl, token })
@@ -572,6 +572,24 @@ export interface ErrorEvent {
 
 export interface CancelledEvent {
   id: string
+}
+
+export interface PostmanImportProgressEvent {
+  importId: string
+  current: number
+  total: number
+  phase: string
+}
+
+/** Subscribe before invoking an import so its earliest progress events are not lost. */
+export async function onPostmanImportProgress(
+  importId: string,
+  handler: (event: PostmanImportProgressEvent) => void,
+): Promise<() => void> {
+  if (!inTauri) return () => {}
+  return tauriListen<PostmanImportProgressEvent>('postman-import:progress', (event) => {
+    if (event.payload.importId === importId) handler(event.payload)
+  })
 }
 
 /** 请求事件的统一分发。

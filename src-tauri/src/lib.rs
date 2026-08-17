@@ -946,32 +946,72 @@ mod commands {
         pub warnings: Vec<String>,
     }
 
+    #[derive(Clone, Debug, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct PostmanImportProgress {
+        import_id: String,
+        current: usize,
+        total: usize,
+        phase: &'static str,
+    }
+
+    fn emit_postman_import_progress(
+        app: &tauri::AppHandle,
+        import_id: &str,
+        current: usize,
+        total: usize,
+        phase: &'static str,
+    ) {
+        let _ = app.emit(
+            "postman-import:progress",
+            PostmanImportProgress {
+                import_id: import_id.to_owned(),
+                current,
+                total,
+                phase,
+            },
+        );
+    }
+
     /// Imports a Postman collection into the active workspace, preserving folder paths.
     #[tauri::command]
-    pub fn postman_import_workspace(
+    pub async fn postman_import_workspace(
+        app: tauri::AppHandle,
         state: State<'_, Arc<AppState>>,
         workspace_id: String,
         session_id: String,
         path: String,
+        import_id: String,
     ) -> Result<PostmanWorkspaceImportResult, String> {
         let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
-        let json = std::fs::read_to_string(&path)
-            .map_err(|error| format!("无法读取 Postman 文件: {error}"))?;
-        let imported =
-            apogee_core::postman::import_json(&json).map_err(|error| error.to_string())?;
-        if imported.requests.is_empty() {
-            return Err(imported
-                .warnings
-                .first()
-                .cloned()
-                .unwrap_or_else(|| "Postman 集合中没有可导入的请求".into()));
-        }
-        state
+        let state = state.inner().clone();
+        tokio::task::spawn_blocking(move || {
+            emit_postman_import_progress(&app, &import_id, 0, 100, "读取文件");
+            let json = std::fs::read_to_string(&path)
+                .map_err(|error| format!("无法读取 Postman 文件: {error}"))?;
+            emit_postman_import_progress(&app, &import_id, 15, 100, "解析集合");
+            let imported =
+                apogee_core::postman::import_json(&json).map_err(|error| error.to_string())?;
+            if imported.requests.is_empty() {
+                return Err(imported
+                    .warnings
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| "Postman 集合中没有可导入的请求".into()));
+            }
+            state
             .with_workspace(workspace_id, session_id, |repository| {
                 use apogee_core::workspace::WorkspaceNodeKind;
                 use std::collections::HashMap;
 
                 let collection_snapshot = repository.create_collection(imported.name.clone())?;
+                emit_postman_import_progress(
+                    &app,
+                    &import_id,
+                    20,
+                    100,
+                    "创建集合",
+                );
                 let collection = collection_snapshot
                     .nodes
                     .iter()
@@ -985,6 +1025,7 @@ mod commands {
                 let mut folders = HashMap::<String, Uuid>::new();
                 let mut imported_folders = 0;
                 let mut imported_requests = 0;
+                let mut last_progress = 20;
 
                 for item in &imported.requests {
                     let mut parent_id = collection_id;
@@ -1016,6 +1057,17 @@ mod commands {
                     let request = repository.create_request(parent_id, item.name.clone())?;
                     repository.save_request(request.id, item.name.clone(), item.spec.clone())?;
                     imported_requests += 1;
+                    let progress = 20 + imported_requests * 80 / imported.requests.len();
+                    if progress > last_progress || imported_requests == imported.requests.len() {
+                        emit_postman_import_progress(
+                            &app,
+                            &import_id,
+                            progress,
+                            100,
+                            "导入请求",
+                        );
+                        last_progress = progress;
+                    }
                 }
                 Ok(PostmanWorkspaceImportResult {
                     collection_id,
@@ -1025,33 +1077,60 @@ mod commands {
                 })
             })
             .map_err(|error| error.to_string())
+        })
+        .await
+        .map_err(|error| format!("Postman 导入任务异常结束: {error}"))?
     }
 
     /// Imports a Postman Environment export into the active workspace.
     #[tauri::command]
-    pub fn postman_import_environment_workspace(
+    pub async fn postman_import_environment_workspace(
+        app: tauri::AppHandle,
         state: State<'_, Arc<AppState>>,
         workspace_id: String,
         session_id: String,
         path: String,
+        import_id: String,
     ) -> Result<apogee_core::postman::PostmanEnvironmentImportResult, String> {
         let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
-        let json = std::fs::read_to_string(&path)
-            .map_err(|error| format!("无法读取 Postman 文件: {error}"))?;
-        let imported = apogee_core::postman::import_environment_json(&json)
-            .map_err(|error| error.to_string())?;
-        state
+        let state = state.inner().clone();
+        tokio::task::spawn_blocking(move || {
+            emit_postman_import_progress(&app, &import_id, 0, 100, "读取文件");
+            let json = std::fs::read_to_string(&path)
+                .map_err(|error| format!("无法读取 Postman 文件: {error}"))?;
+            emit_postman_import_progress(&app, &import_id, 25, 100, "解析环境变量");
+            let imported = apogee_core::postman::import_environment_json(&json)
+                .map_err(|error| error.to_string())?;
+            let variable_count = imported.environment.variables.len();
+            state
             .with_workspace(workspace_id, session_id, |repository| {
+                emit_postman_import_progress(
+                    &app,
+                    &import_id,
+                    55,
+                    100,
+                    "创建环境",
+                );
                 let created = repository.create_environment(imported.environment.name.clone())?;
                 let mut environment = imported.environment.clone();
                 environment.id = created.id;
                 let environment = repository.save_environment(environment)?;
+                emit_postman_import_progress(
+                    &app,
+                    &import_id,
+                    if variable_count == 0 { 100 } else { 95 },
+                    100,
+                    "写入变量",
+                );
                 Ok(apogee_core::postman::PostmanEnvironmentImportResult {
                     environment,
                     warnings: imported.warnings.clone(),
                 })
             })
             .map_err(|error| error.to_string())
+        })
+        .await
+        .map_err(|error| format!("Postman 环境导入任务异常结束: {error}"))?
     }
 
     /// Imports a YApi project in two phases. Analyze performs network access and keeps

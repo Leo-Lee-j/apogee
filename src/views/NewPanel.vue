@@ -8,8 +8,10 @@ import NaiveThemeScope from '@/components/NaiveThemeScope.vue'
 import { useTabsStore } from '@/stores/tabs'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { importCurl } from '@/features/curl'
+import { toast } from '@/features/feedback'
 import YapiImportPanel from '@/features/import/YapiImportPanel.vue'
-import { ipc, inTauri, type RequestSpec, type YapiImportResult } from '@/ipc'
+import { ipc, inTauri, onPostmanImportProgress, type RequestSpec, type YapiImportResult } from '@/ipc'
+import { useImportStore } from '@/stores/import'
 
 /**
  * 新建请求标签里的选项面板。
@@ -21,6 +23,7 @@ import { ipc, inTauri, type RequestSpec, type YapiImportResult } from '@/ipc'
 
 const tabs = useTabsStore()
 const workspace = useWorkspaceStore()
+const imports = useImportStore()
 const panel = ref<HTMLElement | null>(null)
 const actionError = ref('')
 const actionNotice = ref('')
@@ -42,6 +45,7 @@ let previewTimer: ReturnType<typeof setTimeout> | undefined
 let previewSequence = 0
 
 const previewText = computed(() => previewSpec.value ? JSON.stringify(previewSpec.value, null, 2) : '')
+const isActionBusy = computed(() => actionBusy.value || imports.postmanBusy)
 const visualHeaders = computed(() => (previewSpec.value?.headers ?? []).filter((item) => item.enabled && item.key))
 const visualParams = computed(() => (previewSpec.value?.params ?? []).filter((item) => item.enabled && item.key))
 const visualAuth = computed(() => {
@@ -225,7 +229,18 @@ async function openPostmanImport() {
   const { open } = await import('@tauri-apps/plugin-dialog')
   const selected = await open({ multiple: false, filters: [{ name: 'Postman Collection', extensions: ['json'] }] })
   if (typeof selected !== 'string') return
-  const result = await ipc.postmanImportWorkspace(selected)
+  const importId = crypto.randomUUID()
+  imports.beginPostman(importId, 'file')
+  const unlisten = await onPostmanImportProgress(importId, (event) => {
+    imports.updatePostman(event)
+  })
+  let result: Awaited<ReturnType<typeof ipc.postmanImportWorkspace>>
+  try {
+    result = await ipc.postmanImportWorkspace(selected, importId)
+  } finally {
+    unlisten()
+    imports.finishPostman(importId)
+  }
   await workspace.load()
   const warningText = result.warnings.join('；')
   importAlert.value = {
@@ -233,9 +248,13 @@ async function openPostmanImport() {
     type: result.warnings.length ? 'warning' : 'success',
     message: `已导入 ${result.importedRequests} 个请求和 ${result.importedFolders} 个文件夹${warningText ? `；${warningText}` : ''}`,
   }
+  const importedMessage = `已导入 ${result.importedRequests} 个请求和 ${result.importedFolders} 个文件夹`
+  if (result.warnings.length) toast().warning(`${importedMessage}；${warningText}`)
+  else toast().success(importedMessage)
   actionNotice.value = `已导入 ${result.importedRequests} 个请求和 ${result.importedFolders} 个文件夹`
   if (result.warnings.length) actionNotice.value += `；${result.warnings.join('；')}`
   } catch (error) {
+    toast().error(actionErrorMessage(error, 'Import failed'))
     importAlert.value = {
       title: '导入失败',
       type: 'error',
@@ -252,7 +271,18 @@ async function openPostmanEnvironmentImport() {
   const { open } = await import('@tauri-apps/plugin-dialog')
   const selected = await open({ multiple: false, filters: [{ name: 'Postman Environment', extensions: ['json'] }] })
   if (typeof selected !== 'string') return
-  const result = await ipc.postmanImportEnvironmentWorkspace(selected)
+  const importId = crypto.randomUUID()
+  imports.beginPostman(importId, 'environment')
+  const unlisten = await onPostmanImportProgress(importId, (event) => {
+    imports.updatePostman(event)
+  })
+  let result: Awaited<ReturnType<typeof ipc.postmanImportEnvironmentWorkspace>>
+  try {
+    result = await ipc.postmanImportEnvironmentWorkspace(selected, importId)
+  } finally {
+    unlisten()
+    imports.finishPostman(importId)
+  }
   await workspace.load()
   const warningText = result.warnings.join('；')
   importAlert.value = {
@@ -260,9 +290,13 @@ async function openPostmanEnvironmentImport() {
     type: result.warnings.length ? 'warning' : 'success',
     message: `已导入环境“${result.environment.name}”及 ${result.environment.variables.length} 个变量${warningText ? `；${warningText}` : ''}`,
   }
+  const importedMessage = `已导入环境“${result.environment.name}”及 ${result.environment.variables.length} 个变量`
+  if (result.warnings.length) toast().warning(`${importedMessage}；${warningText}`)
+  else toast().success(importedMessage)
   actionNotice.value = `已导入环境“${result.environment.name}”及 ${result.environment.variables.length} 个变量`
   if (result.warnings.length) actionNotice.value += `；${result.warnings.join('；')}`
   } catch (error) {
+    toast().error(actionErrorMessage(error, 'Import failed'))
     importAlert.value = {
       title: '导入失败',
       type: 'error',
@@ -339,7 +373,7 @@ function closePanel() {
 }
 
 async function pick(option: NewOption) {
-  if (!option.run || actionBusy.value) return
+  if (!option.run || isActionBusy.value) return
   actionError.value = ''
   actionBusy.value = true
   try {
@@ -416,7 +450,7 @@ onMounted(async () => {
           quaternary
           circle
           size="small"
-          :disabled="actionBusy"
+          :disabled="isActionBusy"
           aria-label="关闭新建请求标签"
           title="关闭新建请求标签"
           @click="closePanel"
@@ -494,11 +528,11 @@ onMounted(async () => {
           {{ importWarnings.join('；') }}
         </AppAlert>
         <div class="curl-actions">
-          <AppButton secondary :disabled="actionBusy" @click="curlMode = false">
+          <AppButton secondary :disabled="isActionBusy" @click="curlMode = false">
             <template #icon><AppIcon :component="IconArrowLeft" :size="15" /></template>
             返回
           </AppButton>
-          <AppButton type="primary" :loading="actionBusy" @click="applyCurlImport">
+          <AppButton type="primary" :loading="isActionBusy" @click="applyCurlImport">
             <template #icon><AppIcon :component="IconCloudUpload" :size="15" /></template>
             导入请求
           </AppButton>
@@ -513,9 +547,9 @@ onMounted(async () => {
               v-for="option in group.items"
               :key="option.id"
               class="card"
-              :class="{ off: !option.run }"
+              :class="{ off: !option.run, importing: imports.postmanProgress && imports.postmanTarget === option.id }"
               type="button"
-              :aria-disabled="!option.run || actionBusy"
+              :disabled="!option.run || isActionBusy"
               :title="option.reason"
               @click="pick(option)"
             >
@@ -528,7 +562,10 @@ onMounted(async () => {
               <span class="tx">
                 <span class="top">
                   <span class="t">{{ option.title }}</span>
-                  <kbd v-if="option.kbd">{{ option.kbd }}</kbd>
+                  <span v-if="imports.postmanProgress && imports.postmanTarget === option.id" class="import-progress-inline" aria-live="polite">
+                    {{ imports.postmanProgress.phase }} {{ imports.postmanPercent }}%
+                  </span>
+                  <kbd v-else-if="option.kbd">{{ option.kbd }}</kbd>
                   <AppTag
                     v-else-if="option.badge"
                     class="badge"
@@ -680,17 +717,20 @@ onMounted(async () => {
   font: inherit;
   cursor: pointer;
 }
-.card:not(.off):hover { border-color: var(--a-primary); background: var(--a-selected); }
+.card:not(.off):not(:disabled):hover { border-color: var(--a-primary); background: var(--a-selected); }
+.card:disabled { cursor: default; opacity: 0.56; }
+.card.importing:disabled { border-color: var(--a-primary); background: var(--a-selected); opacity: 1; }
 .card.off { cursor: default; background: transparent; border-color: var(--a-border); }
 .card.off .top .t { color: var(--a-text-dim); }
 .card.off .d { color: var(--a-text-faint); }
 .card .ic { flex: 0 0 auto; color: var(--a-primary); margin-top: 1px; }
 .card.off .ic { color: var(--a-text-ghost); }
 .card .ic .ico { width: 16px; height: 16px; }
-.tx { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.top { display: flex; align-items: center; gap: 6px; }
+.tx { flex: 1 1 auto; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.top { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .top .t { font: var(--a-fw-semibold) var(--a-fs-base) / 1.3 var(--a-font-ui); }
 .card .d { font: var(--a-fs-sm) / 1.5 var(--a-font-ui); color: var(--a-text-dim); }
+.import-progress-inline { min-width: 0; margin-left: auto; color: var(--a-primary); font: var(--a-fw-medium) var(--a-fs-xs)/1.4 var(--a-font-ui); text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .badge {
   flex: 0 0 auto;
   border-radius: var(--a-radius-pill);
