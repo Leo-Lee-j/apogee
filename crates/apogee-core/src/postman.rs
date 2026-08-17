@@ -148,12 +148,11 @@ fn walk_items(
             .and_then(|v| v.as_str())
             .unwrap_or("GET")
             .to_string();
-        let url = request
-            .get("url")
-            .and_then(|v| v.as_str())
+        let url_value = request.get("url");
+        let url = url_value
+            .and_then(|value| value.as_str())
             .or_else(|| {
-                request
-                    .get("url")
+                url_value
                     .and_then(|v| v.get("raw"))
                     .and_then(|v| v.as_str())
             })
@@ -169,6 +168,14 @@ fn walk_items(
             continue;
         }
         let headers = rows(request.get("header"));
+        let params = url_value
+            .and_then(|value| value.get("query"))
+            .map(rows_value)
+            .unwrap_or_default();
+        let path_params = url_value
+            .and_then(|value| value.get("variable"))
+            .map(rows_value)
+            .unwrap_or_default();
         let body = request
             .get("body")
             .and_then(|b| b.get("raw"))
@@ -184,9 +191,12 @@ fn walk_items(
             folder: folder.clone(),
             spec: RequestSpec {
                 method,
-                url,
-                params: Vec::new(),
-                path_params: Vec::new(),
+                // Apifox exports its service URL as `{{baseUrl}}` in the Postman
+                // collection, but not its value. Apogee represents that scope as the
+                // active environment host, so keep only the relative request path.
+                url: normalize_apifox_base_url(&url),
+                params,
+                path_params,
                 headers,
                 body,
                 auth: AuthConfig::None,
@@ -196,20 +206,54 @@ fn walk_items(
     }
 }
 fn rows(value: Option<&serde_json::Value>) -> Vec<KeyValue> {
-    value
-        .and_then(|v| v.as_array())
+    value.map(rows_value).unwrap_or_default()
+}
+
+fn rows_value(value: &serde_json::Value) -> Vec<KeyValue> {
+    let values: Vec<&serde_json::Value> = match value {
+        serde_json::Value::Array(values) => values.iter().collect(),
+        serde_json::Value::Object(_) => vec![value],
+        _ => Vec::new(),
+    };
+    values
         .into_iter()
-        .flatten()
         .filter_map(|v| {
             Some(KeyValue {
                 enabled: !v.get("disabled").and_then(|x| x.as_bool()).unwrap_or(false),
                 key: v.get("key")?.as_str()?.into(),
-                value: v.get("value").and_then(|x| x.as_str()).unwrap_or("").into(),
-                description: None,
+                value: value_text(v.get("value")).into(),
+                description: v
+                    .get("description")
+                    .and_then(|value| value.as_str())
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_string),
                 kind: crate::model::ValueKind::Text,
             })
         })
         .collect()
+}
+
+fn value_text(value: Option<&serde_json::Value>) -> String {
+    match value {
+        Some(serde_json::Value::String(value)) => value.clone(),
+        Some(serde_json::Value::Null) | None => String::new(),
+        Some(value) => value.to_string(),
+    }
+}
+
+fn normalize_apifox_base_url(url: &str) -> String {
+    let trimmed = url.trim();
+    let Some(rest) = trimmed
+        .strip_prefix("{{baseUrl}}")
+        .or_else(|| trimmed.strip_prefix("{{baseURL}}"))
+    else {
+        return trimmed.to_string();
+    };
+    if rest.is_empty() || rest.starts_with('/') || rest.starts_with('?') || rest.starts_with('#') {
+        rest.to_string()
+    } else {
+        format!("/{rest}")
+    }
 }
 
 #[cfg(test)]
@@ -290,7 +334,10 @@ mod tests {
         assert_eq!(imported.name, "blog-user");
         assert_eq!(imported.requests.len(), 3);
         assert_eq!(imported.requests[0].folder, vec!["user"]);
-        assert_eq!(imported.requests[0].spec.url, "http://127.0.0.1:8088/oauth/login");
+        assert_eq!(
+            imported.requests[0].spec.url,
+            "http://127.0.0.1:8088/oauth/login"
+        );
         assert!(matches!(
             imported.requests[0].spec.body,
             Body::Json { ref content } if content == "{\"username\":\"demo\"}"
@@ -307,5 +354,44 @@ mod tests {
             .warnings
             .iter()
             .any(|warning| warning.contains("missing-url")));
+    }
+
+    #[test]
+    fn imports_apifox_base_url_and_object_url_parameters() {
+        let imported = import_json(
+            r#"{
+              "info": { "name": "Apifox" },
+              "item": [{
+                "name": "fixer",
+                "request": {
+                  "method": "GET",
+                  "url": {
+                    "raw": "{{baseURL}}/api/latest",
+                    "query": [
+                      {"key": "access_key", "value": "secret", "description": "API key"},
+                      {"key": "base", "value": "USD", "disabled": true}
+                    ],
+                    "variable": {"key": "version", "value": "v1", "description": "API version"}
+                  }
+                }
+              }]
+            }"#,
+        )
+        .unwrap();
+
+        let spec = &imported.requests[0].spec;
+        assert_eq!(spec.url, "/api/latest");
+        assert_eq!(spec.params.len(), 2);
+        assert_eq!(spec.params[0].key, "access_key");
+        assert_eq!(spec.params[0].value, "secret");
+        assert_eq!(spec.params[0].description.as_deref(), Some("API key"));
+        assert!(!spec.params[1].enabled);
+        assert_eq!(spec.path_params.len(), 1);
+        assert_eq!(spec.path_params[0].key, "version");
+        assert_eq!(spec.path_params[0].value, "v1");
+        assert_eq!(
+            spec.path_params[0].description.as_deref(),
+            Some("API version")
+        );
     }
 }
