@@ -175,6 +175,33 @@ fn webview_part(command_line: Option<&str>) -> usize {
     }
 }
 
+/// 进程 ID 会被 Windows 复用，因此父 PID 本身不足以标识父子关系。
+/// 返回创建时间（FILETIME 的 100ns tick），供进程树遍历时验证归属。
+#[cfg(windows)]
+fn process_creation_time(pid: u32) -> Option<u64> {
+    use windows_sys::Win32::Foundation::{CloseHandle, FILETIME};
+    use windows_sys::Win32::System::Threading::{
+        GetProcessTimes, OpenProcess, PROCESS_QUERY_INFORMATION,
+    };
+
+    let handle = unsafe { OpenProcess(PROCESS_QUERY_INFORMATION, 0, pid) };
+    if handle.is_null() {
+        return None;
+    }
+    let mut created = FILETIME::default();
+    let mut exited = FILETIME::default();
+    let mut kernel = FILETIME::default();
+    let mut user = FILETIME::default();
+    let ok = unsafe { GetProcessTimes(handle, &mut created, &mut exited, &mut kernel, &mut user) };
+    unsafe {
+        CloseHandle(handle);
+    }
+    if ok == 0 {
+        return None;
+    }
+    Some(((created.dwHighDateTime as u64) << 32) | created.dwLowDateTime as u64)
+}
+
 #[cfg(windows)]
 pub fn current_app() -> AppMemInfo {
     use std::collections::{HashMap, HashSet};
@@ -220,14 +247,39 @@ pub fn current_app() -> AppMemInfo {
         }
         CloseHandle(snapshot);
     }
+    // ToolHelp 仅记录 ParentProcessId。父进程退出、PID 被另一个应用复用后，旧子进程
+    // 的 ParentProcessId 会与新进程碰撞；只有创建时间不早于父进程才能算作真实子进程。
+    // 无法读取创建时间时宁可漏报，也不能把无关应用的内存归到 Apogee。
+    let Some(root_start) = process_creation_time(root) else {
+        return AppMemInfo::default();
+    };
+    let mut starts = HashMap::from([(root, root_start)]);
     let mut tree = HashSet::from([root]);
     loop {
-        let before = tree.len();
+        let mut discovered = Vec::new();
         for (pid, (parent, _)) in &parents {
-            if tree.contains(parent) {
-                tree.insert(*pid);
+            if !tree.contains(parent) || tree.contains(pid) {
+                continue;
+            }
+            let Some(&parent_start) = starts.get(parent) else {
+                continue;
+            };
+            let child_start = match starts.get(pid) {
+                Some(&started) => started,
+                None => match process_creation_time(*pid) {
+                    Some(started) => {
+                        starts.insert(*pid, started);
+                        started
+                    }
+                    None => continue,
+                },
+            };
+            if child_start >= parent_start {
+                discovered.push(*pid);
             }
         }
+        let before = tree.len();
+        tree.extend(discovered);
         if tree.len() == before {
             break;
         }

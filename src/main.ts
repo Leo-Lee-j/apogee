@@ -23,6 +23,11 @@ import { ipc, inTauri, type BootMetrics } from './ipc'
 
 const t0 = performance.now()
 
+// 开发时保留浏览器的检查工具；正式桌面包不应暴露 WebView 的默认右键菜单。
+if (inTauri && !import.meta.env.DEV) {
+  document.addEventListener('contextmenu', (event) => event.preventDefault())
+}
+
 const app = createApp(AppShell)
 app.use(createPinia())
 
