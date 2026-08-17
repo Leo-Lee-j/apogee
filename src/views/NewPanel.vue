@@ -443,7 +443,6 @@ onMounted(async () => {
       <header class="hd">
         <div>
           <h2 id="new-title">新建请求</h2>
-          <p class="sub">这是一个独立标签，选择请求类型后开始调试</p>
         </div>
         <AppButton
           class="x"
@@ -626,11 +625,6 @@ onMounted(async () => {
   margin: 0;
   font: var(--a-fw-semibold) var(--a-fs-lg) / 1.4 var(--a-font-ui);
   color: var(--a-text);
-}
-.sub {
-  margin: 3px 0 0;
-  color: var(--a-text-dim);
-  font: var(--a-fs-sm) / 1.5 var(--a-font-ui);
 }
 .x {
   flex: 0 0 auto;
