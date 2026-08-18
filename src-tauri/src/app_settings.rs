@@ -4,6 +4,24 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
+pub(crate) fn atomic_replace(temporary: &Path, target: &Path) -> Result<()> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::Storage::FileSystem::{MoveFileExW, MOVEFILE_REPLACE_EXISTING};
+        let from: Vec<u16> = temporary.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+        let to: Vec<u16> = target.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+        let ok = unsafe { MoveFileExW(from.as_ptr(), to.as_ptr(), MOVEFILE_REPLACE_EXISTING) };
+        if ok == 0 { anyhow::bail!("无法原子替换文件：{}", target.display()); }
+        return Ok(());
+    }
+    #[cfg(not(windows))]
+    {
+        fs::rename(temporary, target)?;
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {
@@ -174,10 +192,7 @@ impl AppSettingsRepository {
             .join(format!(".settings.{}.tmp", Uuid::new_v4()));
         fs::write(&temporary, serde_json::to_vec_pretty(&normalized_settings)?)?;
         let target = self.path();
-        if target.exists() {
-            fs::remove_file(&target)?;
-        }
-        fs::rename(temporary, target)?;
+        atomic_replace(&temporary, &target)?;
         Ok(())
     }
 

@@ -4,6 +4,7 @@ import { createPinia, setActivePinia } from 'pinia'
 const workspaceClose = vi.fn()
 const workspaceOpen = vi.fn()
 const workspaceList = vi.fn()
+const appSettingsLoad = vi.fn()
 
 vi.mock('@/ipc', () => ({
   inTauri: true,
@@ -12,6 +13,7 @@ vi.mock('@/ipc', () => ({
       if (key === 'workspaceClose') return workspaceClose
       if (key === 'workspaceOpen') return workspaceOpen
       if (key === 'workspaceList') return workspaceList
+      if (key === 'appSettingsLoad') return appSettingsLoad
       return vi.fn()
     },
   }),
@@ -31,6 +33,24 @@ describe('app workspace lifecycle', () => {
     workspaceOpen.mockReset()
     workspaceList.mockReset()
     workspaceList.mockResolvedValue([])
+    appSettingsLoad.mockReset()
+    appSettingsLoad.mockResolvedValue({
+      settingsVersion: 1,
+      defaultWorkspaceRoot: 'C:/workspaces',
+      openLastWorkspaceOnStart: false,
+      showMemoryMonitor: true,
+      lowMemoryMode: false,
+      proxyMode: 'system',
+      proxyUrl: '',
+      timeoutMs: 30000,
+      verifyTls: true,
+      themeMode: 'light',
+      language: 'system',
+      fontFamily: 'system',
+      editorFontFamily: 'system',
+      uiFontSize: 13,
+      resultFontSize: 13,
+    })
   })
 
   it('flushes the active session before closing and returns to launcher', async () => {
@@ -75,6 +95,54 @@ describe('app workspace lifecycle', () => {
     expect(app.shell).toBe('workspace')
     expect(workspace.workspaceId).toBe('workspace-b')
     expect(workspace.sessionId).toBe('session-b')
+  })
+
+  it('does not begin opening the next workspace until the old session closes', async () => {
+    let closeOld!: () => void
+    workspaceClose.mockImplementationOnce(() => new Promise<void>((resolve) => { closeOld = resolve }))
+    const app = useAppStore()
+    const workspace = (await import('./workspace')).useWorkspaceStore()
+    app.shell = 'workspace'
+    workspace.workspaceId = 'workspace-a'
+    workspaceOpen.mockResolvedValueOnce({
+      descriptor: { id: 'workspace-b', name: 'B', path: 'C:/b', lastOpenedAt: 2, status: 'available' },
+      workspaceId: 'workspace-b', sessionId: 'session-b',
+      snapshot: { id: 'workspace-b', name: 'B', nodes: [], environments: [] },
+      state: { activeEnvironmentId: null, activeEnvironmentSet: false },
+    })
+
+    const switching = app.switchWorkspace('workspace-b')
+    await vi.waitFor(() => expect(workspaceClose).toHaveBeenCalledTimes(1))
+    expect(app.shell).toBe('closing')
+    expect(workspace.workspaceId).toBe('workspace-a')
+    expect(workspaceOpen).not.toHaveBeenCalled()
+
+    closeOld()
+    await expect(switching).resolves.toBe(true)
+    expect(workspace.workspaceId).toBe('workspace-b')
+  })
+
+  it('only auto-opens the latest available workspace when the setting is enabled', async () => {
+    appSettingsLoad.mockResolvedValueOnce({
+      ...(await appSettingsLoad()),
+      openLastWorkspaceOnStart: true,
+    })
+    workspaceList.mockResolvedValueOnce([
+      { id: 'missing', name: 'Missing', path: 'C:/missing', lastOpenedAt: 3, status: 'missing' },
+      { id: 'workspace-b', name: 'B', path: 'C:/b', lastOpenedAt: 2, status: 'available' },
+    ])
+    workspaceOpen.mockResolvedValueOnce({
+      descriptor: { id: 'workspace-b', name: 'B', path: 'C:/b', lastOpenedAt: 2, status: 'available' },
+      workspaceId: 'workspace-b', sessionId: 'session-b',
+      snapshot: { id: 'workspace-b', name: 'B', nodes: [], environments: [] },
+      state: { activeEnvironmentId: null, activeEnvironmentSet: false },
+    })
+
+    const app = useAppStore()
+    await app.initialize()
+
+    expect(workspaceOpen).toHaveBeenCalledWith({ workspaceId: 'workspace-b' })
+    expect(app.shell).toBe('workspace')
   })
 
   it('returns to launcher when the next workspace cannot open', async () => {

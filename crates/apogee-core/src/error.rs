@@ -48,6 +48,8 @@ impl Hint {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppError {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
     pub kind: ErrorKind,
     /// 已本地化的简述
     pub message: String,
@@ -61,11 +63,17 @@ pub struct AppError {
 impl AppError {
     pub fn new(kind: ErrorKind, message: impl Into<String>) -> Self {
         Self {
+            code: None,
             kind,
             message: message.into(),
             detail: None,
             hints: Vec::new(),
         }
+    }
+
+    pub fn code(mut self, code: impl Into<String>) -> Self {
+        self.code = Some(code.into());
+        self
     }
 
     pub fn detail(mut self, detail: impl Into<String>) -> Self {

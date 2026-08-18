@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
-use crate::app_settings::clean_windows_path;
+use crate::app_settings::{atomic_replace, clean_windows_path};
 use crate::workspace::WorkspaceRepository;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -141,10 +141,7 @@ impl WorkspaceRegistry {
         fs::create_dir_all(parent)?;
         let temporary = parent.join(format!(".workspaces.{}.tmp", Uuid::new_v4()));
         fs::write(&temporary, serde_json::to_vec_pretty(registry)?)?;
-        if self.path.exists() {
-            fs::remove_file(&self.path)?;
-        }
-        fs::rename(temporary, &self.path)?;
+        atomic_replace(&temporary, &self.path)?;
         Ok(())
     }
 }

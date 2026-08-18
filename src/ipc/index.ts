@@ -29,6 +29,7 @@ export interface Hint {
 }
 
 export interface AppError {
+  code?: string
   kind: ErrorKind
   message: string
   detail?: string
@@ -253,6 +254,10 @@ function isAppError(e: unknown): e is AppError {
 /** 把任意抛出物归一化成 AppError，保证 UI 永远拿得到 hints 数组。 */
 export function normalizeError(e: unknown): AppError {
   if (isAppError(e)) return e
+  if (typeof e === 'string') {
+    const match = e.match(/^([A-Z][A-Z0-9_]{2,}):?\s*(.*)$/)
+    if (match) return { code: match[1], kind: 'io', message: match[2] || match[1], hints: [] }
+  }
   return {
     kind: 'io',
     message: e instanceof Error ? e.message : String(e),

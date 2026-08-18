@@ -24,6 +24,13 @@ use std::sync::Arc;
 use std::time::Duration;
 use tauri::Manager;
 
+fn app_data_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    if let Some(path) = std::env::var_os("APOGEE_DATA_DIR") {
+        return Ok(std::path::PathBuf::from(path));
+    }
+    app.path().app_data_dir().map_err(|error| error.to_string())
+}
+
 pub fn run() {
     install_panic_hook();
 
@@ -107,10 +114,7 @@ pub fn run() {
             commands::yapi_discard_import,
         ])
         .setup(move |app| {
-            let data_dir = app
-                .path()
-                .app_data_dir()
-                .map_err(|error| std::io::Error::other(error.to_string()))?;
+            let data_dir = app_data_dir(&app.handle()).map_err(std::io::Error::other)?;
             std::fs::create_dir_all(&data_dir)?;
 
             let settings = app_settings::AppSettingsRepository::new(&data_dir).load()?;
@@ -234,7 +238,7 @@ mod commands {
 
     #[tauri::command]
     pub fn app_settings_load(app: tauri::AppHandle) -> Result<AppSettings, String> {
-        let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+        let dir = super::app_data_dir(&app)?;
         AppSettingsRepository::new(&dir)
             .load()
             .map_err(|e| e.to_string())
@@ -245,7 +249,7 @@ mod commands {
         app: tauri::AppHandle,
         settings: AppSettings,
     ) -> Result<AppSettings, String> {
-        let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+        let dir = super::app_data_dir(&app)?;
         let repo = AppSettingsRepository::new(&dir);
         repo.save(&settings).map_err(|e| e.to_string())?;
         repo.load().map_err(|e| e.to_string())
@@ -282,7 +286,7 @@ mod commands {
         let root = match path.filter(|value| !value.trim().is_empty()) {
             Some(path) => PathBuf::from(path),
             None => {
-                let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+                let data_dir = super::app_data_dir(&app)?;
                 let settings = AppSettingsRepository::new(&data_dir)
                     .load()
                     .map_err(|e| e.to_string())?;
@@ -413,10 +417,7 @@ mod commands {
         let descriptor = registry(app)?
             .register(&repository)
             .map_err(|error| error.to_string())?;
-        let data_dir = app
-            .path()
-            .app_data_dir()
-            .map_err(|error| error.to_string())?;
+        let data_dir = super::app_data_dir(app)?;
         let mut workspace_state = crate::workspace_state::WorkspaceStateRepository::new(&data_dir)
             .load(snapshot.id)
             .map_err(|error| error.to_string())?;
@@ -450,10 +451,7 @@ mod commands {
     }
 
     fn registry(app: &tauri::AppHandle) -> Result<WorkspaceRegistry, String> {
-        let data_dir = app
-            .path()
-            .app_data_dir()
-            .map_err(|error| error.to_string())?;
+        let data_dir = super::app_data_dir(app)?;
         Ok(WorkspaceRegistry::new(&data_dir))
     }
 
@@ -626,7 +624,7 @@ mod commands {
                 .map_err(|error| error.to_string())?;
         }
         // 应用级网络设置只作为默认值，显式配置在请求/集合层的字段优先。
-        let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+        let data_dir = super::app_data_dir(&app)?;
         let settings = crate::app_settings::AppSettingsRepository::new(&data_dir)
             .load()
             .map_err(|error| error.to_string())?;
@@ -1360,10 +1358,7 @@ mod commands {
                 Ok(())
             })
             .map_err(|error| error.to_string())?;
-        let data_dir = app
-            .path()
-            .app_data_dir()
-            .map_err(|error| error.to_string())?;
+        let data_dir = super::app_data_dir(&app)?;
         crate::workspace_state::WorkspaceStateRepository::new(&data_dir)
             .save(workspace_id, &workspace_state)
             .map_err(|error| error.to_string())
