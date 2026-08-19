@@ -249,20 +249,17 @@
 
   --a-text: #111827;
   --a-text-soft: #374151;
-  --a-text-dim: #6b7280;
-  --a-text-faint: #6b7280;
+  --a-text-dim: #5e6c80;
+  --a-text-faint: #5e6c80;
   --a-text-ghost: #d1d5db;
 
-  --a-primary: #6366f1;
+  --a-primary: #5b5bd6;
   --a-primary-hover: #4f46e5;
   --a-primary-pressed: #4338ca;
-  /* 亮主题下白字在 #2563EB 上是 5.17:1，可以用白字。 */
+  /* 亮主题下白字在 #5B5BD6 上达到 AA，对比度优先于综合色相。 */
   --a-on-primary: #ffffff;
-  /* 渐变末端从 Apogee 的 #0EA5E9 压深到 #0E7CAE。
-     原值配白字只有 2.77:1，按钮右半边的文字不可读。代价是天蓝略钝，
-     换来的是「发送」这一个最重要的按钮全幅可读。
-     暗主题不必付这个代价，因为它用深色前景，#38BDF8 上是 9.02:1。 */
-  --a-grad-from: #6366f1;
+  /* 渐变两端使用与主色一致的 AA 合格色；若末端过亮，按钮右半边文字会不可读。 */
+  --a-grad-from: #5b5bd6;
   --a-grad-to: #4f46e5;
   --a-primary-gradient: var(--a-primary);
   --a-glow: rgba(59, 130, 246, 0.08);
@@ -276,7 +273,7 @@
   --a-get-bg: rgba(5, 150, 105, 0.16);
   --a-post: #0369a1;
   --a-post-bg: rgba(14, 165, 233, 0.16);
-  --a-put: #b45309;
+  --a-put: #92400e;
   --a-put-bg: rgba(217, 119, 6, 0.16);
   --a-patch: #7e22ce;
   --a-patch-bg: rgba(147, 51, 234, 0.16);

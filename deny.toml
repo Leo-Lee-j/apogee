@@ -1,22 +1,16 @@
-# cargo-deny 配置 —— 对应决策 D6 / PRD §9.5「许可合规」
+# cargo-deny 配置 —— 开源发布的第三方许可与供应链门禁。
 #
-# 背景：Apogee 闭源分发（D6）。闭源产品分发第三方开源依赖有明确的法律要求：
-#   1. GPL / AGPL / SSPL 依赖 → 闭源分发直接违约，必须硬阻断
-#   2. MIT / Apache-2.0 等许可要求随产品附带归属声明 → 见 about.toml
-#
-# 本文件的作用是让「不小心引入 GPL 依赖」在 CI 阶段就 fail，而不是等到发布前才发现。
+# Apogee 源码以 MIT 发布，但第三方组件仍须兼容其各自的许可证，并在二进制
+# 发布物中附带归属声明（见 about.toml）。本文件让不兼容许可证、未知来源和
+# 已知安全公告在 CI 阶段直接失败，而不是等到发布前才发现。
 # 运行：cargo deny check
 
 [graph]
 all-features = false
 
-# 只检查**实际会分发**的目标平台（决策 D2：v1.0 前只做 Windows + macOS）。
-#
-# 这一条不是可选优化。不设 targets 时 cargo-deny 会把所有平台的依赖都算进来，
-# 于是 8 个 Linux 专用的 gtk-rs GTK3 绑定（atk / gdk / gtk / gtk-sys ...）
-# 会带着「已停止维护」的 advisory 一起报出来 —— 而这些 crate 根本不会进
-# 我们的 Windows/macOS 产物。噪声会让人养成忽略 cargo-deny 输出的习惯，
-# 那比不跑还糟。
+# 只检查**实际会分发**的目标平台（当前：Windows + macOS）。
+# 不设 targets 会把不进入发行产物的 Linux 专用 GTK 依赖及其 advisory 也纳入，
+# 产生噪声并掩盖真正需要处理的风险。
 targets = [
     "x86_64-pc-windows-msvc",
     "aarch64-apple-darwin",
@@ -27,7 +21,7 @@ targets = [
 version = 2
 
 # ── 允许的许可（白名单）──────────────────────────────────────────────
-# 只放宽松许可。新增条目前必须确认该许可允许闭源分发。
+# 仅接受与本项目分发策略兼容的许可证。新增条目前必须确认再分发义务。
 allow = [
     "MIT",
     "MIT-0",
@@ -42,7 +36,7 @@ allow = [
     "Unlicense",
     "BSL-1.0",
     "OpenSSL",
-    "MPL-2.0",       # 文件级 copyleft，不感染我们自己的代码；仅在不修改依赖源码时可用
+    "MPL-2.0",       # 文件级 copyleft；修改依赖源码前必须重新评估
 ]
 
 # 置信度阈值：低于此值的许可识别结果视为未知，会触发失败
@@ -51,9 +45,8 @@ confidence-threshold = 0.9
 # 例外清单：留空。任何例外都必须显式写在这里并附理由，避免默默放水。
 exceptions = []
 
-# 工作区内部 crate 不参与许可检查。
-# 我们自己的 crate 标的是 `LicenseRef-proprietary`（不是 SPDX 标准许可），
-# 本来就不在白名单里，也不需要在 —— 白名单管的是**第三方**依赖。
+# 工作区 crate 的许可证由根目录 LICENSE 与 workspace.package.license 声明；
+# 这里仅审计会随产品分发的第三方依赖，避免重复检查自身源码。
 [licenses.private]
 ignore = true
 
@@ -88,10 +81,9 @@ yanked = "deny"
 # 规则：每条都要写清「为什么现在不能修」和「什么时候复查」。
 # 不允许出现没有理由的 ignore —— 那等于关掉了整个 advisories 检查。
 #
-# 下面这些全部是 Tauri 的传递依赖，且上游 advisory 明确写了
-# "No safe upgrade is available"。它们是 unmaintained 类告警，不是已知漏洞。
-# 复查时机：每次升级 tauri 大版本时重新跑 `cargo deny check advisories`，
-# 能去掉的立刻去掉。
+# 这些条目均为“已停止维护”而非已知可利用漏洞，且公告明确没有安全升级路径。
+# 复查时机：每次执行 `cargo update`，或升级 Tauri/fontdb 时重新运行
+# `cargo deny check advisories`；存在可替代版本时立刻移除对应 ignore。
 ignore = [
     # urlpattern → tauri-utils → tauri。rust-unic 整个项目已停止维护。
     { id = "RUSTSEC-2025-0075", reason = "unic-char-range：经 urlpattern 传递自 tauri-utils，上游无可用替代" },
@@ -99,6 +91,8 @@ ignore = [
     { id = "RUSTSEC-2025-0081", reason = "unic-char-property：同上" },
     { id = "RUSTSEC-2025-0098", reason = "unic-ucd-version：同上" },
     { id = "RUSTSEC-2025-0100", reason = "unic-ucd-ident：同上" },
+    # fontdb 仅用于枚举本机字体族；ttf-parser 是其唯一上游依赖，公告无安全升级。
+    { id = "RUSTSEC-2026-0192", reason = "ttf-parser：由 fontdb 0.23.0 引入，仅用于本机字体枚举；公告无可用安全升级，升级或替换 fontdb 时必须复查" },
 ]
 # 注：限定 targets 后，原先出现的 8 条 gtk-rs GTK3 advisory 和
 # proc-macro-error(RUSTSEC-2024-0370) 都不再进入依赖图，所以不需要 ignore。

@@ -21,8 +21,8 @@ use apogee_core::request::{AuthConfig, Body, RequestSettings, RequestSpec};
 use apogee_core::response::ResponseSummary;
 use apogee_core::vars::Environment;
 use apogee_core::workspace::{
-    CollectionEntry, ContainerDocument, EnvironmentEntry, PersistedRequest, WorkspaceManifest,
-    WorkspaceContainer, WorkspaceNode, WorkspaceNodeKind, WorkspaceRequest, WorkspaceSnapshot,
+    CollectionEntry, ContainerDocument, EnvironmentEntry, PersistedRequest, WorkspaceContainer,
+    WorkspaceManifest, WorkspaceNode, WorkspaceNodeKind, WorkspaceRequest, WorkspaceSnapshot,
     WORKSPACE_FORMAT_VERSION,
 };
 use serde::de::DeserializeOwned;
@@ -442,24 +442,40 @@ impl WorkspaceRepository {
         write_yaml(&location.path.join(marker), &document)?;
         if matches!(location.node.kind, WorkspaceNodeKind::Collection) {
             let mut manifest = self.read_manifest()?;
-            let entry = manifest.collections.iter_mut().find(|entry| entry.id == container.id)
+            let entry = manifest
+                .collections
+                .iter_mut()
+                .find(|entry| entry.id == container.id)
                 .with_context(|| format!("工作区清单中没有集合：{}", container.id))?;
             entry.name = name;
             write_yaml(&self.manifest_path(), &manifest)?;
         }
-        Ok(WorkspaceContainer { id: document.id, name: document.name, auth: document.auth, settings: document.settings })
+        Ok(WorkspaceContainer {
+            id: document.id,
+            name: document.name,
+            auth: document.auth,
+            settings: document.settings,
+        })
     }
 
-    pub fn resolve_request_inheritance(&self, request_id: Uuid, mut spec: RequestSpec) -> Result<RequestSpec> {
+    pub fn resolve_request_inheritance(
+        &self,
+        request_id: Uuid,
+        mut spec: RequestSpec,
+    ) -> Result<RequestSpec> {
         let locations = self.scan()?;
-        let mut current = locations.iter().find(|item| item.node.id == request_id)
+        let mut current = locations
+            .iter()
+            .find(|item| item.node.id == request_id)
             .with_context(|| format!("未知的工作区节点：{request_id}"))?;
         if !matches!(current.node.kind, WorkspaceNodeKind::Request) {
             bail!("节点不是请求：{request_id}");
         }
         let mut ancestors = Vec::new();
         while let Some(parent_id) = current.node.parent_id {
-            current = locations.iter().find(|item| item.node.id == parent_id)
+            current = locations
+                .iter()
+                .find(|item| item.node.id == parent_id)
                 .with_context(|| format!("请求 {request_id} 的上级节点不存在：{parent_id}"))?;
             ancestors.push(current);
         }
@@ -470,10 +486,14 @@ impl WorkspaceRepository {
         for ancestor in ancestors {
             let marker = container_marker(&ancestor.node.kind)?;
             let container: ContainerDocument = read_yaml(&ancestor.path.join(marker))?;
-            if !matches!(container.auth, AuthConfig::Inherit) { auth = container.auth; }
+            if !matches!(container.auth, AuthConfig::Inherit) {
+                auth = container.auth;
+            }
             merge_settings(&mut settings, &container.settings);
         }
-        if matches!(spec.auth, AuthConfig::Inherit) { spec.auth = auth; }
+        if matches!(spec.auth, AuthConfig::Inherit) {
+            spec.auth = auth;
+        }
         merge_settings(&mut settings, &spec.settings);
         spec.settings = settings;
         Ok(spec)
@@ -725,9 +745,8 @@ impl WorkspaceRepository {
                         &staging_environments.join(format!("{}.yaml", environment.id)),
                         &environment,
                     )?;
-                    let _: Environment = read_yaml(
-                        &staging_environments.join(format!("{}.yaml", environment.id)),
-                    )?;
+                    let _: Environment =
+                        read_yaml(&staging_environments.join(format!("{}.yaml", environment.id)))?;
                     environments.push(environment);
                 }
             }
@@ -759,10 +778,12 @@ impl WorkspaceRepository {
                 name: collection_name.clone(),
                 directory,
             });
-            manifest.environments.extend(environments.iter().map(|environment| EnvironmentEntry {
-                id: environment.id,
-                name: environment.name.clone(),
-            }));
+            manifest
+                .environments
+                .extend(environments.iter().map(|environment| EnvironmentEntry {
+                    id: environment.id,
+                    name: environment.name.clone(),
+                }));
             write_yaml(&self.manifest_path(), &manifest)?;
             // 只有完整快照可重读时才视为提交成功。
             self.snapshot()?;
@@ -849,13 +870,15 @@ impl WorkspaceRepository {
                     .find(|entry| entry.id == id)
                     .with_context(|| format!("工作区清单中没有集合：{id}"))?;
                 entry.name = name.clone();
-                let mut document: ContainerDocument = read_yaml(&location.path.join(COLLECTION_MARKER))?;
+                let mut document: ContainerDocument =
+                    read_yaml(&location.path.join(COLLECTION_MARKER))?;
                 document.name = name;
                 write_yaml(&location.path.join(COLLECTION_MARKER), &document)?;
                 write_yaml(&self.manifest_path(), &manifest)?;
             }
             WorkspaceNodeKind::Folder => {
-                let mut document: ContainerDocument = read_yaml(&location.path.join(FOLDER_MARKER))?;
+                let mut document: ContainerDocument =
+                    read_yaml(&location.path.join(FOLDER_MARKER))?;
                 document.name = name;
                 write_yaml(&location.path.join(FOLDER_MARKER), &document)?;
             }
@@ -1109,16 +1132,36 @@ fn container_marker(kind: &WorkspaceNodeKind) -> Result<&'static str> {
 }
 
 fn merge_settings(base: &mut RequestSettings, override_with: &RequestSettings) {
-    if override_with.timeout_ms.is_some() { base.timeout_ms = override_with.timeout_ms; }
-    if override_with.follow_redirects.is_some() { base.follow_redirects = override_with.follow_redirects; }
-    if override_with.max_redirects.is_some() { base.max_redirects = override_with.max_redirects; }
-    if override_with.verify_tls.is_some() { base.verify_tls = override_with.verify_tls; }
-    if override_with.http_version.is_some() { base.http_version = override_with.http_version; }
-    if override_with.encode_url.is_some() { base.encode_url = override_with.encode_url; }
-    if override_with.send_cookies.is_some() { base.send_cookies = override_with.send_cookies; }
-    if override_with.proxy_url.is_some() { base.proxy_url = override_with.proxy_url.clone(); }
-    if override_with.retry_count.is_some() { base.retry_count = override_with.retry_count; }
-    if override_with.retry_backoff_ms.is_some() { base.retry_backoff_ms = override_with.retry_backoff_ms; }
+    if override_with.timeout_ms.is_some() {
+        base.timeout_ms = override_with.timeout_ms;
+    }
+    if override_with.follow_redirects.is_some() {
+        base.follow_redirects = override_with.follow_redirects;
+    }
+    if override_with.max_redirects.is_some() {
+        base.max_redirects = override_with.max_redirects;
+    }
+    if override_with.verify_tls.is_some() {
+        base.verify_tls = override_with.verify_tls;
+    }
+    if override_with.http_version.is_some() {
+        base.http_version = override_with.http_version;
+    }
+    if override_with.encode_url.is_some() {
+        base.encode_url = override_with.encode_url;
+    }
+    if override_with.send_cookies.is_some() {
+        base.send_cookies = override_with.send_cookies;
+    }
+    if override_with.proxy_url.is_some() {
+        base.proxy_url = override_with.proxy_url.clone();
+    }
+    if override_with.retry_count.is_some() {
+        base.retry_count = override_with.retry_count;
+    }
+    if override_with.retry_backoff_ms.is_some() {
+        base.retry_backoff_ms = override_with.retry_backoff_ms;
+    }
 }
 
 fn unique_name<'a>(base: &str, existing: impl IntoIterator<Item = &'a str>) -> String {
@@ -1146,8 +1189,13 @@ fn validate_import_tree(root: &Path) -> Result<()> {
             if entry.file_type()?.is_dir() {
                 let _: ContainerDocument = read_yaml(&path.join(FOLDER_MARKER))?;
                 visit(&path)?;
-            } else if path.extension().is_some_and(|extension| extension == "yaml")
-                && path.file_name().and_then(|name| name.to_str()).is_some_and(|name| !name.starts_with('_'))
+            } else if path
+                .extension()
+                .is_some_and(|extension| extension == "yaml")
+                && path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| !name.starts_with('_'))
             {
                 let _: PersistedRequest = read_yaml(&path)?;
             }
@@ -1205,6 +1253,10 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::items_after_test_module,
+    reason = "normalize_environment_host is kept after the focused persistence regressions to avoid a broad unrelated reorder"
+)]
 mod tests {
     use super::*;
     use apogee_core::model::Timing;
@@ -1334,25 +1386,67 @@ mod tests {
     fn resolves_container_auth_and_settings_from_nearest_ancestor() {
         let root = std::env::temp_dir().join(format!("apogee-inherit-test-{}", Uuid::new_v4()));
         let repository = WorkspaceRepository::create(&root, "test".into()).unwrap();
-        let collection = repository.create_collection("API".into()).unwrap()
-            .nodes.into_iter().find(|node| matches!(node.kind, WorkspaceNodeKind::Collection)).unwrap();
-        let folder = repository.create_folder(collection.id, "users".into()).unwrap()
-            .nodes.into_iter().find(|node| node.parent_id == Some(collection.id) && matches!(node.kind, WorkspaceNodeKind::Folder)).unwrap();
+        let collection = repository
+            .create_collection("API".into())
+            .unwrap()
+            .nodes
+            .into_iter()
+            .find(|node| matches!(node.kind, WorkspaceNodeKind::Collection))
+            .unwrap();
+        let folder = repository
+            .create_folder(collection.id, "users".into())
+            .unwrap()
+            .nodes
+            .into_iter()
+            .find(|node| {
+                node.parent_id == Some(collection.id)
+                    && matches!(node.kind, WorkspaceNodeKind::Folder)
+            })
+            .unwrap();
         let request = repository.create_request(folder.id, "get".into()).unwrap();
 
-        repository.save_container(WorkspaceContainer {
-            id: collection.id, name: collection.name, auth: AuthConfig::Bearer { token: "collection".into() },
-            settings: RequestSettings { timeout_ms: Some(1000), ..Default::default() },
-        }).unwrap();
-        repository.save_container(WorkspaceContainer {
-            id: folder.id, name: folder.name, auth: AuthConfig::ApiKey { key: "x-key".into(), value: "folder".into(), location: apogee_core::request::ApiKeyIn::Header },
-            settings: RequestSettings { timeout_ms: Some(2000), verify_tls: Some(false), ..Default::default() },
-        }).unwrap();
+        repository
+            .save_container(WorkspaceContainer {
+                id: collection.id,
+                name: collection.name,
+                auth: AuthConfig::Bearer {
+                    token: "collection".into(),
+                },
+                settings: RequestSettings {
+                    timeout_ms: Some(1000),
+                    ..Default::default()
+                },
+            })
+            .unwrap();
+        repository
+            .save_container(WorkspaceContainer {
+                id: folder.id,
+                name: folder.name,
+                auth: AuthConfig::ApiKey {
+                    key: "x-key".into(),
+                    value: "folder".into(),
+                    location: apogee_core::request::ApiKeyIn::Header,
+                },
+                settings: RequestSettings {
+                    timeout_ms: Some(2000),
+                    verify_tls: Some(false),
+                    ..Default::default()
+                },
+            })
+            .unwrap();
 
-        let spec = repository.resolve_request_inheritance(request.id, RequestSpec {
-            settings: RequestSettings { timeout_ms: Some(3000), ..Default::default() },
-            ..default_request_spec()
-        }).unwrap();
+        let spec = repository
+            .resolve_request_inheritance(
+                request.id,
+                RequestSpec {
+                    settings: RequestSettings {
+                        timeout_ms: Some(3000),
+                        ..Default::default()
+                    },
+                    ..default_request_spec()
+                },
+            )
+            .unwrap();
         assert!(matches!(spec.auth, AuthConfig::ApiKey { ref value, .. } if value == "folder"));
         assert_eq!(spec.settings.timeout_ms, Some(3000));
         assert_eq!(spec.settings.verify_tls, Some(false));

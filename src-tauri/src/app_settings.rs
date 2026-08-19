@@ -9,11 +9,21 @@ pub(crate) fn atomic_replace(temporary: &Path, target: &Path) -> Result<()> {
     {
         use std::os::windows::ffi::OsStrExt;
         use windows_sys::Win32::Storage::FileSystem::{MoveFileExW, MOVEFILE_REPLACE_EXISTING};
-        let from: Vec<u16> = temporary.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
-        let to: Vec<u16> = target.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+        let from: Vec<u16> = temporary
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+        let to: Vec<u16> = target
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
         let ok = unsafe { MoveFileExW(from.as_ptr(), to.as_ptr(), MOVEFILE_REPLACE_EXISTING) };
-        if ok == 0 { anyhow::bail!("无法原子替换文件：{}", target.display()); }
-        return Ok(());
+        if ok == 0 {
+            anyhow::bail!("无法原子替换文件：{}", target.display());
+        }
+        Ok(())
     }
     #[cfg(not(windows))]
     {

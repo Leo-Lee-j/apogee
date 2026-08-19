@@ -6,11 +6,11 @@ members = ["crates/apogee-core", "src-tauri", "spikes/s6-postman-schema"]
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.85"
-license = "LicenseRef-proprietary"
+license = "MIT"
+# 源码按 MIT 协议开放；在另行制定 crates.io 发布策略前，仍禁止误发布 crate。
 publish = false
 
-# 决策 D6：闭源发布。所有 crate 标记 publish = false，避免误发到 crates.io。
-# 依赖许可白名单见 deny.toml（PRD §9.5）。
+# 第三方许可白名单、来源和漏洞门禁见 deny.toml。
 
 [workspace.dependencies]
 apogee-core = { path = "crates/apogee-core" }

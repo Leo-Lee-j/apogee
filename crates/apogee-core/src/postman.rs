@@ -221,7 +221,7 @@ fn rows_value(value: &serde_json::Value) -> Vec<KeyValue> {
             Some(KeyValue {
                 enabled: !v.get("disabled").and_then(|x| x.as_bool()).unwrap_or(false),
                 key: v.get("key")?.as_str()?.into(),
-                value: value_text(v.get("value")).into(),
+                value: value_text(v.get("value")),
                 description: v
                     .get("description")
                     .and_then(|value| value.as_str())

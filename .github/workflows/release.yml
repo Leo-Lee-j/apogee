@@ -1,0 +1,226 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing v<semver> tag to release
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build and publish Windows release
+    runs-on: windows-latest
+    timeout-minutes: 90
+    env:
+      CARGO_TERM_COLOR: always
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - name: Validate tag and version metadata
+        shell: pwsh
+        run: |
+          $tag = $env:RELEASE_TAG
+          if ($tag -notmatch '^v(?<version>(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?)$') {
+            throw "Release tag must be v<semver>; got '$tag'."
+          }
+          $version = $Matches['version']
+          $npmVersion = (Get-Content -LiteralPath package.json -Raw | ConvertFrom-Json).version
+          $tauriVersion = (Get-Content -LiteralPath src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          $cargoText = Get-Content -LiteralPath Cargo.toml -Raw
+          $cargoMatch = [regex]::Match($cargoText, '(?ms)^\[workspace\.package\].*?^version\s*=\s*"(?<version>[^"]+)"')
+          if (-not $cargoMatch.Success) { throw 'Could not read workspace package version from Cargo.toml.' }
+          $cargoVersion = $cargoMatch.Groups['version'].Value
+          if ($npmVersion -ne $version -or $tauriVersion -ne $version -or $cargoVersion -ne $version) {
+            throw "Tag $tag does not match package.json=$npmVersion, tauri.conf.json=$tauriVersion, Cargo.toml=$cargoVersion."
+          }
+          $stable = $tag -match '^v\d+\.\d+\.\d+$'
+          "RELEASE_VERSION=$version" | Add-Content -LiteralPath $env:GITHUB_ENV
+          "IS_STABLE=$($stable.ToString().ToLowerInvariant())" | Add-Content -LiteralPath $env:GITHUB_ENV
+          $sourceDateEpoch = git log -1 --format=%ct
+          if ($sourceDateEpoch -notmatch '^\d+$') { throw 'Could not derive SOURCE_DATE_EPOCH from the checked-out tag.' }
+          "SOURCE_DATE_EPOCH=$sourceDateEpoch" | Add-Content -LiteralPath $env:GITHUB_ENV
+
+      - name: Require signing credentials for stable releases
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          if ($env:IS_STABLE -ne 'true') {
+            Write-Host 'Prerelease tag: unsigned builds are permitted only when explicitly documented in Release Notes.'
+            exit 0
+          }
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_BASE64) -or [string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PASSWORD)) {
+            throw 'Stable releases require WINDOWS_CERTIFICATE_BASE64 and WINDOWS_CERTIFICATE_PASSWORD GitHub Actions secrets.'
+          }
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.17.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.15.0
+          cache: pnpm
+
+      - name: Install Rust MSRV
+        shell: pwsh
+        run: |
+          rustup toolchain install 1.85.1-x86_64-pc-windows-msvc --profile minimal
+          rustup default 1.85.1-x86_64-pc-windows-msvc
+          rustc --version
+
+      - name: Install JavaScript dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Rust compliance tools
+        shell: pwsh
+        run: |
+          cargo +stable install cargo-deny --version 0.20.2 --locked
+          cargo +stable install cargo-about --version 0.9.1 --locked
+
+      - name: Verify release quality gates
+        shell: pwsh
+        run: |
+          pnpm audit --prod --audit-level=low --json
+          pnpm licenses:check
+          pnpm typecheck
+          pnpm test
+          pnpm build
+          pnpm check:contrast
+          cargo fmt --all -- --check
+          cargo clippy --workspace --all-targets --locked -- -D warnings
+          cargo test --workspace --locked
+          cargo build -p apogee-desktop --locked
+          pnpm test:e2e
+
+      - name: Generate third-party notices and SBOMs
+        shell: pwsh
+        run: |
+          pnpm licenses:rust
+          pnpm licenses:npm
+          pnpm generate:sbom
+
+      - name: Build Windows NSIS installer
+        run: pnpm tauri build --bundles nsis
+
+      - name: Sign and verify Windows installer when credentials are available
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          $installers = @(Get-ChildItem -LiteralPath target/release/bundle/nsis -File -Filter 'Apogee_*_x64-setup.exe')
+          if ($installers.Count -ne 1) { throw "Expected exactly one current NSIS installer, found $($installers.Count)." }
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_BASE64) -or [string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PASSWORD)) {
+            if ($env:IS_STABLE -eq 'true') { throw 'Stable release reached signing without a complete certificate credential set.' }
+            Write-Host 'No complete signing certificate configured; publishing this prerelease as unsigned.'
+            'INSTALLER_SIGNED=false' | Add-Content -LiteralPath $env:GITHUB_ENV
+            exit 0
+          }
+
+          $kitBin = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\bin'
+          $signtool = Get-ChildItem -Path $kitBin -Recurse -File -Filter signtool.exe |
+            Where-Object { $_.FullName -match '\\x64\\' } |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if ($null -eq $signtool) { throw 'Windows SDK signtool.exe was not found on the runner.' }
+
+          $certificatePath = Join-Path $env:RUNNER_TEMP 'apogee-signing.pfx'
+          try {
+            [IO.File]::WriteAllBytes($certificatePath, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_BASE64))
+            & $signtool.FullName sign /fd SHA256 /f $certificatePath /p $env:WINDOWS_CERTIFICATE_PASSWORD /tr http://timestamp.digicert.com /td SHA256 $installers[0].FullName
+            if ($LASTEXITCODE -ne 0) { throw "signtool sign failed with exit code $LASTEXITCODE." }
+            & $signtool.FullName verify /pa /v $installers[0].FullName
+            if ($LASTEXITCODE -ne 0) { throw "signtool verify failed with exit code $LASTEXITCODE." }
+            'INSTALLER_SIGNED=true' | Add-Content -LiteralPath $env:GITHUB_ENV
+          } finally {
+            Remove-Item -LiteralPath $certificatePath -Force -ErrorAction SilentlyContinue
+          }
+
+      - name: Assemble release assets and checksums
+        shell: pwsh
+        run: |
+          $assetDir = Join-Path $env:GITHUB_WORKSPACE 'release-assets'
+          New-Item -ItemType Directory -Path $assetDir -Force | Out-Null
+          $installer = Get-ChildItem -LiteralPath target/release/bundle/nsis -File -Filter 'Apogee_*_x64-setup.exe'
+          if ($installer.Count -ne 1) { throw "Expected exactly one current NSIS installer, found $($installer.Count)." }
+          $files = @(
+            $installer.FullName,
+            'LICENSE',
+            'THIRD-PARTY-NOTICES.txt',
+            'THIRD-PARTY-NOTICES-NPM.txt',
+            'apogee-rust.spdx.json',
+            'apogee-npm.spdx.json'
+          )
+          foreach ($file in $files) {
+            if (-not (Test-Path -LiteralPath $file)) { throw "Required release asset is missing: $file" }
+            Copy-Item -LiteralPath $file -Destination $assetDir -Force
+          }
+          $checksumLines = Get-ChildItem -LiteralPath $assetDir -File |
+            Sort-Object Name |
+            ForEach-Object {
+              $hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+              "$hash *$($_.Name)"
+            }
+          Set-Content -LiteralPath (Join-Path $assetDir 'SHA256SUMS.txt') -Value $checksumLines -NoNewline
+
+          $signingState = if ($env:INSTALLER_SIGNED -eq 'true') {
+            'Authenticode signed and verified by the release workflow.'
+          } else {
+            'Unsigned prerelease: no complete Windows signing credential set was available.'
+          }
+          $notesFile = Join-Path $env:RUNNER_TEMP 'apogee-release-verification.md'
+          $notes = @(
+            '## Verification',
+            '',
+            "- Windows installer: $signingState",
+            '- Verify the installer against `SHA256SUMS.txt` before installation.',
+            '- Inspect `apogee-rust.spdx.json`, `apogee-npm.spdx.json`, and both third-party notice files for dependency provenance and attribution.',
+            '',
+            '## Release notes',
+            '',
+            'See `CHANGELOG.md` in this tagged source revision for user-visible changes.'
+          ) -join "`n"
+          Set-Content -LiteralPath $notesFile -Value $notes
+          "RELEASE_ASSET_DIR=$assetDir" | Add-Content -LiteralPath $env:GITHUB_ENV
+          "RELEASE_NOTES_FILE=$notesFile" | Add-Content -LiteralPath $env:GITHUB_ENV
+
+      - name: Preserve built assets from this workflow run
+        uses: actions/upload-artifact@v4
+        with:
+          name: apogee-${{ env.RELEASE_VERSION }}-windows-x64
+          path: release-assets
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $assets = @(Get-ChildItem -LiteralPath $env:RELEASE_ASSET_DIR -File | Sort-Object Name | ForEach-Object FullName)
+          if ($assets.Count -lt 2) { throw 'Release asset collection is unexpectedly incomplete.' }
+          $arguments = @('release', 'create', $env:RELEASE_TAG, '--repo', $env:GITHUB_REPOSITORY, '--verify-tag', '--title', "Apogee $env:RELEASE_VERSION", '--notes-file', $env:RELEASE_NOTES_FILE)
+          if ($env:IS_STABLE -ne 'true') { $arguments += '--prerelease' }
+          $arguments += $assets
+          & gh @arguments
+          if ($LASTEXITCODE -ne 0) { throw "gh release create failed with exit code $LASTEXITCODE." }

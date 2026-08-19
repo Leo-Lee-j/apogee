@@ -740,7 +740,10 @@ pub enum Outcome {
     Failed {
         error: AppError,
         /// 请求已经组装完成时保留快照，让网络失败仍能查看最终发送内容。
-        actual_request: Option<ActualRequest>,
+        ///
+        /// 实际请求可能包含较大的 Body；单独装箱，避免所有 Outcome 都为该
+        /// 失败分支支付同等大小的栈空间。
+        actual_request: Box<Option<ActualRequest>>,
     },
 }
 
@@ -777,7 +780,7 @@ pub async fn execute(
         Ok(None) => Outcome::Cancelled,
         Err(failure) => Outcome::Failed {
             error: failure.error,
-            actual_request: failure.actual_request,
+            actual_request: Box::new(failure.actual_request),
         },
     }
 }

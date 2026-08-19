@@ -4,6 +4,9 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+overrides:
+  nanoid: 3.3.18
+
 importers:
 
   .:
@@ -720,8 +723,8 @@ packages:
     peerDependencies:
       vue: ^3.0.0
 
-  nanoid@3.3.16:
-    resolution: {integrity: sha512-bzlKTyNJ7+LdGIIwy8ijFpIqEQIvafahV7eYykJ8Cvh42EdJeODoJ6gUJXpQJvej1BddH8OqTXZNE/KfbWAu8Q==}
+  nanoid@3.3.18:
+    resolution: {integrity: sha512-DTg4MJbGMWkfi6VZFdNt2/caMbQy4Ou+Op/hJQvGEWcnVfoA1QA+xzRKAzw9jD6+GVOOeYr/mIcuDSdug6F6+w==}
     engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
     hasBin: true
 
@@ -1629,7 +1632,7 @@ snapshots:
       vue: 3.5.40(typescript@5.9.3)
       vueuc: 0.4.65(vue@3.5.40(typescript@5.9.3))
 
-  nanoid@3.3.16: {}
+  nanoid@3.3.18: {}
 
   nostics@1.2.0: {}
 
@@ -1669,7 +1672,7 @@ snapshots:
 
   postcss@8.5.23:
     dependencies:
-      nanoid: 3.3.16
+      nanoid: 3.3.18
       picocolors: 1.1.1
       source-map-js: 1.2.1
 

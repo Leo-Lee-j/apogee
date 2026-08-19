@@ -1,0 +1,48 @@
+name: Feature proposal
+description: Propose a focused, user-visible improvement
+title: '[Feature]: '
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the user problem first. Apogee is local-first and performance-constrained, so proposals should explain privacy, startup, memory, package-size, and maintenance trade-offs where relevant.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: Who encounters this problem, and what is the current workaround?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the smallest useful behavior, not only an implementation preference.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Include existing tools, workflows, or smaller changes that would address the problem.
+
+  - type: textarea
+    id: impact
+    attributes:
+      label: Privacy, performance, compatibility, and maintenance impact
+      description: State any expected network access, data handling, startup/memory/package impact, platform scope, or new dependency.
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues and did not include secrets or private user data.
+          required: true
+        - label: I understand that the proposal may be declined if it conflicts with the documented product boundary.
+          required: true

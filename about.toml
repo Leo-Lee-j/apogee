@@ -1,12 +1,11 @@
-# cargo-about 配置 —— 生成 THIRD-PARTY-NOTICES.txt
+# cargo-about 配置 —— 生成 THIRD-PARTY-NOTICES.txt。
 #
-# 对应决策 D6 / PRD §9.5：MIT、Apache-2.0、BSD 等许可要求分发时附带版权与许可声明。
-# 这是**强制项**，不是可选项 —— 闭源产品尤其需要，因为用户无法从源码里看到这些声明。
+# 即使 Apogee 源码按 MIT 公开，分发 Windows/macOS 安装包时仍必须保留
+# 所有第三方组件的版权与许可证声明。发布工作流会生成并随 Release 附带此文件。
 #
 # 生成：cargo about generate about.hbs -o THIRD-PARTY-NOTICES.txt
-# 该产物必须随安装包分发，并在「关于」页可查。
 
-# 只针对实际会分发的目标平台收集依赖（决策 D2：仅 Windows + macOS）
+# 只针对实际会分发的目标平台收集依赖（当前：Windows + macOS）
 targets = [
     "x86_64-pc-windows-msvc",
     "aarch64-apple-darwin",
@@ -17,9 +16,7 @@ targets = [
 ignore-build-dependencies = true
 ignore-dev-dependencies = true
 
-# 跳过工作区内部 crate（publish = false 的那些）。
-# 它们标的是 LicenseRef-proprietary，不是 SPDX 标准许可，本来也不需要
-# 对自己做归属声明 —— 这份文件是给**第三方**开源组件用的。
+# 归属声明只列出第三方组件；项目自身的 MIT 许可由根目录 LICENSE 负责。
 # 与 deny.toml 的 [licenses.private] ignore = true 一致。
 private = { ignore = true }
 

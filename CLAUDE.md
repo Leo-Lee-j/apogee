@@ -43,9 +43,19 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 
-# 许可与视觉门禁
+# 安全、许可与视觉门禁
+pnpm audit --prod --audit-level=low
 pnpm licenses:check
 pnpm check:contrast
+
+# 发布归属与 SBOM（生成物保持忽略，不手工提交）
+pnpm licenses:rust
+pnpm licenses:npm
+pnpm generate:sbom
+
+# 真实 Windows 桌面 E2E（先构建 debug 应用）
+cargo build -p apogee-desktop --locked
+pnpm test:e2e
 
 # 性能/体积 Spike，耗时较长，按改动风险选择执行
 pnpm spike:s1
@@ -55,7 +65,7 @@ pnpm spike:s5
 
 Tauri 的 `beforeBuildCommand` 使用 `pnpm build:nocheck`，因此不能把桌面构建成功当作 TypeScript 检查通过；提交前应单独运行 `pnpm typecheck` 或 `pnpm build`。
 
-仓库当前没有前端单元测试框架。前端改动至少运行类型检查和构建；Rust 领域逻辑应补充相邻模块的 `#[cfg(test)]` 单元测试。
+仓库已使用 Vitest 运行前端单元测试（`pnpm test`），并提供基于真实 Tauri/WebView2 的 Windows E2E（`pnpm test:e2e`）。前端改动至少运行与影响范围相符的类型检查、单测和构建；Rust 领域逻辑应补充相邻模块的 `#[cfg(test)]` 单元测试。
 
 ## 代码结构
 
@@ -110,7 +120,7 @@ Tauri 的 `beforeBuildCommand` 使用 `pnpm build:nocheck`，因此不能把桌�
 - 领域错误使用统一的 `AppError`、`ErrorKind` 和 `Hint`，不要把内部错误字符串直接泄露给 UI。
 - 大文件与响应体使用流式 I/O；禁止用 `response.bytes().await` 等方式整体读入内存。
 - 公共行为尽量落在 `apogee-core` 的纯函数或可测试服务中，Tauri 层只负责适配。
-- 新依赖必须兼容闭源分发许可。禁止 GPL、AGPL、SSPL；新增依赖后运行 `pnpm licenses:check` 并评估包体影响。
+- 新依赖必须符合项目的 MIT 分发策略与 `deny.toml` 白名单。默认不引入 GPL、AGPL、SSPL；这类依赖会改变再分发义务，只有经过明确的维护者与许可评估才能例外。新增依赖后运行 `pnpm audit --prod --audit-level=low`、`pnpm licenses:check` 并评估包体影响。
 - 保持根 `Cargo.toml` 的 release 体积配置及 reqwest/rustls feature 选择。不要引入 OpenSSL、默认 TLS 或需要 NASM/CMake 的 aws-lc-rs 路径。
 
 ## 性能与验证

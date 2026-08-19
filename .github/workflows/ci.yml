@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Windows quality gates
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.17.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.15.0
+          cache: pnpm
+
+      - name: Install Rust MSRV
+        shell: pwsh
+        run: |
+          rustup toolchain install 1.85.1-x86_64-pc-windows-msvc --profile minimal
+          rustup default 1.85.1-x86_64-pc-windows-msvc
+          rustc --version
+          cargo --version
+
+      - name: Install JavaScript dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Rust compliance tools
+        shell: pwsh
+        run: |
+          cargo +stable install cargo-deny --version 0.20.2 --locked
+          cargo deny --version
+
+      - name: Audit production npm dependencies
+        run: pnpm audit --prod --audit-level=low --json
+
+      - name: Check dependency licenses, sources, and advisories
+        run: pnpm licenses:check
+
+      - name: Check TypeScript
+        run: pnpm typecheck
+
+      - name: Run frontend unit tests
+        run: pnpm test
+
+      - name: Build frontend
+        run: pnpm build
+
+      - name: Check visual contrast and token drift
+        run: pnpm check:contrast
+
+      - name: Check Rust formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run Rust Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Run Rust tests
+        run: cargo test --workspace --locked
+
+      - name: Build Windows desktop test binary
+        run: cargo build -p apogee-desktop --locked
+
+      - name: Run real Tauri/WebView2 E2E
+        run: pnpm test:e2e

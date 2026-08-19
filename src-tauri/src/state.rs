@@ -33,11 +33,14 @@ struct InFlight {
     tab_id: Option<String>,
 }
 
+/// 响应摘要索引：响应 ID、传输体积、耗时和 Content-Type。体不进入此缓存。
+type ResponseMetaEntry = (Uuid, u64, Timing, Option<String>);
+
 pub struct AppState {
     pub spool: RwLock<Spool>,
     pub store: ResponseStore,
     /// 只存元信息（体积、耗时），**不存 body**。
-    pub(crate) meta: RwLock<Vec<(Uuid, u64, Timing, Option<String>)>>,
+    pub(crate) meta: RwLock<Vec<ResponseMetaEntry>>,
     semantic_meta: RwLock<HashMap<Uuid, ResponseSummary>>,
     /// 当前窗口绑定的工作区会话。启动入口阶段为 None。
     pub workspace: RwLock<Option<WorkspaceSession>>,
@@ -212,7 +215,7 @@ impl AppState {
             let s = String::from_utf8_lossy(&full).to_string();
             let start = s.find('[').map(|i| i + 1).unwrap_or(0);
             let end = s.rfind("]}}").unwrap_or(s.len());
-            s[start..end].as_bytes().to_vec()
+            s.as_bytes()[start..end].to_vec()
         };
 
         // 真正的流式：迭代器只反复交出同一个 1MB 块的**引用**，

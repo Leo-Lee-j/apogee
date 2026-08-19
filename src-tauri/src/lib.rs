@@ -114,7 +114,7 @@ pub fn run() {
             commands::yapi_discard_import,
         ])
         .setup(move |app| {
-            let data_dir = app_data_dir(&app.handle()).map_err(std::io::Error::other)?;
+            let data_dir = app_data_dir(app.handle()).map_err(std::io::Error::other)?;
             std::fs::create_dir_all(&data_dir)?;
 
             let settings = app_settings::AppSettingsRepository::new(&data_dir).load()?;
@@ -157,6 +157,26 @@ pub fn run() {
 fn apply_webview_runtime_settings(context: &mut tauri::Context<tauri::Wry>) {
     #[cfg(windows)]
     {
+        // Wry 的 custom additionalBrowserArgs 会替代默认参数；无论是性能量测
+        // 还是 E2E，都先保留这些安全/行为默认值再追加测试所需开关。
+        const DEFAULT_BROWSER_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required";
+
+        // 只允许受控的本地 E2E 进程显式开启 CDP。该环境变量未设置时，发行版
+        // 不会监听调试端口；端口解析失败或为 0 同样视为未启用。
+        if let Some(port) = std::env::var("APOGEE_E2E_CDP_PORT")
+            .ok()
+            .and_then(|value| value.parse::<u16>().ok())
+            .filter(|port| *port != 0)
+        {
+            let args = format!(
+                "{DEFAULT_BROWSER_ARGS} --remote-debugging-port={port} --remote-allow-origins=*"
+            );
+            for window in &mut context.config_mut().app.windows {
+                window.additional_browser_args = Some(args.clone());
+            }
+            return;
+        }
+
         // 性能量测台显式控制 GPU 开关，不能被用户偏好污染。
         if std::env::var_os("APOGEE_SPIKE_AUTORUN").is_some() {
             return;
@@ -174,11 +194,9 @@ fn apply_webview_runtime_settings(context: &mut tauri::Context<tauri::Wry>) {
             return;
         };
         if settings.low_memory_mode {
-            // 自定义 additionalBrowserArgs 会替代 Wry 默认参数，因此须保留默认
-            // 禁用项与自动播放策略，再追加低内存标志。
-            const LOW_MEMORY_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required --disable-gpu --disable-gpu-compositing";
+            let args = format!("{DEFAULT_BROWSER_ARGS} --disable-gpu --disable-gpu-compositing");
             for window in &mut context.config_mut().app.windows {
-                window.additional_browser_args = Some(LOW_MEMORY_ARGS.to_string());
+                window.additional_browser_args = Some(args.clone());
             }
         }
     }
@@ -615,8 +633,12 @@ mod commands {
         state
             .with_workspace(workspace_id, session_id, |_| Ok(()))
             .map_err(|error| error.to_string())?;
-        if let Some(raw_id) = ctx.as_ref().and_then(|item| item.request_node_id.as_deref()) {
-            let request_id = Uuid::parse_str(raw_id).map_err(|_| format!("非法的请求节点 id：{raw_id}"))?;
+        if let Some(raw_id) = ctx
+            .as_ref()
+            .and_then(|item| item.request_node_id.as_deref())
+        {
+            let request_id =
+                Uuid::parse_str(raw_id).map_err(|_| format!("非法的请求节点 id：{raw_id}"))?;
             spec = state
                 .with_workspace(workspace_id, session_id, |repository| {
                     repository.resolve_request_inheritance(request_id, spec)
@@ -628,8 +650,12 @@ mod commands {
         let settings = crate::app_settings::AppSettingsRepository::new(&data_dir)
             .load()
             .map_err(|error| error.to_string())?;
-        if spec.settings.timeout_ms.is_none() { spec.settings.timeout_ms = Some(settings.timeout_ms); }
-        if spec.settings.verify_tls.is_none() { spec.settings.verify_tls = Some(settings.verify_tls); }
+        if spec.settings.timeout_ms.is_none() {
+            spec.settings.timeout_ms = Some(settings.timeout_ms);
+        }
+        if spec.settings.verify_tls.is_none() {
+            spec.settings.verify_tls = Some(settings.verify_tls);
+        }
         if spec.settings.proxy_url.is_none() {
             spec.settings.proxy_url = match settings.proxy_mode.as_str() {
                 "manual" => settings.proxy_url.filter(|v| !v.trim().is_empty()),
@@ -998,83 +1024,84 @@ mod commands {
                     .unwrap_or_else(|| "Postman 集合中没有可导入的请求".into()));
             }
             state
-            .with_workspace(workspace_id, session_id, |repository| {
-                use apogee_core::workspace::WorkspaceNodeKind;
-                use std::collections::HashMap;
+                .with_workspace(workspace_id, session_id, |repository| {
+                    use apogee_core::workspace::WorkspaceNodeKind;
+                    use std::collections::HashMap;
 
-                let collection_snapshot = repository.create_collection(imported.name.clone())?;
-                emit_postman_import_progress(
-                    &app,
-                    &import_id,
-                    20,
-                    100,
-                    "创建集合",
-                );
-                let collection = collection_snapshot
-                    .nodes
-                    .iter()
-                    .rev()
-                    .find(|node| {
-                        matches!(node.kind, WorkspaceNodeKind::Collection)
-                            && node.name == imported.name
+                    let collection_snapshot =
+                        repository.create_collection(imported.name.clone())?;
+                    emit_postman_import_progress(&app, &import_id, 20, 100, "创建集合");
+                    let collection = collection_snapshot
+                        .nodes
+                        .iter()
+                        .rev()
+                        .find(|node| {
+                            matches!(node.kind, WorkspaceNodeKind::Collection)
+                                && node.name == imported.name
+                        })
+                        .ok_or_else(|| anyhow::anyhow!("导入集合创建后无法定位节点"))?;
+                    let collection_id = collection.id;
+                    let mut folders = HashMap::<String, Uuid>::new();
+                    let mut imported_folders = 0;
+                    let mut imported_requests = 0;
+                    let mut last_progress = 20;
+
+                    for item in &imported.requests {
+                        let mut parent_id = collection_id;
+                        let mut path_key = String::new();
+                        for folder_name in &item.folder {
+                            if !path_key.is_empty() {
+                                path_key.push('/');
+                            }
+                            path_key.push_str(folder_name);
+                            if let Some(id) = folders.get(&path_key) {
+                                parent_id = *id;
+                                continue;
+                            }
+                            let snapshot =
+                                repository.create_folder(parent_id, folder_name.clone())?;
+                            let folder = snapshot
+                                .nodes
+                                .iter()
+                                .rev()
+                                .find(|node| {
+                                    node.parent_id == Some(parent_id)
+                                        && matches!(node.kind, WorkspaceNodeKind::Folder)
+                                        && node.name == *folder_name
+                                })
+                                .ok_or_else(|| anyhow::anyhow!("导入文件夹创建后无法定位节点"))?;
+                            folders.insert(path_key.clone(), folder.id);
+                            parent_id = folder.id;
+                            imported_folders += 1;
+                        }
+                        let request = repository.create_request(parent_id, item.name.clone())?;
+                        repository.save_request(
+                            request.id,
+                            item.name.clone(),
+                            item.spec.clone(),
+                        )?;
+                        imported_requests += 1;
+                        let progress = 20 + imported_requests * 80 / imported.requests.len();
+                        if progress > last_progress || imported_requests == imported.requests.len()
+                        {
+                            emit_postman_import_progress(
+                                &app,
+                                &import_id,
+                                progress,
+                                100,
+                                "导入请求",
+                            );
+                            last_progress = progress;
+                        }
+                    }
+                    Ok(PostmanWorkspaceImportResult {
+                        collection_id,
+                        imported_requests,
+                        imported_folders,
+                        warnings: imported.warnings.clone(),
                     })
-                    .ok_or_else(|| anyhow::anyhow!("导入集合创建后无法定位节点"))?;
-                let collection_id = collection.id;
-                let mut folders = HashMap::<String, Uuid>::new();
-                let mut imported_folders = 0;
-                let mut imported_requests = 0;
-                let mut last_progress = 20;
-
-                for item in &imported.requests {
-                    let mut parent_id = collection_id;
-                    let mut path_key = String::new();
-                    for folder_name in &item.folder {
-                        if !path_key.is_empty() {
-                            path_key.push('/');
-                        }
-                        path_key.push_str(folder_name);
-                        if let Some(id) = folders.get(&path_key) {
-                            parent_id = *id;
-                            continue;
-                        }
-                        let snapshot = repository.create_folder(parent_id, folder_name.clone())?;
-                        let folder = snapshot
-                            .nodes
-                            .iter()
-                            .rev()
-                            .find(|node| {
-                                node.parent_id == Some(parent_id)
-                                    && matches!(node.kind, WorkspaceNodeKind::Folder)
-                                    && node.name == *folder_name
-                            })
-                            .ok_or_else(|| anyhow::anyhow!("导入文件夹创建后无法定位节点"))?;
-                        folders.insert(path_key.clone(), folder.id);
-                        parent_id = folder.id;
-                        imported_folders += 1;
-                    }
-                    let request = repository.create_request(parent_id, item.name.clone())?;
-                    repository.save_request(request.id, item.name.clone(), item.spec.clone())?;
-                    imported_requests += 1;
-                    let progress = 20 + imported_requests * 80 / imported.requests.len();
-                    if progress > last_progress || imported_requests == imported.requests.len() {
-                        emit_postman_import_progress(
-                            &app,
-                            &import_id,
-                            progress,
-                            100,
-                            "导入请求",
-                        );
-                        last_progress = progress;
-                    }
-                }
-                Ok(PostmanWorkspaceImportResult {
-                    collection_id,
-                    imported_requests,
-                    imported_folders,
-                    warnings: imported.warnings.clone(),
                 })
-            })
-            .map_err(|error| error.to_string())
+                .map_err(|error| error.to_string())
         })
         .await
         .map_err(|error| format!("Postman 导入任务异常结束: {error}"))?
@@ -1101,31 +1128,26 @@ mod commands {
                 .map_err(|error| error.to_string())?;
             let variable_count = imported.environment.variables.len();
             state
-            .with_workspace(workspace_id, session_id, |repository| {
-                emit_postman_import_progress(
-                    &app,
-                    &import_id,
-                    55,
-                    100,
-                    "创建环境",
-                );
-                let created = repository.create_environment(imported.environment.name.clone())?;
-                let mut environment = imported.environment.clone();
-                environment.id = created.id;
-                let environment = repository.save_environment(environment)?;
-                emit_postman_import_progress(
-                    &app,
-                    &import_id,
-                    if variable_count == 0 { 100 } else { 95 },
-                    100,
-                    "写入变量",
-                );
-                Ok(apogee_core::postman::PostmanEnvironmentImportResult {
-                    environment,
-                    warnings: imported.warnings.clone(),
+                .with_workspace(workspace_id, session_id, |repository| {
+                    emit_postman_import_progress(&app, &import_id, 55, 100, "创建环境");
+                    let created =
+                        repository.create_environment(imported.environment.name.clone())?;
+                    let mut environment = imported.environment.clone();
+                    environment.id = created.id;
+                    let environment = repository.save_environment(environment)?;
+                    emit_postman_import_progress(
+                        &app,
+                        &import_id,
+                        if variable_count == 0 { 100 } else { 95 },
+                        100,
+                        "写入变量",
+                    );
+                    Ok(apogee_core::postman::PostmanEnvironmentImportResult {
+                        environment,
+                        warnings: imported.warnings.clone(),
+                    })
                 })
-            })
-            .map_err(|error| error.to_string())
+                .map_err(|error| error.to_string())
         })
         .await
         .map_err(|error| format!("Postman 环境导入任务异常结束: {error}"))?
@@ -1274,7 +1296,10 @@ mod commands {
     ) -> Result<apogee_core::workspace::WorkspaceContainer, String> {
         let node_id = parse_id(&node_id)?;
         let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
-        state.with_workspace(workspace_id, session_id, |repository| repository.read_container(node_id))
+        state
+            .with_workspace(workspace_id, session_id, |repository| {
+                repository.read_container(node_id)
+            })
             .map_err(|error| error.to_string())
     }
 
@@ -1286,7 +1311,10 @@ mod commands {
         container: apogee_core::workspace::WorkspaceContainer,
     ) -> Result<apogee_core::workspace::WorkspaceContainer, String> {
         let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
-        state.with_workspace(workspace_id, session_id, |repository| repository.save_container(container))
+        state
+            .with_workspace(workspace_id, session_id, |repository| {
+                repository.save_container(container)
+            })
             .map_err(|error| error.to_string())
     }
 

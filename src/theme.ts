@@ -66,31 +66,31 @@ const commonDark = {
 /** 与 tokens.css `:root[data-theme='light']` 对齐。 */
 const commonLight = {
   ...commonDark,
-  primaryColor: '#2563eb',
-  primaryColorHover: '#1d4ed8',
-  primaryColorPressed: '#1d4ed8',
-  primaryColorSuppl: '#2563eb',
+  primaryColor: '#5b5bd6',
+  primaryColorHover: '#4f46e5',
+  primaryColorPressed: '#4338ca',
+  primaryColorSuppl: '#5b5bd6',
 
   successColor: '#059669',
   warningColor: '#d97706',
   errorColor: '#dc2626',
-  infoColor: '#2563eb',
+  infoColor: '#5b5bd6',
 
   textColorBase: '#111827',
   textColor1: '#111827',
   textColor2: '#374151',
-  textColor3: '#6b7280',
+  textColor3: '#5e6c80',
 
   // 亮主题里画布是云母白、面板是纯白（层级方向与暗主题相反，见 tokens.css）
-  bodyColor: '#fafafb',
+  bodyColor: '#f8fafc',
   cardColor: '#ffffff',
   modalColor: '#ffffff',
   popoverColor: '#ffffff',
-  inputColor: '#f7f7f8',
+  inputColor: '#f1f5f9',
   tableColor: '#ffffff',
 
-  borderColor: '#e5e7eb',
-  dividerColor: '#e5e7eb',
+  borderColor: '#e2e8f0',
+  dividerColor: '#e2e8f0',
 } as const
 
 /** 组件级只覆写必要的部分。改得越多，样式计算越慢。 */

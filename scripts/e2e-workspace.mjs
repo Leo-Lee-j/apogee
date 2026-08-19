@@ -2,8 +2,8 @@
 /**
  * Desktop smoke test for the workspace lifecycle.
  *
- * The app is launched with an isolated data root and WebView2 remote debugging;
- * playwright-core connects to the real Tauri WebView (no browser mock).
+ * The app is launched with an isolated data root and a test-only WebView2 CDP
+ * port; playwright-core connects to the real Tauri WebView (no browser mock).
  */
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -15,19 +15,32 @@ const external = process.env.APOGEE_E2E_EXTERNAL === '1'
 const root = external ? resolve(process.env.APOGEE_DATA_DIR ?? '.apogee-e2e') : mkdtempSync(join(tmpdir(), 'apogee-e2e-'))
 const exe = resolve('target/debug/apogee.exe')
 const port = 9225
+const externalAppPid = Number.parseInt(process.env.APOGEE_E2E_APP_PID ?? '', 10)
 const child = external ? null : spawn(exe, [], {
   cwd: resolve('.'),
   env: {
     ...process.env,
     APOGEE_DATA_DIR: root,
-    WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}`,
+    APOGEE_E2E_CDP_PORT: String(port),
+    WEBVIEW2_USER_DATA_FOLDER: join(root, 'webview2'),
   },
   stdio: ['ignore', 'pipe', 'pipe'],
 })
 let childStderr = ''
 child?.stderr?.on('data', (chunk) => { childStderr += String(chunk) })
 
+function externalAppStatus() {
+  if (!external || !Number.isInteger(externalAppPid) || externalAppPid <= 0) return ''
+  try {
+    process.kill(externalAppPid, 0)
+    return `; Apogee PID ${externalAppPid} is still running`
+  } catch {
+    return `; Apogee PID ${externalAppPid} exited before CDP became ready`
+  }
+}
+
 let browser
+let lastCdpError = ''
 try {
   const endpoint = `http://127.0.0.1:${port}`
   const deadline = Date.now() + 30_000
@@ -35,12 +48,17 @@ try {
     try {
       browser = await chromium.connectOverCDP(endpoint)
       break
-    } catch {
+    } catch (error) {
+      lastCdpError = error instanceof Error ? error.message : String(error)
       if (child && child.exitCode !== null) throw new Error(`Apogee exited before CDP became ready (code ${child.exitCode})`)
       await new Promise((resolvePromise) => setTimeout(resolvePromise, 250))
     }
   }
-  if (!browser) throw new Error(`WebView2 remote debugging endpoint did not become ready${childStderr ? `; stderr: ${childStderr}` : ''}`)
+  if (!browser) {
+    throw new Error(
+      `WebView2 remote debugging endpoint did not become ready${lastCdpError ? `; last CDP error: ${lastCdpError}` : ''}${externalAppStatus()}${childStderr ? `; stderr: ${childStderr}` : ''}`,
+    )
+  }
 
   const context = browser.contexts()[0]
   const page = context.pages()[0]

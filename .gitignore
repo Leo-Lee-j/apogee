@@ -12,9 +12,12 @@
 /src/types/auto-imports.d.ts
 # ts-rs 从 Rust 类型生成的 TS 定义（03 文档 §9「类型契约」）
 /src/types/generated
-# cargo-about 生成的归属声明。发布流程里生成并随安装包分发（PRD §9.5），
-# 不需要入库 —— 入库反而会每次依赖变动都产生噪声 diff。
+# cargo-about / npm 归属声明和 SPDX SBOM 都由发布流程生成；不需要入库 ——
+# 入库反而会每次依赖变动都产生噪声 diff。
 /THIRD-PARTY-NOTICES.txt
+/THIRD-PARTY-NOTICES-NPM.txt
+/apogee-rust.spdx.json
+/apogee-npm.spdx.json
 # vite 分包归属 dump（调试用）
 /dist/chunk-map.json
 
@@ -44,5 +47,3 @@ Thumbs.db
 # AI 工作目录
 .claude
 .omc
-
-CLAUDE.md

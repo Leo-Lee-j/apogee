@@ -17,7 +17,7 @@ pub struct AppMemoryPart {
     pub private_bytes: u64,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppMemInfo {
     pub working_set_bytes: u64,
@@ -25,18 +25,6 @@ pub struct AppMemInfo {
     pub available: bool,
     pub process_count: u32,
     pub parts: Vec<AppMemoryPart>,
-}
-
-impl Default for AppMemInfo {
-    fn default() -> Self {
-        Self {
-            working_set_bytes: 0,
-            private_bytes: 0,
-            available: false,
-            process_count: 0,
-            parts: Vec::new(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize)]
