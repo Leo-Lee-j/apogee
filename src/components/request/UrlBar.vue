@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { computed, defineAsyncComponent, onMounted, ref, watch } from 'vue'
 import { h } from 'vue'
 import {
   NRadio,
@@ -11,12 +11,16 @@ import { useTabsStore } from '@/stores/tabs'
 import { useUiStore } from '@/stores/ui'
 import { useRequest } from '@/stores/request'
 import { useWorkspaceStore } from '@/stores/workspace'
+import type { RequestSpec } from '@/ipc'
 import { AppButton, AppDropdown, AppIcon, AppSelect } from '@/components/ui'
 import { IconLink, IconSave, IconSend } from '@/components/ui/icons'
 import NaiveThemeScope from '@/components/NaiveThemeScope.vue'
 import { saveCurrentRequest } from '@/features/saveRequest'
+import { toast } from '@/features/feedback'
 import SaveToPicker from './SaveToPicker.vue'
 import VariableInput from './VariableInput.vue'
+
+const DebugCasesPanel = defineAsyncComponent(() => import('./DebugCasesPanel.vue'))
 
 /**
  * URL 栏，40px —— 全产品最重要的一行（02 文档 §4.1）。
@@ -41,6 +45,22 @@ const inputEl = ref<InputInst | null>(null)
 const urlFocused = ref(false)
 
 const tab = computed(() => tabs.active)
+const casesOpen = ref(false)
+/** 只有实际 Request 或从用例加载的独立调试标签具有稳定来源。 */
+const debugCaseRequestId = computed(() => tab.value?.nodeId ?? tab.value?.sourceRequestId)
+const currentRequestSpec = computed<RequestSpec>(() => {
+  const current = tab.value
+  return {
+    method: current?.method ?? 'GET',
+    url: current?.url ?? '',
+    params: current?.params ?? [],
+    pathParams: current?.pathParams ?? [],
+    headers: current?.headers ?? [],
+    body: current?.body ?? { type: 'none' },
+    auth: current?.auth ?? { type: 'inherit' },
+    settings: current?.settings ?? {},
+  }
+})
 const environmentOptions = computed(() => [
   {
     label: '无环境',
@@ -159,6 +179,14 @@ function triggerSend() {
   if (!sending.value) void send()
 }
 
+function openDebugCases() {
+  if (!debugCaseRequestId.value) {
+    toast().warning('请先保存请求，再保存调试用例。')
+    return
+  }
+  casesOpen.value = true
+}
+
 /** URL 中出现 :id / {id} 时自动创建对应的路径参数行。 */
 watch(
   () => tab.value?.url,
@@ -273,9 +301,18 @@ defineExpose({
       <template #icon><AppIcon :component="IconSave" :size="16" /></template>
       保存
     </AppButton>
+    <AppButton class="cases" secondary size="medium" title="将当前请求参数保存为调试用例" @click="openDebugCases">
+      保存用例
+    </AppButton>
 
     <!-- 草稿保存：位置选择器（保存按钮与 Ctrl+S 共用，状态在 ui store） -->
     <SaveToPicker v-model:show="ui.saveAsOpen" />
+    <DebugCasesPanel
+      v-model:show="casesOpen"
+      :request-id="debugCaseRequestId"
+      :request-name="tab?.title ?? '新建请求'"
+      :spec="currentRequestSpec"
+    />
   </NaiveThemeScope>
   </div>
 </template>
@@ -465,11 +502,12 @@ defineExpose({
   font-family: var(--a-font-editor);
   font-size: var(--a-fs-editor-base);
 }
-.send, .save {
+.send, .save, .cases {
   min-width: 54px;
   height: var(--url-control-height);
   min-height: var(--url-control-height);
   border-radius: var(--url-radius);
 }
 .send { font-weight: var(--a-fw-semibold); }
+.cases { min-width: 78px; }
 </style>

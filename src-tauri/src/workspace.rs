@@ -16,19 +16,20 @@
 //! 目录名只使用稳定 UUID，用户重命名不会移动路径；可读名称全部写在 YAML 中。
 
 use anyhow::{bail, Context, Result};
-use apogee_core::model::KeyValue;
+use apogee_core::model::{ActualRequest, KeyValue};
 use apogee_core::request::{AuthConfig, Body, RequestSettings, RequestSpec};
 use apogee_core::response::ResponseSummary;
 use apogee_core::vars::Environment;
 use apogee_core::workspace::{
-    CollectionEntry, ContainerDocument, EnvironmentEntry, PersistedRequest, WorkspaceContainer,
-    WorkspaceManifest, WorkspaceNode, WorkspaceNodeKind, WorkspaceRequest, WorkspaceSnapshot,
-    WORKSPACE_FORMAT_VERSION,
+    CollectionEntry, ContainerDocument, DebugCase, EnvironmentEntry, PersistedRequest,
+    WorkspaceContainer, WorkspaceManifest, WorkspaceNode, WorkspaceNodeKind, WorkspaceRequest,
+    WorkspaceSnapshot, WORKSPACE_FORMAT_VERSION,
 };
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
 const COLLECTION_MARKER: &str = "_collection.yaml";
@@ -48,25 +49,66 @@ pub struct YapiWorkspaceImportResult {
     pub warnings: Vec<String>,
 }
 
+/// 持久化失败运行时的可渲染错误。`kind` 保持字符串，兼容事件层的兜底错误。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryHint {
+    pub label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryError {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
+    pub kind: String,
+    pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    #[serde(default)]
+    pub hints: Vec<HistoryHint>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HistoryEntry {
     pub id: Uuid,
     pub created_at_ms: u64,
+    #[serde(default)]
+    pub debug_case_id: Option<Uuid>,
+    #[serde(default)]
+    pub environment_id: Option<Uuid>,
     pub method: String,
     pub url: String,
+    /// `None` 表示请求在收到 HTTP 响应前失败，前端显示为 ERR。
     pub status: Option<u16>,
     pub size_bytes: u64,
     pub duration_ms: f64,
 }
 
+/// 一条运行记录恰有一个结果：成功时有 `response` 和响应体文件，失败时有 `error`
+/// 及可选的最终请求快照。失败记录绝不伪造空响应体。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HistoryRecord {
     pub id: Uuid,
     pub created_at_ms: u64,
+    #[serde(default)]
+    pub debug_case_id: Option<Uuid>,
+    #[serde(default)]
+    pub environment_id: Option<Uuid>,
     pub spec: RequestSpec,
-    pub response: ResponseSummary,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response: Option<ResponseSummary>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<HistoryError>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actual_request: Option<ActualRequest>,
+    /// 失败时没有 `ResponseSummary`，因此把从发送到终结事件的耗时单独保存。
+    #[serde(default)]
+    pub duration_ms: f64,
 }
 
 pub struct WorkspaceRepository {
@@ -291,6 +333,7 @@ impl WorkspaceRepository {
                     is_folder: true,
                     expanded: true,
                     kind: WorkspaceNodeKind::Collection,
+                    debug_case_count: 0,
                 },
                 path: path.clone(),
             });
@@ -311,8 +354,11 @@ impl WorkspaceRepository {
         spec: RequestSpec,
         response: ResponseSummary,
         body_source: &Path,
+        debug_case_id: Option<Uuid>,
+        environment_id: Option<Uuid>,
     ) -> Result<()> {
         let id = response.id;
+        let duration_ms = response.timing.total_ms;
         let directory = self.history_directory();
         fs::create_dir_all(&directory)?;
         let body_target = directory.join(format!("{id}.body"));
@@ -327,8 +373,44 @@ impl WorkspaceRepository {
             &HistoryRecord {
                 id,
                 created_at_ms,
+                debug_case_id,
+                environment_id,
                 spec,
-                response,
+                response: Some(response),
+                error: None,
+                actual_request: None,
+                duration_ms,
+            },
+        )?;
+        self.trim_history()
+    }
+
+    /// 记录未收到 HTTP 响应的运行；只持久化可显示的错误和最终请求，不创建 body 文件。
+    pub fn record_failed_history(
+        &self,
+        created_at_ms: u64,
+        spec: RequestSpec,
+        error: HistoryError,
+        actual_request: Option<ActualRequest>,
+        duration_ms: f64,
+        debug_case_id: Option<Uuid>,
+        environment_id: Option<Uuid>,
+    ) -> Result<()> {
+        let id = Uuid::new_v4();
+        let directory = self.history_directory();
+        fs::create_dir_all(&directory)?;
+        write_yaml(
+            &directory.join(format!("{id}.yaml")),
+            &HistoryRecord {
+                id,
+                created_at_ms,
+                debug_case_id,
+                environment_id,
+                spec,
+                response: None,
+                error: Some(error),
+                actual_request,
+                duration_ms,
             },
         )?;
         self.trim_history()
@@ -339,28 +421,52 @@ impl WorkspaceRepository {
         records.sort_by_key(|record| std::cmp::Reverse(record.created_at_ms));
         Ok(records
             .into_iter()
-            .map(|record| HistoryEntry {
-                id: record.id,
-                created_at_ms: record.created_at_ms,
-                method: record.spec.method,
-                url: record.spec.url,
-                status: record.response.status,
-                size_bytes: record.response.size_bytes,
-                duration_ms: record.response.timing.total_ms,
+            .map(|record| {
+                let status = record
+                    .response
+                    .as_ref()
+                    .and_then(|response| response.status);
+                let size_bytes = record
+                    .response
+                    .as_ref()
+                    .map(|response| response.size_bytes)
+                    .unwrap_or_default();
+                let duration_ms = record
+                    .response
+                    .as_ref()
+                    .map(|response| response.timing.total_ms)
+                    .unwrap_or(record.duration_ms);
+                HistoryEntry {
+                    id: record.id,
+                    created_at_ms: record.created_at_ms,
+                    debug_case_id: record.debug_case_id,
+                    environment_id: record.environment_id,
+                    method: record.spec.method,
+                    url: record.spec.url,
+                    status,
+                    size_bytes,
+                    duration_ms,
+                }
             })
             .collect())
     }
 
-    pub fn read_history(&self, id: Uuid) -> Result<(HistoryRecord, PathBuf)> {
+    /// 成功记录带响应体路径；失败记录没有响应体，因此返回 `None`。
+    pub fn read_history(&self, id: Uuid) -> Result<(HistoryRecord, Option<PathBuf>)> {
         let directory = self.history_directory();
         let record: HistoryRecord = read_yaml(&directory.join(format!("{id}.yaml")))?;
         if record.id != id {
             bail!("历史记录 id 不一致：{id}");
         }
-        let body = directory.join(format!("{id}.body"));
-        if !body.exists() {
-            bail!("历史响应体不存在：{id}");
-        }
+        let body = if record.response.is_some() {
+            let body = directory.join(format!("{id}.body"));
+            if !body.exists() {
+                bail!("历史响应体不存在：{id}");
+            }
+            Some(body)
+        } else {
+            None
+        };
         Ok((record, body))
     }
 
@@ -584,11 +690,81 @@ impl WorkspaceRepository {
         self.snapshot()
     }
 
+    pub fn list_debug_cases(&self, request_id: Uuid) -> Result<Vec<DebugCase>> {
+        let location = self.locate(request_id)?;
+        if !matches!(location.node.kind, WorkspaceNodeKind::Request) {
+            bail!("节点不是请求：{request_id}");
+        }
+        let document: PersistedRequest = read_yaml(&location.path)
+            .with_context(|| format!("读取请求文件失败：{}", location.path.display()))?;
+        if document.id != request_id {
+            bail!("请求文件 {} 的 id 不一致", location.path.display());
+        }
+        Ok(document.debug_cases)
+    }
+
+    pub fn create_debug_case(
+        &self,
+        request_id: Uuid,
+        name: String,
+        case_type: apogee_core::workspace::DebugCaseType,
+        spec: RequestSpec,
+    ) -> Result<DebugCase> {
+        let name = required_name(&name)?;
+        let location = self.locate(request_id)?;
+        if !matches!(location.node.kind, WorkspaceNodeKind::Request) {
+            bail!("节点不是请求：{request_id}");
+        }
+        let mut document: PersistedRequest = read_yaml(&location.path)
+            .with_context(|| format!("读取请求文件失败：{}", location.path.display()))?;
+        if document.id != request_id {
+            bail!("请求文件 {} 的 id 不一致", location.path.display());
+        }
+        let now = epoch_ms();
+        let debug_case = DebugCase {
+            id: Uuid::new_v4(),
+            request_id,
+            name,
+            case_type,
+            spec,
+            created_at_ms: now,
+            updated_at_ms: now,
+        };
+        document.debug_cases.push(debug_case.clone());
+        write_yaml(&location.path, &document)?;
+        Ok(debug_case)
+    }
+
+    pub fn delete_debug_case(&self, request_id: Uuid, case_id: Uuid) -> Result<()> {
+        let location = self.locate(request_id)?;
+        if !matches!(location.node.kind, WorkspaceNodeKind::Request) {
+            bail!("节点不是请求：{request_id}");
+        }
+        let mut document: PersistedRequest = read_yaml(&location.path)
+            .with_context(|| format!("读取请求文件失败：{}", location.path.display()))?;
+        if document.id != request_id {
+            bail!("请求文件 {} 的 id 不一致", location.path.display());
+        }
+        let original_len = document.debug_cases.len();
+        document
+            .debug_cases
+            .retain(|debug_case| debug_case.id != case_id);
+        if document.debug_cases.len() == original_len {
+            bail!("未知的调试用例：{case_id}");
+        }
+        write_yaml(&location.path, &document)
+    }
+
     pub fn save_request(&self, id: Uuid, name: String, spec: RequestSpec) -> Result<()> {
         let name = required_name(&name)?;
         let location = self.locate(id)?;
         if !matches!(location.node.kind, WorkspaceNodeKind::Request) {
             bail!("节点不是请求：{id}");
+        }
+        let document: PersistedRequest = read_yaml(&location.path)
+            .with_context(|| format!("读取请求文件失败：{}", location.path.display()))?;
+        if document.id != id {
+            bail!("请求文件 {} 的 id 不一致", location.path.display());
         }
         write_yaml(
             &location.path,
@@ -597,6 +773,7 @@ impl WorkspaceRepository {
                 id,
                 name,
                 spec,
+                debug_cases: document.debug_cases,
             },
         )
     }
@@ -713,6 +890,7 @@ impl WorkspaceRepository {
                         id: request_id,
                         name: required_name(&item.name)?,
                         spec: item.spec.clone(),
+                        debug_cases: Vec::new(),
                     },
                 )?;
             }
@@ -852,6 +1030,7 @@ impl WorkspaceRepository {
             id,
             name,
             spec: default_request_spec(),
+            debug_cases: Vec::new(),
         };
         let path = parent.path.join(format!("{id}.yaml"));
         write_yaml(&path, &document)?;
@@ -975,6 +1154,7 @@ impl WorkspaceRepository {
                     is_folder: true,
                     expanded: true,
                     kind: WorkspaceNodeKind::Collection,
+                    debug_case_count: 0,
                 },
                 path: path.clone(),
             });
@@ -1014,6 +1194,7 @@ impl WorkspaceRepository {
                         is_folder: true,
                         expanded: false,
                         kind: WorkspaceNodeKind::Folder,
+                        debug_case_count: 0,
                     },
                     path: path.clone(),
                 });
@@ -1038,6 +1219,7 @@ impl WorkspaceRepository {
                         is_folder: false,
                         expanded: false,
                         kind: WorkspaceNodeKind::Request,
+                        debug_case_count: document.debug_cases.len(),
                     },
                     path,
                 });
@@ -1108,6 +1290,15 @@ impl WorkspaceRepository {
         }
         Ok(manifest)
     }
+}
+
+fn epoch_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .try_into()
+        .unwrap_or(u64::MAX)
 }
 
 fn default_request_spec() -> RequestSpec {
@@ -1323,14 +1514,17 @@ mod tests {
         let spec = default_request_spec();
 
         repository
-            .record_history(1234, spec, response, &source)
+            .record_history(1234, spec, response, &source, None, None)
             .unwrap();
         let listed = repository.list_history().unwrap();
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].status, Some(200));
         let (record, body) = repository.read_history(response_id).unwrap();
         assert_eq!(record.created_at_ms, 1234);
-        assert_eq!(fs::read(body).unwrap(), br#"{"ok":true}"#);
+        assert_eq!(
+            fs::read(body.expect("成功历史必须有响应体")).unwrap(),
+            br#"{"ok":true}"#
+        );
 
         repository.clear_history().unwrap();
         assert!(repository.list_history().unwrap().is_empty());
@@ -1469,6 +1663,8 @@ mod tests {
                 default_request_spec(),
                 ResponseSummary::without_http(response_id, 15, Timing::default()),
                 &source,
+                None,
+                None,
             )
             .unwrap();
 
@@ -1478,7 +1674,14 @@ mod tests {
         assert!(runtime.join(HISTORY_DIR).is_dir());
         assert_eq!(repository.list_history().unwrap().len(), 1);
         assert_eq!(
-            fs::read(repository.read_history(response_id).unwrap().1).unwrap(),
+            fs::read(
+                repository
+                    .read_history(response_id)
+                    .unwrap()
+                    .1
+                    .expect("成功历史必须有响应体")
+            )
+            .unwrap(),
             b"runtime-history"
         );
         fs::remove_dir_all(root).unwrap();

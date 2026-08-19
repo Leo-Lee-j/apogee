@@ -89,6 +89,9 @@ pub fn run() {
             commands::workspace_load,
             commands::workspace_read_request,
             commands::workspace_save_request,
+            commands::workspace_list_debug_cases,
+            commands::workspace_create_debug_case,
+            commands::workspace_delete_debug_case,
             commands::workspace_read_container,
             commands::workspace_save_container,
             commands::workspace_create_collection,
@@ -101,6 +104,7 @@ pub fn run() {
             commands::workspace_delete_environment,
             commands::workspace_save_state,
             commands::history_record,
+            commands::history_record_error,
             commands::history_list,
             commands::history_read,
             commands::history_clear,
@@ -222,13 +226,13 @@ mod commands {
     use super::state::AppState;
     use crate::app_settings::{AppSettings, AppSettingsRepository};
     use crate::workspace::WorkspaceRepository;
-    use crate::workspace::{HistoryEntry, HistoryRecord};
+    use crate::workspace::{HistoryEntry, HistoryError, HistoryRecord};
     use crate::workspace_registry::{WorkspaceDescriptor, WorkspaceRegistry};
     use apogee_core::error::AppError;
     use apogee_core::request::RequestSpec;
     use apogee_core::response::{ResponseSummary, TreeNode};
     use apogee_core::vars::Environment;
-    use apogee_core::workspace::{WorkspaceRequest, WorkspaceSnapshot};
+    use apogee_core::workspace::{DebugCase, DebugCaseType, WorkspaceRequest, WorkspaceSnapshot};
     use serde::{Deserialize, Serialize};
     use std::path::PathBuf;
     use std::sync::Arc;
@@ -876,6 +880,8 @@ mod commands {
         created_at_ms: u64,
         spec: apogee_core::request::RequestSpec,
         response: ResponseSummary,
+        debug_case_id: Option<String>,
+        environment_id: Option<String>,
     ) -> Result<(), String> {
         let body = state
             .spool
@@ -883,9 +889,50 @@ mod commands {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .path_for(response.id);
         let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
+        let debug_case_id = debug_case_id.as_deref().map(parse_id).transpose()?;
+        let environment_id = environment_id.as_deref().map(parse_id).transpose()?;
         state
             .with_workspace(workspace_id, session_id, |repository| {
-                repository.record_history(created_at_ms, spec, response, &body)
+                repository.record_history(
+                    created_at_ms,
+                    spec,
+                    response,
+                    &body,
+                    debug_case_id,
+                    environment_id,
+                )
+            })
+            .map_err(|error| error.to_string())
+    }
+
+    /// 将未收到 HTTP 响应的失败运行写进历史。失败不访问 response spool，也不创建空 body。
+    #[tauri::command]
+    pub fn history_record_error(
+        state: State<'_, Arc<AppState>>,
+        workspace_id: String,
+        session_id: String,
+        created_at_ms: u64,
+        spec: apogee_core::request::RequestSpec,
+        error: HistoryError,
+        actual_request: Option<apogee_core::model::ActualRequest>,
+        duration_ms: f64,
+        debug_case_id: Option<String>,
+        environment_id: Option<String>,
+    ) -> Result<(), String> {
+        let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
+        let debug_case_id = debug_case_id.as_deref().map(parse_id).transpose()?;
+        let environment_id = environment_id.as_deref().map(parse_id).transpose()?;
+        state
+            .with_workspace(workspace_id, session_id, |repository| {
+                repository.record_failed_history(
+                    created_at_ms,
+                    spec,
+                    error,
+                    actual_request,
+                    duration_ms,
+                    debug_case_id,
+                    environment_id,
+                )
             })
             .map_err(|error| error.to_string())
     }
@@ -918,9 +965,13 @@ mod commands {
                 repository.read_history(id)
             })
             .map_err(|error| error.to_string())?;
-        record.response = state
-            .restore_history_response(record.response, &body)
-            .map_err(|error| error.to_string())?;
+        if let (Some(response), Some(body)) = (record.response.take(), body) {
+            record.response = Some(
+                state
+                    .restore_history_response(response, &body)
+                    .map_err(|error| error.to_string())?,
+            );
+        }
         Ok(record)
     }
 
@@ -1283,6 +1334,59 @@ mod commands {
         state
             .with_workspace(workspace_id, session_id, |repository| {
                 repository.save_request(id, name, spec)
+            })
+            .map_err(|error| error.to_string())
+    }
+
+    #[tauri::command]
+    pub fn workspace_list_debug_cases(
+        state: State<'_, Arc<AppState>>,
+        workspace_id: String,
+        session_id: String,
+        request_id: String,
+    ) -> Result<Vec<DebugCase>, String> {
+        let request_id = parse_id(&request_id)?;
+        let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
+        state
+            .with_workspace(workspace_id, session_id, |repository| {
+                repository.list_debug_cases(request_id)
+            })
+            .map_err(|error| error.to_string())
+    }
+
+    #[tauri::command]
+    pub fn workspace_create_debug_case(
+        state: State<'_, Arc<AppState>>,
+        workspace_id: String,
+        session_id: String,
+        request_id: String,
+        name: String,
+        case_type: DebugCaseType,
+        spec: RequestSpec,
+    ) -> Result<DebugCase, String> {
+        let request_id = parse_id(&request_id)?;
+        let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
+        state
+            .with_workspace(workspace_id, session_id, |repository| {
+                repository.create_debug_case(request_id, name, case_type, spec)
+            })
+            .map_err(|error| error.to_string())
+    }
+
+    #[tauri::command]
+    pub fn workspace_delete_debug_case(
+        state: State<'_, Arc<AppState>>,
+        workspace_id: String,
+        session_id: String,
+        request_id: String,
+        case_id: String,
+    ) -> Result<(), String> {
+        let request_id = parse_id(&request_id)?;
+        let case_id = parse_id(&case_id)?;
+        let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
+        state
+            .with_workspace(workspace_id, session_id, |repository| {
+                repository.delete_debug_case(request_id, case_id)
             })
             .map_err(|error| error.to_string())
     }

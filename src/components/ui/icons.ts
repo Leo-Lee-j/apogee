@@ -1,4 +1,8 @@
-/** Product-level aliases. Lucide keeps the UI quiet, consistent and stroke-based. */
+export {
+  ChevronForwardOutline as IconChevronForwardOutline,
+  ChevronDownOutline as IconChevronDownOutline,
+} from '@vicons/ionicons5'
+
 export {
   Plus as IconAdd, Clipboard as IconClipboard, X as IconClose, UploadCloud as IconCloudUpload,
   ChevronDown as IconChevronDown, Minimize2 as IconRestore, Copy as IconCopy, Code2 as IconCode,

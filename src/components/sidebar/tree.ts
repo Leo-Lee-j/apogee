@@ -44,6 +44,8 @@ export interface FlatNode {
   isFolder: boolean
   expanded: boolean
   kind?: 'collection' | 'folder' | 'request'
+  /** 请求节点的调试用例摘要数；完整定义由侧栏展开时按需读取。 */
+  debugCaseCount?: number
 }
 
 const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const

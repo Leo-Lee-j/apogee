@@ -132,6 +132,8 @@ export interface WorkspaceNode {
   isFolder: boolean
   expanded: boolean
   kind?: WorkspaceNodeKind
+  /** 请求下保存的调试用例数量；完整定义在用户展开时按需读取。 */
+  debugCaseCount: number
 }
 
 export interface EnvironmentVariable {
@@ -202,21 +204,47 @@ export interface WorkspaceRequest {
   spec: RequestSpec
 }
 
+export type DebugCaseType = 'success' | 'failure' | 'exception'
+
+/** 归属已保存请求、可复用参数的命名调试用例。 */
+export interface DebugCase {
+  id: string
+  requestId: string
+  name: string
+  /** 保存时选择的预期场景；运行结果仍独立由 HTTP 状态或网络错误决定。 */
+  caseType: DebugCaseType
+  /** 保存时的未解析请求快照，保留 {{variable}} 占位符。 */
+  spec: RequestSpec
+  createdAtMs: number
+  updatedAtMs: number
+}
+
 export interface HistoryEntry {
   id: string
   createdAtMs: number
+  /** 未关联调试用例的普通请求历史为 null。 */
+  debugCaseId?: string | null
+  /** 执行时选中的环境；用于按环境显示用例最近结果。 */
+  environmentId?: string | null
   method: string
   url: string
+  /** 未收到 HTTP 响应的运行没有状态码，界面显示为 ERR。 */
   status?: number
   sizeBytes: number
   durationMs: number
 }
 
+/** 成功运行带 response；失败运行带 error、可选的实际请求，且没有响应体。 */
 export interface HistoryRecord {
   id: string
   createdAtMs: number
+  debugCaseId?: string | null
+  environmentId?: string | null
   spec: RequestSpec
-  response: ResponseSummary
+  response?: ResponseSummary | null
+  error?: AppError | null
+  actualRequest?: ActualRequest | null
+  durationMs: number
 }
 
 export type NodeKind = 'object' | 'array' | 'string' | 'number' | 'bool' | 'null'
@@ -469,6 +497,25 @@ export const ipc = {
     return call('workspace_save_request', { ...sessionArgs(), requestId, name, spec })
   },
 
+  /** 读取绑定一个请求的命名调试用例定义。 */
+  workspaceListDebugCases(requestId: string): Promise<DebugCase[]> {
+    return call('workspace_list_debug_cases', { ...sessionArgs(), requestId })
+  },
+
+  /** 将当前未解析请求参数以预期场景分类保存为调试用例。 */
+  workspaceCreateDebugCase(
+    requestId: string,
+    name: string,
+    caseType: DebugCaseType,
+    spec: RequestSpec,
+  ): Promise<DebugCase> {
+    return call('workspace_create_debug_case', { ...sessionArgs(), requestId, name, caseType, spec })
+  },
+
+  workspaceDeleteDebugCase(requestId: string, caseId: string): Promise<void> {
+    return call('workspace_delete_debug_case', { ...sessionArgs(), requestId, caseId })
+  },
+
   workspaceCreateCollection(name: string): Promise<WorkspaceSnapshot> {
     return call('workspace_create_collection', { ...sessionArgs(), name })
   },
@@ -501,8 +548,43 @@ export const ipc = {
     return call('cancel_request', { handleId })
   },
 
-  historyRecord(createdAtMs: number, spec: RequestSpec, response: ResponseSummary): Promise<void> {
-    return call('history_record', { ...sessionArgs(), createdAtMs, spec, response })
+  historyRecord(
+    createdAtMs: number,
+    spec: RequestSpec,
+    response: ResponseSummary,
+    debugCaseId?: string,
+    environmentId?: string,
+  ): Promise<void> {
+    return call('history_record', {
+      ...sessionArgs(),
+      createdAtMs,
+      spec,
+      response,
+      debugCaseId,
+      environmentId,
+    })
+  },
+
+  /** 持久化未收到 HTTP 响应的失败运行；不传也不创建响应体。 */
+  historyRecordError(
+    createdAtMs: number,
+    spec: RequestSpec,
+    error: AppError,
+    actualRequest: ActualRequest | null,
+    durationMs: number,
+    debugCaseId?: string,
+    environmentId?: string,
+  ): Promise<void> {
+    return call('history_record_error', {
+      ...sessionArgs(),
+      createdAtMs,
+      spec,
+      error,
+      actualRequest,
+      durationMs,
+      debugCaseId,
+      environmentId,
+    })
   },
 
   historyList(): Promise<HistoryEntry[]> {

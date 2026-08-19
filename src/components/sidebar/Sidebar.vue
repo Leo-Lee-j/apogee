@@ -13,10 +13,10 @@ import {
   AppPopconfirm,
   AppSpace,
 } from '@/components/ui'
-import { IconAdd, IconApi, IconCopy, IconDelete, IconDownload, IconEdit, IconLocate, IconMore, IconSort, IconFolder, IconFolderOpen, IconStats } from '@/components/ui/icons'
+import { IconAdd, IconChevronDownOutline, IconChevronForwardOutline, IconCloseCircle, IconCopy, IconDelete, IconDownload, IconEdit, IconLocate, IconMore, IconRemoveCircle, IconSort, IconFolder, IconFolderOpen, IconStats } from '@/components/ui/icons'
 import NaiveThemeScope from '@/components/NaiveThemeScope.vue'
 import { toast } from '@/features/feedback'
-import { ipc, type KeyValue, type RequestSpec, type WorkspaceNode } from '@/ipc'
+import { ipc, type DebugCase, type DebugCaseType, type KeyValue, type RequestSpec, type WorkspaceNode } from '@/ipc'
 import {
   OVERSCAN,
   sidebarRowHeightForUiSize,
@@ -50,6 +50,44 @@ const props = defineProps<{
   nodes?: FlatNode[]
 }>()
 
+type DebugCaseRow = {
+  /** 前缀避免与工作区 UUID 节点冲突，且不参与集合树节点操作。 */
+  id: string
+  parentId: string
+  depth: number
+  name: string
+  isFolder: false
+  expanded: false
+  kind: 'debug-case'
+  debugCase: DebugCase
+}
+
+type SidebarRow = FlatNode | DebugCaseRow
+
+function isDebugCaseRow(node: SidebarRow): node is DebugCaseRow {
+  return node.kind === 'debug-case'
+}
+
+function isRequestWithDebugCases(node: SidebarRow): node is FlatNode {
+  return !isDebugCaseRow(node)
+    && node.kind === 'request'
+    && (node.debugCaseCount ?? 0) > 0
+}
+
+const DEBUG_CASE_TYPE_LABELS: Record<DebugCaseType, string> = {
+  success: '成功',
+  failure: '失败',
+  exception: '异常',
+}
+
+function debugCaseTypeLabel(caseType: DebugCaseType) {
+  return DEBUG_CASE_TYPE_LABELS[caseType]
+}
+
+function debugCaseTypeClass(caseType: DebugCaseType) {
+  return `case-${caseType}`
+}
+
 /**
  * 用 `shallowRef` 而不是 `ref`：这个数组在 S3 的 20000 节点档位下会产生
  * 20000 个 Proxy（03 文档 §4.2 明确禁止对大数组做深度响应式）。
@@ -78,6 +116,8 @@ const actionName = ref('')
 const actionParentId = ref<string | null>(null)
 const actionError = ref('')
 const deleteError = ref('')
+const pendingDeleteCaseId = ref<string | null>(null)
+const deletingDebugCaseId = ref<string | null>(null)
 const deleteTarget = ref<FlatNode | null>(null)
 const actionSaving = ref(false)
 const actionOpen = computed({
@@ -163,8 +203,33 @@ function onSortSelect(key: string | number) {
   if (option) sortMode.value = option.mode
 }
 
-/** 可见节点：折叠的文件夹下的子节点不参与渲染。只改这个计算，不重建原数组。 */
-const visible = computed(() => sortVisible(visibleNodes(all.value, filter.value), sortMode.value))
+/**
+ * 基础树仍只包含 Rust 返回的工作区节点。展开后的用例在这里临时投影为定高扁平行，
+ * 因而沿用现有 spacer、切片与滚动算法，不建立递归 children 或额外虚拟列表。
+ */
+const visible = computed<SidebarRow[]>(() => {
+  const base = sortVisible(visibleNodes(all.value, filter.value), sortMode.value)
+  if (filter.value.trim()) return base
+
+  const rows: SidebarRow[] = []
+  for (const node of base) {
+    rows.push(node)
+    if (!isRequestWithDebugCases(node) || !workspace.isDebugCasesExpanded(node.id)) continue
+    for (const debugCase of workspace.debugCasesForRequest(node.id)) {
+      rows.push({
+        id: `debug-case:${debugCase.id}`,
+        parentId: node.id,
+        depth: node.depth + 1,
+        name: debugCase.name,
+        isFolder: false,
+        expanded: false,
+        kind: 'debug-case',
+        debugCase,
+      })
+    }
+  }
+  return rows
+})
 
 /** 新建文件夹可选的目标：集合 + 文件夹（扁平树，按 depth 缩进渲染）。 */
 const folderTargets = computed(() => all.value.filter((node) => node.isFolder))
@@ -216,9 +281,14 @@ onBeforeUnmount(() => {
   resizeObserver = null
 })
 
-function toggle(n: FlatNode) {
+function toggle(n: SidebarRow) {
   selectedId.value = n.id
   deleteError.value = ''
+  pendingDeleteCaseId.value = null
+  if (isDebugCaseRow(n)) {
+    workspace.openDebugCase(n.debugCase)
+    return
+  }
   if (!n.isFolder) {
     if (n.kind === 'request') {
       void workspace.openRequest(n)
@@ -241,9 +311,33 @@ function toggle(n: FlatNode) {
   all.value = [...all.value]
 }
 
+/** 请求主行继续维持单击预览 / 双击固定；用例按钮只控制下方的懒加载子行。 */
+function toggleRequestDebugCases(node: FlatNode) {
+  void workspace.toggleDebugCases(node.id)
+}
+
+async function confirmDeleteDebugCase(row: DebugCaseRow) {
+  const caseId = row.debugCase.id
+  if (deletingDebugCaseId.value === caseId) return
+  if (pendingDeleteCaseId.value !== caseId) {
+    pendingDeleteCaseId.value = caseId
+    return
+  }
+
+  pendingDeleteCaseId.value = null
+  deletingDebugCaseId.value = caseId
+  const success = await workspace.deleteDebugCase(row.parentId, caseId)
+  deletingDebugCaseId.value = null
+  if (success) {
+    if (selectedId.value === row.id) selectedId.value = null
+  } else {
+    toast().error(workspace.lastError?.message ?? '删除用例失败，请稍后重试。')
+  }
+}
+
 /** 双击固定：以正式标签（非预览）打开请求（02 文档 §4.5 单击预览/双击固定）。 */
-function pinOpen(n: FlatNode) {
-  if (n.isFolder || n.kind !== 'request') return
+function pinOpen(n: SidebarRow) {
+  if (isDebugCaseRow(n) || n.isFolder || n.kind !== 'request') return
   void workspace.openRequest(n, false)
 }
 
@@ -653,7 +747,7 @@ defineExpose({
           size="small"
           aria-label="重命名选中项"
           title="重命名选中项"
-          :disabled="!selectedId"
+          :disabled="!selectedNode"
           @click="openAction('rename')"
         >
           <template #icon>
@@ -676,7 +770,7 @@ defineExpose({
               size="small"
               aria-label="删除选中项"
               title="删除选中项"
-              :disabled="!selectedId"
+              :disabled="!selectedNode"
             >
               <template #icon>
                 <AppIcon :component="IconDelete" :size="16" />
@@ -820,7 +914,12 @@ defineExpose({
           v-for="(n, i) in slice"
           :key="n.id"
           class="row"
-          :class="{ folder: n.isFolder, active: n.id === activeNodeId, selected: n.id === selectedId }"
+          :class="{
+            folder: n.isFolder,
+            'debug-case': isDebugCaseRow(n),
+            active: n.id === activeNodeId,
+            selected: n.id === selectedId,
+          }"
           :aria-current="n.id === activeNodeId ? 'true' : undefined"
           :style="{
             transform: `translateY(${(startIdx + i) * rowHeight}px)`,
@@ -829,24 +928,64 @@ defineExpose({
           @click="toggle(n)"
           @dblclick="pinOpen(n)"
         >
-          <span class="node-icon" :class="{ folder: n.isFolder }">
-            <AppIcon :component="n.isFolder ? (n.expanded ? IconFolderOpen : IconFolder) : IconApi" :size="15" />
+          <span class="disclosure-gutter">
+            <button
+              v-if="isRequestWithDebugCases(n)"
+              type="button"
+              class="case-toggle"
+              :aria-label="workspace.isDebugCasesExpanded(n.id) ? `收起“${n.name}”的调试用例` : `展开“${n.name}”的调试用例`"
+              :aria-expanded="workspace.isDebugCasesExpanded(n.id)"
+              :title="workspace.isDebugCasesExpanded(n.id) ? '收起调试用例' : '展开调试用例'"
+              @click.stop="toggleRequestDebugCases(n)"
+            ><AppIcon
+              :component="workspace.isDebugCasesExpanded(n.id) ? IconChevronDownOutline : IconChevronForwardOutline"
+              :size="15"
+              aria-hidden="true"
+            /></button>
           </span>
-          <span v-if="!n.isFolder" class="m method-badge" :class="`method-${String(n.method ?? 'GET').toLowerCase()}`">{{ n.method === 'DELETE' ? 'DEL' : n.method }}</span>
-          <span class="name">{{ n.name }}</span>
-          <AppDropdown :options="itemMenuOptions(n)" placement="bottom-end" @select="onItemMenuSelect($event, n)">
+          <span v-if="n.isFolder" class="node-icon folder">
+            <AppIcon :component="n.expanded ? IconFolderOpen : IconFolder" :size="15" />
+          </span>
+          <template v-if="isDebugCaseRow(n)">
+            <span class="case-type" :class="debugCaseTypeClass(n.debugCase.caseType)">
+              {{ debugCaseTypeLabel(n.debugCase.caseType) }}
+            </span>
+            <span class="name">{{ n.name }}</span>
             <AppButton
-              class="item-menu-button"
+              class="case-delete-button"
+              :class="{ pending: pendingDeleteCaseId === n.debugCase.id }"
               quaternary
               circle
               size="tiny"
-              :aria-label="`${n.name} 操作菜单`"
-              title="更多操作"
-              @click.stop
+              :type="pendingDeleteCaseId === n.debugCase.id ? 'error' : 'default'"
+              :loading="deletingDebugCaseId === n.debugCase.id"
+              :disabled="deletingDebugCaseId !== null && deletingDebugCaseId !== n.debugCase.id"
+              :title="deletingDebugCaseId === n.debugCase.id ? '正在删除…' : pendingDeleteCaseId === n.debugCase.id ? '再次点击确认删除' : '删除用例'"
+              :aria-label="deletingDebugCaseId === n.debugCase.id ? '正在删除用例' : pendingDeleteCaseId === n.debugCase.id ? '确认删除用例' : '删除用例'"
+              @click.stop="confirmDeleteDebugCase(n)"
             >
-              <template #icon><AppIcon :component="IconMore" :size="15" /></template>
+              <template #icon>
+                <AppIcon :component="pendingDeleteCaseId === n.debugCase.id ? IconCloseCircle : IconRemoveCircle" :size="17" />
+              </template>
             </AppButton>
-          </AppDropdown>
+          </template>
+          <template v-else>
+            <span v-if="!n.isFolder" class="m method-badge" :class="`method-${String(n.method ?? 'GET').toLowerCase()}`">{{ n.method === 'DELETE' ? 'DEL' : n.method }}</span>
+            <span class="name">{{ n.name }}</span>
+            <AppDropdown :options="itemMenuOptions(n)" placement="bottom-end" @select="onItemMenuSelect($event, n)">
+              <AppButton
+                class="item-menu-button"
+                quaternary
+                circle
+                size="tiny"
+                :aria-label="`${n.name} 操作菜单`"
+                title="更多操作"
+                @click.stop
+              >
+                <template #icon><AppIcon :component="IconMore" :size="15" /></template>
+              </AppButton>
+            </AppDropdown>
+          </template>
         </div>
       </div>
     </div>
@@ -984,6 +1123,7 @@ defineExpose({
 .row:hover { background: var(--a-selected); color: var(--a-text); border-radius: 6px; box-shadow: inset 0 0 0 1px var(--a-primary); }
 .row.selected:not(.active) { box-shadow: inset 2px 0 0 var(--a-border-strong); }
 .row.folder { color: var(--a-text); font-weight: 600; }
+.row.debug-case { color: var(--a-text-soft); font-weight: var(--a-fw-normal); }
 /* 当前打开的接口与“新建请求”选项使用同一套轻量激活态。 */
 .row.active { background: var(--a-selected); color: var(--a-text); border: 0; border-radius: 6px; box-shadow: inset 0 0 0 1px var(--a-primary); }
 .row.active:hover { background: var(--a-selected); color: var(--a-text); }
@@ -998,6 +1138,58 @@ defineExpose({
   color: var(--a-text-faint);
 }
 .node-icon.folder { color: var(--a-text-dim); }
+.disclosure-gutter {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 16px;
+  width: 16px;
+  height: 100%;
+}
+.case-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--a-radius-sm);
+  background: transparent;
+  color: var(--a-text-faint);
+  cursor: pointer;
+}
+.case-toggle:hover { background: var(--a-hover); color: var(--a-text); }
+.case-type {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 40px;
+  width: 40px;
+  height: var(--a-h-pill);
+  border: 1px solid color-mix(in srgb, currentColor 22%, transparent);
+  border-radius: 5px;
+  font: 700 var(--a-fs-2xs)/var(--a-lh-xs) var(--a-font-ui);
+}
+.case-type.case-success { color: var(--a-ok); background: var(--a-get-bg); }
+.case-type.case-failure { color: var(--a-warn); background: var(--a-put-bg); }
+.case-type.case-exception { color: var(--a-error); background: var(--a-delete-bg); }
+.case-delete-button {
+  flex: 0 0 var(--a-h-control-xs);
+  width: var(--a-h-control-xs);
+  height: var(--a-h-control-xs);
+  margin-left: auto;
+  padding: 0;
+  color: var(--a-text-faint);
+  opacity: 0;
+}
+.row.debug-case:hover .case-delete-button,
+.row.debug-case.selected .case-delete-button,
+.case-delete-button.pending,
+.case-delete-button:focus-visible { opacity: 1; }
+.case-delete-button:hover { color: var(--a-error); background: var(--a-delete-bg); }
 .m.method-badge { width: 40px; min-width: 40px; flex: 0 0 40px; height: var(--a-h-pill); display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 1px solid color-mix(in srgb, currentColor 22%, transparent); border-radius: 5px; font: 700 var(--a-fs-2xs)/var(--a-lh-xs) var(--a-font-mono); letter-spacing: .02em; }
 .method-get { color: var(--a-get); background: var(--a-get-bg); }
 .method-post { color: var(--a-post); background: var(--a-post-bg); }

@@ -83,6 +83,9 @@ pub struct WorkspaceNode {
     pub is_folder: bool,
     pub expanded: bool,
     pub kind: WorkspaceNodeKind,
+    /// 请求节点所含用例数；不内嵌完整定义，供侧边栏决定是否显示懒加载入口。
+    #[serde(default)]
+    pub debug_case_count: usize,
 }
 
 /// `workspace_load` 的结果。
@@ -104,6 +107,31 @@ pub struct WorkspaceRequest {
     pub spec: RequestSpec,
 }
 
+/// 用例预期覆盖的场景类型；这是保存时的分类元数据，不是运行断言。
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DebugCaseType {
+    #[default]
+    Success,
+    Failure,
+    Exception,
+}
+
+/// 可保存到请求中的调试用例。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugCase {
+    pub id: Uuid,
+    pub request_id: Uuid,
+    pub name: String,
+    /// 用户保存时选择的预期场景。旧 YAML 缺失时按成功用例兼容读取。
+    #[serde(default)]
+    pub case_type: DebugCaseType,
+    pub spec: RequestSpec,
+    pub created_at_ms: u64,
+    pub updated_at_ms: u64,
+}
+
 /// 独立请求 YAML 文件的格式。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PersistedRequest {
@@ -112,6 +140,8 @@ pub struct PersistedRequest {
     pub name: String,
     #[serde(flatten)]
     pub spec: RequestSpec,
+    #[serde(default, rename = "debugCases", skip_serializing_if = "Vec::is_empty")]
+    pub debug_cases: Vec<DebugCase>,
 }
 
 impl PersistedRequest {

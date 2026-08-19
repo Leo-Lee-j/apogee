@@ -54,8 +54,18 @@ export interface Tab {
    *
    * 存 id 而不是从 `url` 反推：URL 是用户可编辑的，改一个字符就找不回节点了。
    * 侧边栏的「定位当前接口」和「高亮当前打开的行」都只认这个字段。
+   *
+   * 只有这个字段允许触发请求 YAML 自动保存；调试用例标签必须保持为空。
    */
   nodeId?: string
+  /**
+   * 独立调试标签的来源请求 id。它只参与集合/文件夹继承解析，绝不能作为保存目标。
+   */
+  sourceRequestId?: string
+  /** 产生此独立调试标签的用例 id；用于把运行结果关联回用例。 */
+  debugCaseId?: string
+  /** 标记可按用例身份去重的参数编辑标签；结果标签不得设置该标记。 */
+  debugCaseEditor?: boolean
   /** 集合或文件夹配置页对应的容器节点。 */
   containerNodeId?: string
   /**
@@ -200,6 +210,17 @@ export const useTabsStore = defineStore('tabs', () => {
         return existing
       }
     }
+    // 只有“用例参数编辑标签”以 DebugCase 身份去重；运行结果标签也带 debugCaseId，
+    // 但它们是独立的历史快照，绝不能被这里错误地激活或覆盖。
+    if (init?.debugCaseEditor && init.debugCaseId) {
+      const existing = tabs.value.find(
+        (tab) => tab.debugCaseEditor && tab.debugCaseId === init.debugCaseId,
+      )
+      if (existing) {
+        activate(existing.id)
+        return existing
+      }
+    }
     // 单击预览：已有临时标签时复用它，避免浏览集合时开出 30 个标签（02 文档 §4.5）
     if (init?.preview) {
       const existing = tabs.value.find((t) => t.preview)
@@ -210,6 +231,9 @@ export const useTabsStore = defineStore('tabs', () => {
         const next: Tab = markRaw({
           ...existing,
           nodeId: undefined, // 先清旧预览的 nodeId，再让 init 决定，避免高亮错行
+          sourceRequestId: undefined,
+          debugCaseId: undefined,
+          debugCaseEditor: undefined,
           ...init,
           id: existing.id,
           preview: true,

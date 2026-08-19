@@ -5,8 +5,11 @@ import {
   ipc,
   normalizeError,
   type AppError,
+  type DebugCase,
+  type DebugCaseType,
   type Environment,
   type EnvironmentVariable,
+  type RequestSpec,
   type WorkspaceNode,
   type WorkspaceDescriptor,
   type WorkspaceOpenResult,
@@ -30,6 +33,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const activeEnvironmentId = ref<string | null>(null)
   /** 尚未落盘的环境 id；发送前统一 flush，避免 Rust 从磁盘读到旧值。 */
   const dirtyEnvironmentIds = reactive(new Set<string>())
+  /** 已经按请求读取过的完整用例定义；工作区快照只携带轻量计数。 */
+  const debugCasesByRequestId = shallowRef<Record<string, DebugCase[]>>({})
+  /** 已展开用例子项的请求 id。使用集合副本更新，维持 shallowRef 的可预期刷新。 */
+  const expandedDebugCaseRequestIds = ref(new Set<string>())
+  const debugCaseLoadPromises = new Map<string, Promise<DebugCase[] | null>>()
+  const debugCaseLoadVersions = new Map<string, number>()
+  let debugCaseCacheVersion = 0
   const activeEnvironment = computed(
     () => environments.value.find((environment) => environment.id === activeEnvironmentId.value) ?? null,
   )
@@ -47,6 +57,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const collections = computed(() => (nodes.value ?? []).filter((node) => node.kind === 'collection'))
 
   function accept(snapshot: WorkspaceSnapshot) {
+    invalidateDebugCaseCache()
     workspaceId.value = snapshot.id
     workspaceName.value = snapshot.name
     nodes.value = snapshot.nodes
@@ -90,6 +101,132 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return appError
   }
 
+  /** 工作区快照来自磁盘，因而必须废弃内存中的用例定义与展开状态。 */
+  function invalidateDebugCaseCache() {
+    debugCaseCacheVersion += 1
+    debugCaseLoadPromises.clear()
+    debugCaseLoadVersions.clear()
+    debugCasesByRequestId.value = {}
+    expandedDebugCaseRequestIds.value = new Set()
+  }
+
+  function debugCasesForRequest(requestId: string): DebugCase[] {
+    return debugCasesByRequestId.value[requestId] ?? []
+  }
+
+  function isDebugCasesExpanded(requestId: string) {
+    return expandedDebugCaseRequestIds.value.has(requestId)
+  }
+
+  function setDebugCasesExpanded(requestId: string, expanded: boolean) {
+    const next = new Set(expandedDebugCaseRequestIds.value)
+    if (expanded) next.add(requestId)
+    else next.delete(requestId)
+    expandedDebugCaseRequestIds.value = next
+  }
+
+  /** 同步快照中的轻量计数，避免创建/删除后必须重读整个工作区才能出现或收起箭头。 */
+  function updateDebugCaseCount(requestId: string, debugCaseCount: number) {
+    const list = nodes.value
+    if (!list) return
+    const index = list.findIndex((node) => node.id === requestId && node.kind === 'request')
+    if (index < 0 || list[index]?.debugCaseCount === debugCaseCount) return
+    nodes.value = list.map((node, nodeIndex) => (
+      nodeIndex === index ? { ...node, debugCaseCount } : node
+    ))
+  }
+
+  /** 按需读取一个请求的用例定义；同一请求的并发展开会复用同一 IPC 调用。 */
+  async function loadDebugCases(requestId: string, force = false): Promise<DebugCase[] | null> {
+    if (!inTauri || !sessionId.value) return null
+    if (!force && Object.prototype.hasOwnProperty.call(debugCasesByRequestId.value, requestId)) {
+      return debugCasesByRequestId.value[requestId] ?? []
+    }
+    const pending = debugCaseLoadPromises.get(requestId)
+    if (pending && !force) return pending
+
+    const cacheVersion = debugCaseCacheVersion
+    const loadVersion = (debugCaseLoadVersions.get(requestId) ?? 0) + 1
+    debugCaseLoadVersions.set(requestId, loadVersion)
+    const task = ipc.workspaceListDebugCases(requestId)
+      .then((debugCases) => {
+        // 快照重载或同请求的更晚读取完成后，旧请求不能把过期 YAML 再写回缓存。
+        if (
+          cacheVersion !== debugCaseCacheVersion
+          || debugCaseLoadVersions.get(requestId) !== loadVersion
+        ) return null
+        debugCasesByRequestId.value = { ...debugCasesByRequestId.value, [requestId]: debugCases }
+        updateDebugCaseCount(requestId, debugCases.length)
+        return debugCases
+      })
+      .catch((error) => {
+        report(error)
+        return null
+      })
+    debugCaseLoadPromises.set(requestId, task)
+    void task.finally(() => {
+      if (debugCaseLoadPromises.get(requestId) === task) debugCaseLoadPromises.delete(requestId)
+    })
+    return task
+  }
+
+  /** 展开请求的用例子项时才拉取完整快照；折叠仅改本地可见行。 */
+  async function toggleDebugCases(requestId: string): Promise<boolean> {
+    if (isDebugCasesExpanded(requestId)) {
+      setDebugCasesExpanded(requestId, false)
+      return false
+    }
+    const debugCases = await loadDebugCases(requestId)
+    if (!debugCases?.length) return false
+    setDebugCasesExpanded(requestId, true)
+    return true
+  }
+
+  async function createDebugCase(
+    requestId: string,
+    name: string,
+    caseType: DebugCaseType,
+    spec: RequestSpec,
+  ): Promise<DebugCase | null> {
+    if (!inTauri || !sessionId.value) return null
+    try {
+      const debugCase = await ipc.workspaceCreateDebugCase(requestId, name, caseType, spec)
+      // 创建后强制刷新再展开：已有用例不会因只追加新返回项而从子树中消失。
+      const debugCases = await loadDebugCases(requestId, true)
+      if (debugCases) {
+        setDebugCasesExpanded(requestId, true)
+      } else {
+        const count = nodes.value?.find((node) => node.id === requestId)?.debugCaseCount ?? 0
+        updateDebugCaseCount(requestId, count + 1)
+      }
+      return debugCase
+    } catch (error) {
+      report(error)
+      return null
+    }
+  }
+
+  async function deleteDebugCase(requestId: string, caseId: string): Promise<boolean> {
+    if (!inTauri || !sessionId.value) return false
+    try {
+      await ipc.workspaceDeleteDebugCase(requestId, caseId)
+      const cached = debugCasesByRequestId.value[requestId]
+      if (cached) {
+        const next = cached.filter((debugCase) => debugCase.id !== caseId)
+        debugCasesByRequestId.value = { ...debugCasesByRequestId.value, [requestId]: next }
+        updateDebugCaseCount(requestId, next.length)
+        if (next.length === 0) setDebugCasesExpanded(requestId, false)
+      } else {
+        const count = nodes.value?.find((node) => node.id === requestId)?.debugCaseCount ?? 0
+        updateDebugCaseCount(requestId, Math.max(0, count - 1))
+      }
+      return true
+    } catch (error) {
+      report(error)
+      return false
+    }
+  }
+
   async function load() {
     if (!inTauri || !sessionId.value) return
     if (loadingPromise) return loadingPromise
@@ -118,6 +255,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   function reset() {
+    invalidateDebugCaseCache()
     nodes.value = undefined
     workspaceId.value = null
     workspaceName.value = ''
@@ -290,7 +428,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
-  async function openRequest(node: WorkspaceNode, preview = true): Promise<WorkspaceRequest | null> {
+  async function openRequest(node: Pick<WorkspaceNode, 'id' | 'kind'>, preview = true): Promise<WorkspaceRequest | null> {
     if (!inTauri || node.kind !== 'request') return null
     try {
       const request = await ipc.workspaceReadRequest(node.id)
@@ -416,6 +554,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       const tabs = useTabsStore()
       tabs.patch(tab.id, {
         nodeId: request.id,
+        // 另存为后的标签已经是独立请求，不能继续把运行结果关联到原用例。
+        sourceRequestId: undefined,
+        debugCaseId: undefined,
+        debugCaseEditor: undefined,
         title: request.name,
         newPanel: false,
         newRequestParentId: undefined,
@@ -435,7 +577,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return applySnapshot(ipc.workspaceRenameNode(nodeId, name))
   }
 
-  /** 复制集合、文件夹或接口；容器会连同其全部后代一起复制。 */
+  /** 复制集合、文件夹或接口；容器会连同其全部后代和调试用例一起复制。 */
   async function duplicateNode(node: WorkspaceNode): Promise<boolean> {
     if (!inTauri || !node.kind) return false
     try {
@@ -456,6 +598,24 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       const cloneParents = new Map<string, string>()
       const rootName = `${node.name} 副本`
 
+      // 用例定义嵌入 Request YAML，不能只复制 RequestSpec。逐条创建会由后端生成
+      // 新 case id 并绑定到新 request id，历史记录仍只属于原请求。
+      const copyRequest = async (sourceId: string, parentId: string, name: string) => {
+        const source = await ipc.workspaceReadRequest(sourceId)
+        const copy = await ipc.workspaceCreateRequest(parentId, name)
+        await ipc.workspaceSaveRequest(copy.id, name, source.spec)
+        const cases = await ipc.workspaceListDebugCases(source.id)
+        for (const debugCase of cases) {
+          await ipc.workspaceCreateDebugCase(
+            copy.id,
+            debugCase.name,
+            debugCase.caseType,
+            debugCase.spec,
+          )
+        }
+        return copy
+      }
+
       if (node.kind === 'collection') {
         const snapshot = await ipc.workspaceCreateCollection(rootName)
         const root = snapshot.nodes.find((item) => !knownIds.has(item.id) && item.kind === 'collection')
@@ -471,9 +631,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         cloneParents.set(node.id, root.id)
       } else {
         if (!node.parentId) throw new Error('接口缺少父级')
-        const source = await ipc.workspaceReadRequest(node.id)
-        const copy = await ipc.workspaceCreateRequest(node.parentId, rootName)
-        await ipc.workspaceSaveRequest(copy.id, rootName, source.spec)
+        await copyRequest(node.id, node.parentId, rootName)
         await load()
         expandPath(node.parentId)
         return true
@@ -489,9 +647,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
           knownIds.add(copy.id)
           cloneParents.set(item.id, copy.id)
         } else if (item.kind === 'request') {
-          const source = await ipc.workspaceReadRequest(item.id)
-          const copy = await ipc.workspaceCreateRequest(parentId, item.name)
-          await ipc.workspaceSaveRequest(copy.id, source.name, source.spec)
+          await copyRequest(item.id, parentId, item.name)
         }
       }
       await load()
@@ -502,6 +658,31 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       report(error)
       return false
     }
+  }
+
+  /**
+   * 将用例快照物化为独立调试标签。刻意不设置 nodeId：编辑此标签不能覆盖基础 Request。
+   * sourceRequestId 只供发送时解析集合/文件夹继承，debugCaseId 用于关联运行结果。
+   */
+  function openDebugCase(debugCase: DebugCase): Tab {
+    const spec = structuredClone(debugCase.spec)
+    const tab = useTabsStore().open({
+      title: `${debugCase.name} · 用例`,
+      sourceRequestId: debugCase.requestId,
+      debugCaseId: debugCase.id,
+      debugCaseEditor: true,
+      preview: false,
+      method: spec.method,
+      url: spec.url,
+      params: spec.params ?? [],
+      pathParams: spec.pathParams ?? [],
+      headers: spec.headers ?? [],
+      body: spec.body ?? { type: 'none' },
+      auth: spec.auth ?? { type: 'inherit' },
+      settings: spec.settings ?? {},
+    })
+    useUiStore().focusUrl()
+    return tab
   }
 
   async function deleteNode(nodeId: string): Promise<boolean> {
@@ -524,6 +705,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     lastError,
     available,
     collections,
+    debugCasesForRequest,
+    isDebugCasesExpanded,
+    loadDebugCases,
+    toggleDebugCases,
+    createDebugCase,
+    deleteDebugCase,
     load,
     enter,
     reset,
@@ -547,6 +734,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     updateRequestMethod,
     renameNode,
     duplicateNode,
+    openDebugCase,
     deleteNode,
   }
 })
