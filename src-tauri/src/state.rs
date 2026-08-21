@@ -3,6 +3,9 @@
 use crate::workspace::WorkspaceRepository;
 use anyhow::{bail, Context, Result};
 use apogee_core::model::{ResponseMeta, Timing};
+#[cfg(test)]
+use apogee_core::public::PublicRequestPreview;
+use apogee_core::public::PublicResponseSummary;
 use apogee_core::response::{
     scalar_preview, synth_json_payload, ResponseStore, ResponseSummary, SpanIndex, Spool, TreeNode,
     PREVIEW_READ_BYTES,
@@ -835,10 +838,17 @@ impl AppState {
 
         if let Some(response) = record.response.take() {
             let body = body.ok_or_else(|| anyhow::anyhow!("历史响应体不存在：{history_id}"))?;
-            let response = restorer(runtime.spool(), response, &body)?;
+            // History records only retain the public projection. Recreate the minimum internal
+            // metadata needed for spool restoration, then immediately project it back before the
+            // command can serialize the record.
+            let response = restorer(
+                runtime.spool(),
+                response.into_internal_for_history_restore(),
+                &body,
+            )?;
             let response_id = response.id;
             match self.publish_history_response(access, response) {
-                Ok(response) => record.response = Some(response),
+                Ok(response) => record.response = Some(PublicResponseSummary::from(&response)),
                 Err(error) => {
                     // 只会清理已失效 session 的私有 spool，不能误删新 runtime 的 body。
                     let _ = runtime.spool().remove(response_id);
@@ -1629,7 +1639,7 @@ mod tests {
         first
             .record_history(
                 1234,
-                RequestSpec {
+                PublicRequestPreview::from(&RequestSpec {
                     method: "GET".into(),
                     url: "https://history.example.test".into(),
                     params: Vec::new(),
@@ -1638,8 +1648,12 @@ mod tests {
                     body: Body::None,
                     auth: AuthConfig::Inherit,
                     settings: RequestSettings::default(),
-                },
-                ResponseSummary::without_http(response_id, payload.len() as u64, Timing::default()),
+                }),
+                PublicResponseSummary::from(&ResponseSummary::without_http(
+                    response_id,
+                    payload.len() as u64,
+                    Timing::default(),
+                )),
                 &source,
                 None,
                 None,
@@ -1720,7 +1734,7 @@ mod tests {
         repository
             .record_history(
                 1234,
-                RequestSpec {
+                PublicRequestPreview::from(&RequestSpec {
                     method: "GET".into(),
                     url: "https://history.example.test".into(),
                     params: Vec::new(),
@@ -1729,8 +1743,12 @@ mod tests {
                     body: Body::None,
                     auth: AuthConfig::Inherit,
                     settings: RequestSettings::default(),
-                },
-                ResponseSummary::without_http(response_id, payload.len() as u64, Timing::default()),
+                }),
+                PublicResponseSummary::from(&ResponseSummary::without_http(
+                    response_id,
+                    payload.len() as u64,
+                    Timing::default(),
+                )),
                 &source,
                 None,
                 None,
@@ -2096,12 +2114,12 @@ mod tests {
             repository
                 .record_history(
                     1234,
-                    request_spec(),
-                    ResponseSummary::without_http(
+                    PublicRequestPreview::from(&request_spec()),
+                    PublicResponseSummary::from(&ResponseSummary::without_http(
                         response_id,
                         payload.len() as u64,
                         Timing::default(),
-                    ),
+                    )),
                     source,
                     None,
                     None,
@@ -2429,6 +2447,10 @@ mod tests {
                         common_header_names: Vec::new(),
                         body: None,
                         body_params: Vec::new(),
+                        sensitive_path_param_names: Vec::new(),
+                        sensitive_path_values: Vec::new(),
+                        sensitive_query_names: Vec::new(),
+                        sensitive_header_names: Vec::new(),
                     },
                     from_cache: false,
                     truncated: false,

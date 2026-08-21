@@ -23,19 +23,27 @@ export type ErrorKind =
   | 'dns' | 'connect' | 'tls' | 'timeout'
   | 'http' | 'io' | 'parse' | 'script' | 'var'
 
-export interface Hint {
+export interface PublicHint {
   label: string
   action?: string
 }
 
-export interface AppError {
+/** Alias retained for components that only render public error data. */
+export type Hint = PublicHint
+
+/**
+ * Error payload allowed across request/history IPC. Technical detail is intentionally absent:
+ * it belongs to the internal execution diagnostic path, not ordinary renderer state.
+ */
+export interface PublicError {
   code?: string
   kind: ErrorKind
   message: string
-  detail?: string
   /** 可操作建议。空数组是设计缺陷，见 02 文档 §8 的三段式错误要求。 */
-  hints: Hint[]
+  hints: PublicHint[]
 }
+
+export type AppError = PublicError
 
 /** 响应体渲染分级。**唯一的高亮阈值是 2MB**（02 文档 §4.4）。 */
 export type RenderTier = 'full' | 'virtualized' | 'noHighlight' | 'summaryOnly'
@@ -52,25 +60,27 @@ export interface Timing {
   totalMs: number
 }
 
-export interface ActualRequest {
+/**
+ * Sanitized execution snapshot. Request bodies, body parameters, file paths and credentials are
+ * intentionally not present in the renderer-facing contract.
+ */
+export interface PublicActualRequest {
   method: string
   url: string
-  /** 已完成变量解析但尚未编码的路径参数值。 */
+  /** 已完成变量解析但已经脱敏的路径参数值。 */
   pathParams?: [string, string][]
   headers: [string, string][]
   /** 已知浏览器/协议通用 Header 名称，供实际请求表格默认隐藏。 */
   commonHeaderNames?: string[]
-  /** 内存型请求体的完整内容；文件和流式上传不会进入快照。 */
-  body?: string
-  /** 流式 Body 无法读取原始字节时保留的字段名称和值。 */
-  bodyParams?: [string, string][]
 }
 
+/** Backwards-compatible UI name for the public-only request snapshot. */
+export type ActualRequest = PublicActualRequest
+
 /**
- * 响应摘要 —— **唯一会过 IPC 的响应信息**，只有几百字节。
- * 响应体本身在磁盘 spool 里，通过 responseUrl 按 Range 拉。
+ * Sanitized response metadata. 响应体仍只通过受 session 保护的 apogee:// Range 通道读取。
  */
-export interface ResponseSummary {
+export interface PublicResponseSummary {
   id: string
   sizeBytes: number
   tier: RenderTier
@@ -81,7 +91,7 @@ export interface ResponseSummary {
   /** SpanIndex 的近似常驻堆内存，不包含响应体文件或 mmap。 */
   indexBytes?: number
   timing: Timing
-  actualRequest?: ActualRequest
+  actualRequest?: PublicActualRequest
   // ── HTTP 语义（03 文档 §3.2）──
   // 全部可选：Spike 合成响应没有 HTTP 语义，UI 据此显示「不可用」而非编造 200。
   status?: number
@@ -91,6 +101,9 @@ export interface ResponseSummary {
   charset?: string
   truncated?: boolean
 }
+
+/** Existing UI consumers use this alias; it can never be a raw internal Rust summary. */
+export type ResponseSummary = PublicResponseSummary
 
 export interface MemInfo {
   workingSetBytes: number
@@ -234,16 +247,34 @@ export interface HistoryEntry {
   durationMs: number
 }
 
-/** 成功运行带 response；失败运行带 error、可选的实际请求，且没有响应体。 */
+/** A non-executable, redacted history request view. It never carries body or auth configuration. */
+export interface HistoryRequestPreview {
+  method: string
+  url: string
+  params?: PublicKeyValue[]
+  pathParams?: PublicKeyValue[]
+  headers?: PublicKeyValue[]
+  settings?: PublicRequestSettings
+}
+
+/** A public parameter/header row. Free-form descriptions are not retained in history IPC. */
+export interface PublicKeyValue {
+  enabled: boolean
+  key: string
+  value: string
+  kind?: 'text' | 'file' | 'secret'
+}
+
+/** 成功运行带 response；失败运行带 error、可选的安全实际请求，且没有响应体。 */
 export interface HistoryRecord {
   id: string
   createdAtMs: number
   debugCaseId?: string | null
   environmentId?: string | null
-  spec: RequestSpec
-  response?: ResponseSummary | null
-  error?: AppError | null
-  actualRequest?: ActualRequest | null
+  spec: HistoryRequestPreview
+  response?: PublicResponseSummary | null
+  error?: PublicError | null
+  actualRequest?: PublicActualRequest | null
   durationMs: number
 }
 
@@ -298,7 +329,6 @@ async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> 
     throw {
       kind: 'io',
       message: '当前页面未连接到 Apogee 桌面宿主，无法执行请求',
-      detail: `IPC 命令：${cmd}`,
       hints: [{ label: '请从 Apogee 桌面应用启动，而不是直接打开 Vite 预览页' }],
     } satisfies AppError
   }
@@ -578,8 +608,8 @@ export const ipc = {
 
   historyRecord(
     createdAtMs: number,
-    spec: RequestSpec,
-    response: ResponseSummary,
+    spec: HistoryRequestPreview,
+    response: PublicResponseSummary,
     debugCaseId?: string,
     environmentId?: string,
     session: WorkspaceSession = sessionArgs(),
@@ -599,9 +629,9 @@ export const ipc = {
   /** 持久化未收到 HTTP 响应的失败运行；不传也不创建响应体。 */
   historyRecordError(
     createdAtMs: number,
-    spec: RequestSpec,
-    error: AppError,
-    actualRequest: ActualRequest | null,
+    spec: HistoryRequestPreview,
+    error: PublicError,
+    actualRequest: PublicActualRequest | null,
     durationMs: number,
     debugCaseId?: string,
     environmentId?: string,
@@ -798,8 +828,8 @@ export type AuthConfig =
   | { type: 'bearer'; token: string }
   | { type: 'apiKey'; key: string; value: string; location: 'header' | 'query' | 'cookie' }
 
-/** 请求级设置。全部可选：不传 = 继承默认。 */
-export interface RequestSettings {
+/** 可公开显示的请求设置；连接代理地址不属于该 DTO。 */
+export interface PublicRequestSettings {
   timeoutMs?: number
   followRedirects?: boolean
   maxRedirects?: number
@@ -807,7 +837,12 @@ export interface RequestSettings {
   httpVersion?: 'http1' | 'http2'
   encodeUrl?: boolean
   sendCookies?: boolean
+  retryCount?: number
+  retryBackoffMs?: number
 }
+
+/** 执行输入当前不暴露 proxy URL，和公开设置形状相同。 */
+export type RequestSettings = PublicRequestSettings
 
 export interface ExecContext {
   tabId?: string
@@ -824,6 +859,246 @@ export interface WorkspaceContainer {
 
 export interface ExecHandle {
   id: string
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// History/public DTO conversion
+//
+// The renderer still owns the editable RequestSpec. It must never forward that object to
+// history IPC: this conversion deliberately constructs a new non-executable preview and omits
+// body/auth/proxy fields even if an untyped caller adds them to the input object.
+// ─────────────────────────────────────────────────────────────────────
+
+const PUBLIC_REDACTED = '[redacted]'
+const PUBLIC_FILE_OMITTED = '[file omitted]'
+
+function normalizedSensitiveName(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]/g, '')
+}
+
+function isSensitivePublicName(name: string): boolean {
+  const normalized = normalizedSensitiveName(name)
+  if (!normalized) return false
+  const exact = new Set([
+    'authorization', 'proxyauthorization', 'cookie', 'setcookie', 'apikey', 'xapikey',
+    'accesskey', 'secret', 'clientsecret', 'token', 'accesstoken', 'refreshtoken',
+    'idtoken', 'password', 'passwd', 'pwd', 'signature', 'sig', 'credential',
+    'credentials', 'bearer', 'privatekey', 'session', 'sessionid', 'key',
+  ])
+  return exact.has(normalized) || [
+    'apikey', 'token', 'secret', 'password', 'signature', 'credential', 'authorization', 'cookie',
+  ].some((marker) => normalized.includes(marker))
+}
+
+function isSensitivePublicValue(value: string): boolean {
+  const normalized = value.trimStart().toLowerCase()
+  return normalized.startsWith('bearer ')
+    || normalized.startsWith('basic ')
+    || normalized.startsWith('token ')
+    || normalized.startsWith('apikey ')
+    || normalized.startsWith('api-key ')
+}
+
+function hasSensitiveKeyValue(row: KeyValue): boolean {
+  return row.kind === 'file'
+    || row.kind === 'secret'
+    || isSensitivePublicName(row.key)
+    || isSensitivePublicValue(row.value)
+}
+
+function toPublicKeyValue(row: KeyValue, sensitiveNames: string[] = []): PublicKeyValue {
+  const sourceMarkedSensitive = isMarkedSensitiveName(row.key, sensitiveNames)
+  const value = row.kind === 'file'
+    ? PUBLIC_FILE_OMITTED
+    : hasSensitiveKeyValue(row) || sourceMarkedSensitive
+      ? PUBLIC_REDACTED
+      : row.value
+  return {
+    enabled: row.enabled,
+    key: row.key,
+    value,
+    kind: row.kind,
+  }
+}
+
+/** Matches Rust's `urlencoding_path`: preserve slash, percent-encode every other byte. */
+function encodePathValue(value: string): string {
+  return Array.from(new TextEncoder().encode(value), (byte) => {
+    const isUnreserved = (byte >= 0x41 && byte <= 0x5a)
+      || (byte >= 0x61 && byte <= 0x7a)
+      || (byte >= 0x30 && byte <= 0x39)
+      || byte === 0x2d || byte === 0x5f || byte === 0x2e || byte === 0x7e || byte === 0x2f
+    return isUnreserved ? String.fromCharCode(byte) : `%${byte.toString(16).padStart(2, '0').toUpperCase()}`
+  }).join('')
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/** Match percent escapes case-insensitively without making unescaped path bytes case-insensitive. */
+function encodedPathPattern(encoded: string): RegExp {
+  let pattern = ''
+  for (let index = 0; index < encoded.length;) {
+    if (encoded[index] === '%' && index + 2 < encoded.length) {
+      const first = encoded[index + 1] ?? ''
+      const second = encoded[index + 2] ?? ''
+      pattern += `%[${first.toUpperCase()}${first.toLowerCase()}][${second.toUpperCase()}${second.toLowerCase()}]`
+      index += 3
+    } else {
+      pattern += escapeRegExp(encoded[index] ?? '')
+      index += 1
+    }
+  }
+  return new RegExp(pattern, 'g')
+}
+
+function redactLiteralValues(value: string, sensitiveValues: string[]): string {
+  const ordered = [...new Set(sensitiveValues.filter((sensitive) => (
+    sensitive.length > 0 && sensitive !== PUBLIC_REDACTED && sensitive !== PUBLIC_FILE_OMITTED
+  )))].sort((left, right) => right.length - left.length)
+
+  return ordered.reduce((result, sensitive) => {
+    const rawRedacted = result.split(sensitive).join(PUBLIC_REDACTED)
+    const encoded = encodePathValue(sensitive)
+    return encoded === sensitive
+      ? rawRedacted
+      : rawRedacted.replace(encodedPathPattern(encoded), PUBLIC_REDACTED)
+  }, value)
+}
+
+function decodeQueryName(value: string): string {
+  try {
+    return decodeURIComponent(value.replaceAll('+', ' '))
+  } catch {
+    return value
+  }
+}
+
+function isMarkedSensitiveName(name: string, sensitiveNames: string[]): boolean {
+  const normalized = name.trim().toLowerCase()
+  return normalized.length > 0 && sensitiveNames.some(
+    (sensitiveName) => sensitiveName.trim().toLowerCase() === normalized,
+  )
+}
+
+function stripUrlUserinfo(value: string): string {
+  const schemeEnd = value.indexOf('://')
+  if (schemeEnd < 0) return value
+  const authorityStart = schemeEnd + 3
+  const rest = value.slice(authorityStart)
+  const slash = rest.indexOf('/')
+  const authority = slash < 0 ? rest : rest.slice(0, slash)
+  const suffix = slash < 0 ? '' : rest.slice(slash)
+  const at = authority.lastIndexOf('@')
+  return at < 0 ? value : `${value.slice(0, authorityStart)}${authority.slice(at + 1)}${suffix}`
+}
+
+function redactUnparseableUrl(value: string, sensitiveQueryNames: string[]): string {
+  const withoutFragment = value.split('#', 1)[0] ?? ''
+  const queryStart = withoutFragment.indexOf('?')
+  if (queryStart < 0) return stripUrlUserinfo(withoutFragment)
+  const base = stripUrlUserinfo(withoutFragment.slice(0, queryStart))
+  const query = withoutFragment.slice(queryStart + 1).split('&').map((pair) => {
+    const separator = pair.indexOf('=')
+    const key = separator < 0 ? pair : pair.slice(0, separator)
+    const rawValue = separator < 0 ? '' : pair.slice(separator + 1)
+    const decodedKey = decodeQueryName(key)
+    return isSensitivePublicName(decodedKey)
+      || isMarkedSensitiveName(decodedKey, sensitiveQueryNames)
+      || isSensitivePublicValue(rawValue)
+      ? `${key}=${PUBLIC_REDACTED}`
+      : pair
+  }).join('&')
+  return `${base}?${query}`
+}
+
+function redactHistoryUrl(
+  value: string,
+  sensitivePathValues: string[],
+  sensitiveQueryNames: string[],
+): string {
+  const redactedPaths = redactLiteralValues(value, sensitivePathValues)
+  try {
+    const url = new URL(redactedPaths)
+    url.username = ''
+    url.password = ''
+    url.hash = ''
+    for (const [key, queryValue] of Array.from(url.searchParams.entries())) {
+      if (
+        isSensitivePublicName(key)
+        || isMarkedSensitiveName(key, sensitiveQueryNames)
+        || isSensitivePublicValue(queryValue)
+      ) {
+        url.searchParams.set(key, PUBLIC_REDACTED)
+      }
+    }
+    return url.toString()
+  } catch {
+    return redactUnparseableUrl(redactedPaths, sensitiveQueryNames)
+  }
+}
+
+function toPublicSettings(settings: RequestSettings | undefined): PublicRequestSettings | undefined {
+  if (!settings) return undefined
+  return {
+    timeoutMs: settings.timeoutMs,
+    followRedirects: settings.followRedirects,
+    maxRedirects: settings.maxRedirects,
+    verifyTls: settings.verifyTls,
+    httpVersion: settings.httpVersion,
+    encodeUrl: settings.encodeUrl,
+    sendCookies: settings.sendCookies,
+    retryCount: settings.retryCount,
+    retryBackoffMs: settings.retryBackoffMs,
+  }
+}
+
+/** Convert an editable request into the only request-shaped value allowed in history IPC. */
+function sensitiveSourceNames(rows: KeyValue[]): string[] {
+  const names: string[] = []
+  for (const row of rows) {
+    const name = row.key.trim()
+    if (name && hasSensitiveKeyValue(row) && !isMarkedSensitiveName(name, names)) {
+      names.push(name)
+    }
+  }
+  return names
+}
+
+function sensitiveAuthQueryNames(auth: AuthConfig | undefined): string[] {
+  if (auth?.type !== 'apiKey' || auth.location !== 'query') return []
+  const name = auth.key.trim()
+  return name ? [name] : []
+}
+
+function sensitiveAuthHeaderNames(auth: AuthConfig | undefined): string[] {
+  if (auth?.type === 'basic' || auth?.type === 'bearer') return ['Authorization']
+  if (auth?.type !== 'apiKey') return []
+  if (auth.location === 'cookie') return ['Cookie']
+  const name = auth.location === 'header' ? auth.key.trim() : ''
+  return name ? [name] : []
+}
+
+export function toHistoryRequestPreview(spec: RequestSpec): HistoryRequestPreview {
+  const pathParams = spec.pathParams ?? []
+  const sensitivePathValues = pathParams
+    .filter(hasSensitiveKeyValue)
+    .map((row) => row.value)
+    .filter(Boolean)
+  const sensitiveQueryNames = [
+    ...sensitiveSourceNames(spec.params ?? []),
+    ...sensitiveAuthQueryNames(spec.auth),
+  ]
+  const sensitiveHeaderNames = sensitiveAuthHeaderNames(spec.auth)
+  return {
+    method: spec.method,
+    url: redactHistoryUrl(spec.url, sensitivePathValues, sensitiveQueryNames),
+    params: (spec.params ?? []).map((row) => toPublicKeyValue(row, sensitiveQueryNames)),
+    pathParams: pathParams.map((row) => toPublicKeyValue(row)),
+    headers: (spec.headers ?? []).map((row) => toPublicKeyValue(row, sensitiveHeaderNames)),
+    settings: toPublicSettings(spec.settings),
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────

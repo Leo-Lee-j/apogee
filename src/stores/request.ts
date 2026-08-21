@@ -3,6 +3,7 @@ import {
   inTauri,
   normalizeError,
   onRequestEvents,
+  toHistoryRequestPreview,
   type RequestSpec,
   type ExecContext,
   type AppError,
@@ -136,7 +137,7 @@ export function useRequest() {
       if (inTauri && spec) {
         void ipc.historyRecord(
           startedAt ?? Date.now(),
-          spec,
+          toHistoryRequestPreview(spec),
           settlement.event.response,
           debugCaseId,
           environmentId,
@@ -159,7 +160,7 @@ export function useRequest() {
         const createdAtMs = startedAt ?? completedAt
         void ipc.historyRecordError(
           createdAtMs,
-          spec,
+          toHistoryRequestPreview(spec),
           errorEvent.error,
           errorEvent.actualRequest ?? null,
           Math.max(0, completedAt - createdAtMs),
@@ -224,7 +225,9 @@ export function useRequest() {
   /** 发送当前激活标签的请求。 */
   async function send() {
     const tab = tabs.active
-    if (!tab || !tab.url.trim() || sending.value) return
+    // History opens a deliberately non-executable projection. Keep this guard at the execution
+    // entry point so keyboard shortcuts or future callers cannot bypass a disabled UI control.
+    if (!tab || tab.historyPreview || !tab.url.trim() || sending.value) return
 
     // 工作区是首屏之后异步加载的。发送必须等它完成，否则默认环境还没
     // 选出来时会把带 {{variable}} 的请求误判成缺少变量。

@@ -1,6 +1,6 @@
 # Rust 工程可靠性优化实施方案
 
-> 状态：实施中（已落地 session-bound response runtime 子切片；完整 P0 尚未完成）
+> 状态：实施中（已落地 session-bound response runtime 与 P0 默认脱敏子切片；完整 P0 尚未完成）
 >
 > 初稿：2026-08-20；最近更新：2026-08-21
 >
@@ -12,7 +12,7 @@
 
 ## 实施状态快照（2026-08-21）
 
-本轮已完成的是 **P0 的 session-scoped response runtime 与局部单文件安全发布子切片**，不是完整的运行态/数据安全基线。下文 §1.1 的审查数据是 2026-08-20 的初始发现；以下内容为当前实现和继续工作的权威进度记录。
+本轮已完成 **P0 的 session-scoped response runtime、局部单文件安全发布与默认脱敏子切片**；这仍不是完整的运行态/数据安全基线。下文 §1.1 的审查数据是 2026-08-20 的初始发现；以下内容为当前实现和继续工作的权威进度记录。
 
 ### 已落地
 
@@ -22,42 +22,44 @@
 - history body 恢复、Synthetic 生成和 JSON 索引采用“短锁捕获 runtime → 锁外 I/O/计算 → 发布前重新验证”的路径；Synthetic 通过 `Arc` 身份防止 open/close ABA。
 - history body 导入使用唯一 `.part` 文件、flush 后以同目录 hard link 作为不可覆盖的发布点；已存在的 body 仅在与 history source 长度匹配时作为幂等恢复复用。若复制后的发布窗口发生竞争，只有明确的 `AlreadyExists` 才会复用匹配 body，其他发布/I/O 失败会原样返回；成功发布或复用后的临时删除失败同样可见为错误，`Spool::remove` 会回收该 response 遗留的 `.part`。history restore 不再以 `exists()` 裸短路。同一 response 的并发发布、已存在 body 的匹配复用、长度不匹配拒绝、`AlreadyExists` 竞争、非冲突失败传播、临时清理失败和 remove 回收均有回归测试。response index 和 metadata 会在 session 切换时清理。
 - Windows 单文件发布已移除“先删除旧文件再 rename”的空窗，应用设置、工作区状态和 YAML 写入在替换失败时保留旧可读文件；CI 也补充了声明 MSRV 与 stable 的 Rust 质量门禁。
+- **P0 默认脱敏子切片已落地，并已按安全复审补强。** `apogee-core::public` 定义了 `PublicRequestPreview`、`PublicActualRequest`、`PublicResponseSummary`、`PublicError`/`PublicHint` 与安全的键值、设置投影；完整 body、auth、代理 URL、文件路径、错误 detail 和不安全提示不会进入这些 DTO。URL 会移除 userinfo/fragment，并依据敏感来源遮蔽中性名称的 query、header、Cookie、Bearer/Basic/API key、`ValueKind::Secret` 与 `ValueKind::File`；路径值同时遮蔽原文及 URL 编码形式（百分号十六进制大小写无关）。
+- `ActualRequest` 仅在执行内存中保留且不会 serde 化的敏感来源元数据；`snapshot_request` 从解析后的 request、鉴权和 API key 采集它们，公开投影可遮蔽中性字段名（例如 `id`、`q`、`X-My-Key`）以及 URL 编码后的路径值（例如 `a b` → `a%20b`）。配置的自定义 API-key Header 即使被同名手写 Header 覆盖，仍被视为敏感来源；实际请求和 history preview 的同名行都会遮蔽覆盖值。
+- history YAML、新旧 history 读取、`request:done` / `request:error`、`get_response_meta`、`index_response` 和相关 Spike 响应均只使用公开 DTO。旧 history 继续只读兼容，读取时会在原始 `Secret`/`File` 标记尚可用时补偿净化实际请求；旧 `auth` 则仅解析无值的 `type`/`key`/`location` 脱敏来源，因此自定义 API-key Header/Query 也会在 legacy preview 行、失败记录和嵌入 response 的 actual request 中被遮蔽，且旧 YAML 不会自动重写或删除。
+- 前端 history IPC 先构造公开 preview，并根据中性 `Secret` query 名、大小写不同的编码 path 值和自定义 query/header API-key 名净化 URL 与 preview 行；历史记录以无 body/auth 的安全 preview 重开。`historyPreview` 在请求执行入口被显式拒绝，快捷键或未来调用方也不能发送该标签；响应面板不显示 actual request body/body 参数或 error detail。普通请求终结日志和 panic hook 只记录安全摘要，不格式化原始执行快照或错误 detail。用户工作区请求 YAML 仍是原始 source of truth，未被本切片改写。
 
 ### 已验证
 
-最近一次本地代码验证通过：
+本切片实施期间已通过以下针对性回归：
 
 | 检查 | 结果 |
 | --- | --- |
-| `cargo +stable fmt --all -- --check` | 通过 |
-| `cargo +stable clippy --workspace --all-targets --locked -- -D warnings` | 通过 |
-| `cargo +stable test --workspace --locked` | 通过（`apogee-core` 61、`apogee-desktop` 35） |
-| `pnpm typecheck` | 通过 |
-| `pnpm exec vitest run --reporter=verbose` | 通过（3 个文件、11 个测试） |
-| `get_diagnostics`（`state.rs`、`lib.rs`）与 `git diff --check` | 无诊断/无空白错误（仅 CRLF 提示） |
-| `pnpm tauri dev` | Vite 与 `target\debug\apogee.exe` 成功启动 |
+| `cargo +stable test -p apogee-core --lib --locked` | 通过（72 项；含中性 query 来源、大小写不同的编码 path、覆盖式 API-key Header 与公开 DTO 回归） |
+| `cargo +stable test -p apogee-desktop legacy_history_is_read_compatibly_but_sanitized_before_output --lib --locked` | 通过（旧 YAML 的中性命名 Secret 补偿净化） |
+| `cargo +stable test -p apogee-desktop legacy_custom_api_key_sources_redact_top_level_and_embedded_actual_requests --lib --locked` | 通过（legacy 自定义 API-key Header/Query 的失败与成功 actual request 脱敏） |
+| `cargo +stable test -p apogee-desktop workspace::tests::history --lib --locked` | 通过（公开 history YAML 持久化和读取） |
+| `get_diagnostics`（脱敏相关 Rust 文件） | 无诊断 |
 
-新增的 Rust barrier 回归覆盖旧 request、history restore、index、Synthetic 在 session 切换时的隔离和旧 spool 延迟回收；测试不依赖 sleep。`Spool::copy_from` 另有独立回归覆盖已存在 body 的匹配复用、大小不匹配拒绝、不可覆盖发布的 `AlreadyExists` 竞争、非冲突发布错误传播、临时清理失败、`Spool::remove` 回收残留和并发恢复。
+本切片已按受影响范围完成完整门禁且全部通过：`cargo +stable fmt --all -- --check`、`cargo +stable clippy --workspace --all-targets --locked -- -D warnings`、`cargo +stable test --workspace --locked`（`apogee-core` 72、`apogee-desktop` 38）、`pnpm typecheck`、`pnpm exec vitest run --reporter=verbose`（5 个文件、16 项测试）与 `git diff --check`。前端 IPC preview 与 history preview 不可执行回归均包含在该门禁内。
 
 ### 下一轮优先级与已知边界
 
-1. **默认脱敏优先。** 当前失败 history 仍会持久化原始 `RequestSpec`、`ActualRequest` 和 error detail，可能含鉴权、Cookie、token、解析后的 URL、body 或本机路径；在其改为 `HistoryRequestView` / `PublicResponseSummary` 并补齐脱敏快照测试前，不能把本切片表述为完成数据安全基线。
-2. **增强 body 完整性校验。** 本轮已验证已有 body 的长度并拒绝错误发布；同长度损坏尚不可区分。若威胁模型或恢复诊断需要，应引入可选 hash/长度元数据并权衡额外 I/O，而不是重新放开 `exists()` 裸短路。
-3. **完成 response runtime 的整体收敛。** 目前是 `ResponseRuntime`，而非目标中的完整 `WorkspaceRuntime`；repository、response registry、in-flight、mutation gate 和计划缓存仍未统一为同一 owning runtime。普通协议 URL 仍是 session 归属校验，尚不是随机、短期 response capability。
-4. **完成阶段 2 的持久化协议。** 尚无跨进程单写者锁、`MutationGate`、staging/journal/tombstone/recovery；成功 history body 复制也仍需拆为锁外复制、重新验证、发布的两阶段流程。
-5. **完成阶段 3 的资源与协议边界。** 尚无 500 MiB runtime 记账、构建前 JSON 预算/single-flight、统一 `ResponseRegistry`、完整 Range/MIME/受限协议 I/O 改造或默认 history/IPC/log 脱敏。
+1. **完成 response runtime 的整体收敛。** 目前是 `ResponseRuntime`，而非目标中的完整 `WorkspaceRuntime`；repository、response registry、in-flight、mutation gate 和计划缓存仍未统一为同一 owning runtime。普通协议 URL 仍是 session 归属校验，尚不是随机、短期 response capability。
+2. **完成阶段 2 的持久化协议。** 尚无跨进程单写者锁、`MutationGate`、staging/journal/tombstone/recovery；成功 history body 复制也仍需拆为锁外复制、重新验证、发布的两阶段流程。
+3. **完成阶段 3 的资源与协议边界。** 尚无 500 MiB runtime 记账、构建前 JSON 预算/single-flight、统一 `ResponseRegistry`、完整 Range/MIME/受限协议 I/O 改造。
+4. **增强 body 完整性校验。** 本轮已验证已有 body 的长度并拒绝错误发布；同长度损坏尚不可区分。若威胁模型或恢复诊断需要，应引入可选 hash/长度元数据并权衡额外 I/O，而不是重新放开 `exists()` 裸短路。
+5. **设计受控 reveal。** 本切片不提供 reveal；若未来确有排障需求，必须先定义显式同意、短时 capability、工作区绑定、审计和过期语义，不能把公开 DTO 重新变成默认明文通道。
 
-### 下一轮建议：默认脱敏最小切片
+### 已完成：默认脱敏最小切片
 
-下一轮优先实现“**默认公开数据不得含执行秘密**”，但不迁移或修改用户工作区中保存的请求定义。为控制影响范围，首个切片只收敛 history 与普通请求终结事件：
+本切片实现“**默认公开数据不得含执行秘密**”，且不迁移或修改用户工作区中保存的请求定义：
 
-1. 在 Rust 侧新增明确的公开 DTO/净化函数，将 `RequestSpec`、`ActualRequest`、`ResponseSummary` 与 `HistoryError` 转为可显示/可持久化视图；默认掩码 `Authorization`、`Proxy-Authorization`、`Cookie`、`Set-Cookie`、API key、Bearer/token、密码和 `ValueKind::Secret`，移除完整 body、敏感 query 值及二进制/文件上传的绝对路径。
-2. 先改写入边界：`history_record` 与 `history_record_error` 在 `WorkspaceRepository` 持久化前接收净化后的 history DTO；失败 history 的 `RequestSpec`、`ActualRequest` 和 error detail 不再原样落入 YAML。
-3. 同步收紧外发边界：`request:done` / `request:error`、`history_read`、`history_list` 和前端 IPC 类型只能接收公开 DTO；普通日志改为仅记录安全的 code/kind/摘要，不能把 `AppError.detail` 或执行快照直接格式化输出。
-4. 对旧 YAML 保持读兼容但默认净化后再进入 IPC；本切片不自动重写或删除旧历史，也不提供 reveal。显式、短时、审计友好的 reveal 机制留待公开 DTO 和 capability 边界稳定后设计。
-5. 新增 Rust/前端回归：Bearer、Cookie、API key、`ValueKind::Secret`、JSON/text body、form-data 文件路径、binary path、敏感 query 和 error detail 均不得出现于 history YAML、`request:done` / `request:error`、`history_read`、`history_list` 或普通日志；同时验证非敏感 method、host、status、duration、大小和可操作 hints 仍保留。
+1. 在 Rust 侧新增公开 DTO 和统一净化函数，将内部 `RequestSpec`、`ActualRequest`、`ResponseSummary` 与 `AppError` 投影为可显示/可持久化视图；默认遮蔽敏感 header/query/URL userinfo、Cookie、Bearer/Basic/API key、密码、`ValueKind::Secret`/`File`，并移除完整 body、auth、代理 URL、文件路径和 error detail。
+2. `ActualRequest` 增加仅内存、不可 serde 的敏感来源元数据；`snapshot_request` 从已解析 request 和鉴权配置收集路径、query、header 的来源。公开 URL 同时替换原始与 `urlencoding_path` 形式，并以百分号十六进制大小写无关的方式匹配，因此中性 `id` 的 `a b`（`a%20b`）和 `é`（`%c3%a9`）都不会绕过脱敏；自定义 API-key Header 即使被同名手写 Header 覆盖，实际请求和 history preview 也保持敏感。
+3. history 写入/读取和失败记录只使用公开 DTO；旧 YAML 兼容读取后立即重净化，不自动 rewrite/delete。读取兼容层会利用仍可解析的原始 `Secret`/`File` 行，以及仅保留 `type`/`key`/`location` 的无值 legacy auth 脱敏来源，补偿净化旧 `actualRequest` 和嵌入 response 的 actual request。
+4. 请求终结事件、response metadata/index 与前端 IPC 均使用公开 DTO；history 打开不会恢复可执行 body/auth，且 tab-level `historyPreview` 会在 `useRequest().send()` 的执行入口被拒绝。响应 UI 不再暴露 actual body/body 参数/error detail；普通日志只保留安全 code/kind/摘要。
+5. 回归覆盖 body/auth 变体、Cookie/Authorization、API key、Secret/File、中性 `id`/`q`/`X-My-Key`、大小写不同的编码路径、API-key Header 覆盖及其 history preview、旧 history YAML 的 custom API-key Header/Query、不可执行 history preview、非敏感摘要以及前端 history preview。明确不包含 reveal、旧数据自动清理、工作区请求 YAML 改写或新的第三方依赖。
 
-预计涉及 `crates/apogee-core/src/{model,http,error}.rs`、`src-tauri/src/{lib,workspace,state}.rs`、`src/ipc/index.ts`、`src/stores/request.ts` 与 history/response 视图组件。应把完整 response body 的本地 spool 保留与其公开 DTO 解耦；资源预算、hash 完整性、随机 response capability、跨进程写者锁和多文件事务继续留在后续切片。
+本切片涉及 `crates/apogee-core/src/{model,http,public}.rs`、`src-tauri/src/{lib,workspace,state}.rs`、`src/ipc/index.ts`、`src/stores/request.ts` 与 history/response 视图组件。应把完整 response body 的本地 spool 保留与其公开 DTO 解耦；资源预算、hash 完整性、随机 response capability、跨进程写者锁和多文件事务继续留在后续切片。
 
 本文把 Rust 全局审查的结论转为可实施的工程计划。它不改变 Apogee 的产品定位：工作区 YAML 仍是用户数据真相来源，应用仍以本地优先、性能优先和可迁移为原则；优化目标是让当前实现真正满足已有文档承诺的工作区隔离、可靠写入、响应资源控制和敏感信息边界。
 
@@ -388,20 +390,24 @@ InternalResponseRecord ──> PublicResponseSummary（脱敏 IPC DTO）
 ### 7.3 内部记录与公开 DTO 分离
 
 ```text
-InternalRequestSnapshot
-  ├── 可含执行所需的最终 URL/header/body 信息
+ActualRequest（执行内存）
+  ├── 可含最终 URL/header/body 信息
+  ├── 不序列化的敏感来源元数据（path/query/header）
   └── 仅 Rust 运行态短期持有
 
-PublicRequestPreview / HistoryRequestView
-  ├── 默认脱敏 header、query、body 字段与路径
-  └── 仅包含 UI/历史真正需要的信息
+PublicRequestPreview
+  ├── 默认脱敏 request 行与 URL
+  ├── 不含 body、auth 或代理 URL
+  └── 用于 history 与安全的不可执行预览
 
 ResponseMetaInternal
   └── 包含 body_path，仅 Rust 侧使用
 
-PublicResponseSummary
-  └── 不包含 body_path、明文凭据或不受限 request body
+PublicResponseSummary / PublicError
+  └── 不包含 body_path、明文凭据、不受限 request body 或 error detail
 ```
+
+**本轮已实现。** `PublicActualRequest` 在从内部快照投影时使用 `ActualRequest` 的非序列化敏感来源元数据；这补足了纯名称 heuristic 无法识别的中性 `ValueKind::Secret`、自定义 API key 及编码 path 值。history 兼容读取则在原始 `PublicRequestPreview` 的 `Secret`/`File` 行被掩码前，将该来源应用到旧 actual snapshot。公开 DTO 不保存这份来源元数据。
 
 必须默认脱敏的值包括：
 
@@ -411,7 +417,7 @@ PublicResponseSummary
 - 二进制/文件上传的绝对路径；
 - 完整请求 body，除非该字段被显式标记为可安全展示。
 
-用户需要排障时，可在本地提供一次性、短时、显式触发的 reveal；普通事件、日志、自动历史和导出不得因为“方便调试”默认保存秘密。旧历史不应被静默删除：读兼容层先阻止其明文再次进入 IPC，再提供用户可确认的清理/重写工具。
+本轮**不提供 reveal**，也不自动清理或重写旧 history。若未来需要本地排障，必须先设计一次性、短时、显式触发且可审计的 reveal / 受控诊断导出，并以工作区绑定 capability 和过期语义取代默认明文；普通事件、日志、自动 history 和导出不得因为“方便调试”默认保存秘密。
 
 ### 7.4 验收标准
 

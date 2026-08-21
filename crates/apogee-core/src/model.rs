@@ -94,6 +94,19 @@ pub struct ActualRequest {
     /// 流式 Body 无法读取原始字节时保留的字段名称和值。
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub body_params: Vec<(String, String)>,
+    /// 仅供公开投影使用的敏感来源元数据。它保留在执行内存中，绝不序列化。
+    ///
+    /// 完整 URL/Header 是组装后的最终值，单靠字段名无法识别用户将 `ValueKind::Secret`
+    /// 标在诸如 `id`、`q` 或自定义 API-key 名上的场景。因此在 snapshot 时保存该来源，
+    /// 由 `PublicActualRequest` 掩码最终编码后的显示值。
+    #[serde(default, skip_serializing, skip_deserializing)]
+    pub sensitive_path_param_names: Vec<String>,
+    #[serde(default, skip_serializing, skip_deserializing)]
+    pub sensitive_path_values: Vec<String>,
+    #[serde(default, skip_serializing, skip_deserializing)]
+    pub sensitive_query_names: Vec<String>,
+    #[serde(default, skip_serializing, skip_deserializing)]
+    pub sensitive_header_names: Vec<String>,
 }
 
 /// 响应元信息。

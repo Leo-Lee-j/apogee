@@ -77,6 +77,8 @@ export interface Tab {
   newRequestParentId?: string
   /** 请求主面板的临时查看模式；不进入 RequestSpec/YAML 持久化。 */
   requestViewMode?: RequestViewMode
+  /** 历史记录打开的安全预览；它显示请求摘要但不能进入执行链。 */
+  historyPreview?: boolean
   /** 有未保存改动，标签上显示 `•` */
   dirty: boolean
   /** 临时标签（单击预览）：标题斜体，被下一次单击复用（02 文档 §4.5） */
@@ -242,6 +244,7 @@ export const useTabsStore = defineStore('tabs', () => {
           actualRequest: null,
           response: null,
           requestViewMode: 'edit',
+          historyPreview: init.historyPreview ?? false,
           newPanel: false,
           newRequestParentId: undefined,
         })
@@ -267,6 +270,7 @@ export const useTabsStore = defineStore('tabs', () => {
       preview: false,
       response: null,
       requestViewMode: 'edit',
+      historyPreview: false,
       newPanel: false,
       ...init,
     })

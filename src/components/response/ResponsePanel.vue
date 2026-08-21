@@ -134,7 +134,6 @@ const actualParams = computed(() => {
 })
 
 const actualPathParams = computed(() => actualRequest.value?.pathParams ?? [])
-const actualBodyParams = computed(() => actualRequest.value?.bodyParams ?? [])
 
 function quotePosix(value: string) {
   return `'${value.replaceAll("'", `'"'"'`)}'`
@@ -158,7 +157,6 @@ const requestCode = computed(() => {
   for (const [name, value] of request.headers) {
     parts.push('--header', quote(`${name}: ${value}`))
   }
-  if (request.body != null) parts.push('--data-raw', quote(request.body))
   parts.push(quote(request.url))
   return parts.join(continuation)
 })
@@ -308,10 +306,6 @@ async function copyText(text: string, success = '已复制') {
         <h3>请求未完成</h3>
         <p class="error-message">{{ requestError.message }}</p>
         <p class="error-kind">错误类型：{{ requestError.kind }}</p>
-        <details v-if="requestError.detail" class="error-detail">
-          <summary>技术详情</summary>
-          <pre>{{ requestError.detail }}</pre>
-        </details>
         <ul v-if="requestError.hints.length" class="hints">
           <li v-for="hint in requestError.hints" :key="`${hint.label}-${hint.action ?? ''}`">
             <span>{{ hint.label }}</span>
@@ -391,19 +385,6 @@ async function copyText(text: string, success = '已复制') {
             <div class="actual-headers">
               <div class="actual-header actual-header-head"><span>名称</span><span>值</span></div>
               <div v-for="([name, value], index) in actualPathParams" :key="`${name}-${index}`" class="actual-header"><code>{{ name }}</code><span class="a-selectable">{{ value }}</span></div>
-            </div>
-          </section>
-
-          <section v-if="actualRequest.body != null || actualBodyParams.length" class="actual-section">
-            <header>
-              <strong>Body</strong>
-              <span v-if="actualRequest.body != null">{{ actualRequest.body.length }} 字符</span>
-              <span v-else>{{ actualBodyParams.length }} 项</span>
-            </header>
-            <pre v-if="actualRequest.body != null" class="actual-body a-selectable"><code>{{ actualRequest.body }}</code></pre>
-            <div v-else class="actual-headers">
-              <div class="actual-header actual-header-head"><span>名称</span><span>值</span></div>
-              <div v-for="([name, value], index) in actualBodyParams" :key="`${name}-${index}`" class="actual-header"><code>{{ name }}</code><span class="a-selectable">{{ value }}</span></div>
             </div>
           </section>
 

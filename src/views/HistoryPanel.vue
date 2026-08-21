@@ -39,13 +39,15 @@ async function open(entry: HistoryEntry) {
   error.value = ''
   try {
     const record = await ipc.historyRead(entry.id)
-    const spec = record.spec
+    const preview = record.spec
+    // History records are intentionally non-executable previews. Opening one creates a safe,
+    // detached request tab rather than reconstructing body/auth credentials from a past run.
     tabs.open({
-      title: historyTitle(entry), method: spec.method, url: spec.url,
-      params: spec.params ?? [], pathParams: spec.pathParams ?? [], headers: spec.headers ?? [],
-      body: spec.body ?? { type: 'none' }, auth: spec.auth ?? { type: 'none' }, settings: spec.settings ?? {},
+      title: historyTitle(entry), method: preview.method, url: preview.url,
+      params: preview.params ?? [], pathParams: preview.pathParams ?? [], headers: preview.headers ?? [],
+      body: { type: 'none' }, auth: { type: 'none' }, settings: preview.settings ?? {},
       response: record.response ?? null, error: record.error ?? null,
-      actualRequest: record.actualRequest ?? null, dirty: false, preview: false,
+      actualRequest: record.actualRequest ?? null, dirty: false, preview: false, historyPreview: true,
     })
     ui.historyOpen = false
   } catch (reason) { error.value = normalizeError(reason).message }

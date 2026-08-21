@@ -10,7 +10,7 @@
 
 ## 背景
 
-Apogee 的工作区 YAML 是用户数据真相，运行时响应、索引与历史则属于可隔离、可重建或可清理的数据。当前实现已经具备单响应的传输上限、按数量裁剪历史，以及针对部分写入失败的回归测试；但尚未形成统一的运行时资源预算、历史脱敏策略或跨进程写入协议。
+Apogee 的工作区 YAML 是用户数据真相，运行时响应、索引与历史则属于可隔离、可重建或可清理的数据。当前实现已经具备单响应的传输上限、按数量裁剪历史、针对部分写入失败的回归测试，以及 history/IPC/普通日志的默认脱敏公开 DTO；但尚未形成统一的运行时资源预算或跨进程写入协议。
 
 同时，release profile 使用 `panic = "abort"` 以满足包体预算，但请求任务中仍保留 `catch_unwind`。abort 发生时进程会在任何 Rust 恢复路径前结束，因此不能把它视为 release 下发送终结 IPC 事件的可靠性机制。
 
@@ -18,13 +18,15 @@ Apogee 的工作区 YAML 是用户数据真相，运行时响应、索引与历�
 
 ## 实施状态更新（2026-08-21）
 
-本次落地的是 response runtime 的 session 隔离子切片，**不改变**本 ADR 的单写者、预算和默认脱敏决策，也不代表 P0 完成：
+本次已落地 response runtime 的 session 隔离与 **P0 默认脱敏子切片**；它不改变本 ADR 的单写者和预算决策，也不代表 P0 完成：
 
 - 已实现 `ResponseAccess` / `ResponseScope`、`RequestLease` 和 session 私有 `Arc<ResponseRuntime>`。普通 response IPC、协议读取、索引、history restore、Synthetic 及前端请求事件均按 `workspaceId + sessionId` 校验；旧 runtime 仅在最后一个锁外任务结束后回收其私有 spool。
 - 已实现 session 切换时清理 response metadata/index，并以 barrier 测试证明旧 request、history restore、index 与 Synthetic 不能向新 session 发布或写入其目录。此机制是隔离与延迟回收，不是 500 MiB runtime 配额或跨进程所有权协议。
 - 已完成部分单文件发布改进：Windows 替换不再先删除旧目标；history body 恢复先写唯一 `.part`、flush 后以同目录 hard link 不可覆盖发布。`Spool::copy_from` 会把长度匹配的已有 target 作为幂等恢复复用；若在发布窗口发生竞争，只有明确的 `AlreadyExists` 且长度匹配才会复用 body。大小不匹配、其他发布/I/O 错误和不支持 hard link 的卷都会保持失败；成功发布或复用后的临时删除失败也返回错误，`Spool::remove` 会回收该 response 残留的 `.part`。`restore_history_response_into` 也不再使用 `exists()` 裸短路。它不等于多文件事务、断电恢复或跨进程单写者锁。
 - 当前普通 response URL 依赖 workspace/session 归属校验，尚不是目标模型中的随机、短期、不可伪造 response capability；完整 `WorkspaceRuntime`、`ResponseRegistry`、`MutationGate` 和资源预算仍待实现。
-- **安全边界仍未达标：**失败 history 目前会持久化原始 `RequestSpec`、`ActualRequest` 和 error detail，可能包含凭据、Cookie、token、body 或本机路径。必须先引入默认脱敏公开 DTO 与回归测试，才能宣称满足本 ADR 的历史/IPC/日志策略。
+- **已实现默认脱敏公开边界（已按安全复审补强）。** `PublicRequestPreview`、`PublicActualRequest`、`PublicResponseSummary`、`PublicError` 和 `PublicHint` 分离内部执行模型与 history/IPC 载荷。history YAML 的读写、失败 history、`request:done` / `request:error`、response metadata/index、Spike 响应与前端 history IPC 都只传递公开 DTO；完整 body、auth、代理 URL、文件路径、error detail 和自由文本 description 不会进入该边界。前端 preview 会基于中性 `Secret` query 名、大小写不同的编码 path 值和自定义 query/header API-key 名先行净化 URL 与 preview 行。
+- **已实现来源感知的实际请求脱敏。** `ActualRequest` 在内存中携带不可 serde 的 path/query/header 敏感来源；HTTP snapshot 从 `ValueKind::Secret`/`File`、Bearer/Basic 和 API key 采集来源，公开投影同时遮蔽中性字段名（如 `id`、`q`、`X-My-Key`）及 URL 编码后的 path 值（包括大小写不同的百分号十六进制）。配置的自定义 API-key Header 即使被同名手写 Header 覆盖也保留为敏感来源；实际请求和 history preview 的同名行都会遮蔽。旧 history 的 legacy `auth` 只反序列化无值的 `type`/`key`/`location` 脱敏来源，因此自定义 API-key Header/Query 同样会遮蔽 legacy preview 行、失败 `actualRequest` 和成功 response 内嵌的 actual request。
+- **兼容与范围。** 用户工作区请求 YAML 保持原始 source of truth；旧 history 可读但不自动重写或删除。普通日志仅记录安全摘要。history 以 tab-level `historyPreview` 打开，`useRequest().send()` 在执行入口拒绝它，因此 UI 以外的调用也不能重新发送历史预览。本切片不提供 reveal、受控诊断导出或 history 自动清理；这些能力必须以后续 capability、过期、审计和显式同意设计为前提。
 - **剩余完整性边界：**当前 `Spool::copy_from` 校验的是来源和已发布 body 的长度，因此能拒绝截断或不同长度的错误文件，但不能区分同长度损坏；如需该保证，应通过后续 ADR/实现引入可选 hash 或完整性元数据，并明确其 I/O 成本。
 
 ## 决策
@@ -76,14 +78,14 @@ Apogee 的工作区 YAML 是用户数据真相，运行时响应、索引与历�
 - 响应 body 可以作为受预算的本地 runtime 文件保留，但普通 history/IPC 不自动传递；查看原文需要用户显式触发且使用短期、工作区绑定 capability。
 - 旧历史采用读兼容：先阻止旧明文再次进入默认 IPC，再提供用户确认的清理或重写工具；不静默删除用户数据。
 
-**已实现状态：** 尚未完整实现，安排在 P0 阶段 3。当前历史仍可能持久化原始请求和执行快照，不能被误认为满足该策略。
+**已实现状态：**P0 默认脱敏子切片已实现并完成安全复审后的补强。公开 DTO 覆盖 history YAML 读写、请求终结事件、response metadata/index、相关 Spike 响应、前端 history IPC 与普通请求终结日志；旧 history 读兼容时再净化，且不会自动改写用户历史。执行期 `ActualRequest` 的来源元数据补足了中性 Secret/API key、API-key Header 覆盖以及大小写不同的百分号编码路径值的遮蔽；legacy `auth` 仅保留无值的名称/位置来源，用于净化旧 preview、失败与成功 actual snapshot。前端 history preview 也会在执行入口被拒绝。仍未实现 reveal、受控诊断导出、用户确认的旧 history 清理/重写，以及阶段 3 的资源预算/协议改造；它们不得成为重新暴露默认明文的理由。
 
 ## 实施约束与顺序
 
 1. 阶段 0 固化本 ADR，并在 CI 同时运行声明的 MSRV 与当前 stable 的 Rust 质量门禁。
 2. 阶段 1 用 `WorkspaceRuntime`、`RequestLease` 和 response capability 绑定 session、spool、in-flight 和响应读取。
 3. 阶段 2 在单写者锁之上实现 `MutationGate`、staging、tombstone、journal 与恢复；不得把锁当成多文件事务的替代品。
-4. 阶段 3 实现共享 runtime 配额、`ResponseRegistry`、索引预算和公开 DTO 脱敏。
+4. 阶段 3 完成共享 runtime 配额、`ResponseRegistry`、索引预算与协议资源边界；公开 DTO 默认脱敏子切片已提前落地，后续工作不得绕过该边界。
 
 在阶段 2、3 完成前，不扩展多工作区写入、大型导入、自动化或“可恢复 panic”承诺。
 

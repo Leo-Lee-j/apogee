@@ -14,7 +14,8 @@
 //!    把取消信号和网络 future 一起等。
 
 use crate::error::{AppError, ErrorKind, Hint};
-use crate::model::{ActualRequest, KeyValue, ResponseMeta, Timing};
+use crate::model::{ActualRequest, KeyValue, ResponseMeta, Timing, ValueKind};
+use crate::public::{is_sensitive_name, is_sensitive_value};
 use crate::request::{ApiKeyIn, AuthConfig, Body, HttpVersion, RequestSpec, ResolvedSettings};
 use crate::response::Spool;
 use crate::vars::{resolve_request, Environment};
@@ -127,7 +128,7 @@ fn urlencoding_query(raw: &str) -> String {
 
 /// path 分量：比 query 多保留 `/`，否则 path 参数里带斜杠会被编码成 `%2F`
 /// 而打断路径结构。
-fn urlencoding_path(raw: &str) -> String {
+pub(crate) fn urlencoding_path(raw: &str) -> String {
     let mut out = String::with_capacity(raw.len());
     for byte in raw.as_bytes() {
         match byte {
@@ -468,6 +469,83 @@ mod tests {
             .iter()
             .map(|value| String::from_utf8_lossy(value.as_bytes()).into_owned())
             .collect()
+    }
+
+    #[test]
+    fn snapshot_preserves_secret_and_api_key_provenance() {
+        let mut s = spec("https://a.test/users/:id");
+        let mut path = kv("id", "a b", true);
+        path.kind = ValueKind::Secret;
+        let mut query = kv("q", "query-secret", true);
+        query.kind = ValueKind::Secret;
+        let mut header = kv("X-My-Key", "header-secret", true);
+        header.kind = ValueKind::Secret;
+        s.path_params = vec![path];
+        s.params = vec![query];
+        s.headers = vec![header];
+        s.auth = AuthConfig::ApiKey {
+            key: "X-Custom-Query".into(),
+            value: "api-key-secret".into(),
+            location: ApiKeyIn::Query,
+        };
+
+        let request = built(&s);
+        let actual = snapshot_request(&request, &s);
+        assert_eq!(actual.sensitive_path_param_names, vec!["id"]);
+        assert_eq!(actual.sensitive_path_values, vec!["a b"]);
+        assert_eq!(actual.sensitive_query_names, vec!["q", "X-Custom-Query"]);
+        assert_eq!(actual.sensitive_header_names, vec!["X-My-Key"]);
+
+        let public = crate::public::PublicActualRequest::from(&actual);
+        let encoded = serde_json::to_string(&public).unwrap();
+        for secret in [
+            "a b",
+            "a%20b",
+            "query-secret",
+            "header-secret",
+            "api-key-secret",
+        ] {
+            assert!(
+                !encoded.contains(secret),
+                "公开请求快照泄露了 {secret}: {encoded}"
+            );
+        }
+    }
+
+    #[test]
+    fn snapshot_marks_overridden_custom_api_key_header_as_sensitive() {
+        let mut s = spec("https://a.test/x");
+        s.auth = AuthConfig::ApiKey {
+            key: "X-My-Key".into(),
+            value: "configured-api-key-secret".into(),
+            location: ApiKeyIn::Header,
+        };
+        // User headers intentionally override the auth-panel value. The custom name must remain
+        // sensitive so this replacement value cannot reach a public request snapshot.
+        s.headers = vec![kv("X-My-Key", "manual-header-secret", true)];
+
+        let request = built(&s);
+        assert_eq!(
+            header_values(&request, "x-my-key"),
+            vec!["manual-header-secret"]
+        );
+        let actual = snapshot_request(&request, &s);
+        assert_eq!(actual.sensitive_header_names, vec!["X-My-Key"]);
+
+        let public = crate::public::PublicActualRequest::from(&actual);
+        let encoded = serde_json::to_string(&public).unwrap();
+        assert_eq!(
+            public
+                .headers
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case("x-my-key"))
+                .map(|(_, value)| value.as_str()),
+            Some(crate::public::REDACTED)
+        );
+        assert!(
+            !encoded.contains("manual-header-secret"),
+            "公开请求快照泄露了覆盖后的 API key header: {encoded}"
+        );
     }
 
     #[test]
@@ -960,6 +1038,56 @@ fn snapshot_rows(rows: &[KeyValue]) -> Vec<(String, String)> {
         .collect()
 }
 
+fn is_sensitive_snapshot_row(row: &KeyValue) -> bool {
+    matches!(row.kind, ValueKind::File | ValueKind::Secret)
+        || is_sensitive_name(&row.key)
+        || is_sensitive_value(&row.value)
+}
+
+fn push_sensitive_name(names: &mut Vec<String>, name: &str) {
+    if !name.is_empty()
+        && !names
+            .iter()
+            .any(|existing| existing.eq_ignore_ascii_case(name))
+    {
+        names.push(name.to_string());
+    }
+}
+
+fn snapshot_sensitive_names(rows: &[KeyValue], trim_name: bool) -> Vec<String> {
+    let mut names = Vec::new();
+    for row in rows
+        .iter()
+        .filter(|row| row.enabled && !row.key.trim().is_empty() && is_sensitive_snapshot_row(row))
+    {
+        let name = if trim_name {
+            row.key.trim()
+        } else {
+            row.key.as_str()
+        };
+        push_sensitive_name(&mut names, name);
+    }
+    names
+}
+
+fn snapshot_sensitive_path_values(rows: &[KeyValue]) -> Vec<String> {
+    rows.iter()
+        .filter(|row| {
+            row.enabled
+                && !row.key.trim().is_empty()
+                && is_sensitive_snapshot_row(row)
+                && !row.value.is_empty()
+        })
+        .map(|row| row.value.clone())
+        .collect()
+}
+
+fn has_configured_header(rows: &[KeyValue], name: &str) -> bool {
+    rows.iter().any(|row| {
+        row.enabled && !row.key.trim().is_empty() && row.key.trim().eq_ignore_ascii_case(name)
+    })
+}
+
 fn snapshot_request(request: &reqwest::Request, resolved: &RequestSpec) -> ActualRequest {
     let mut headers = request
         .headers()
@@ -1019,6 +1147,35 @@ fn snapshot_request(request: &reqwest::Request, resolved: &RequestSpec) -> Actua
         Body::None | Body::Json { .. } | Body::Text { .. } | Body::GraphQl { .. } => Vec::new(),
     };
 
+    let sensitive_path_param_names = snapshot_sensitive_names(&resolved.path_params, false);
+    let sensitive_path_values = snapshot_sensitive_path_values(&resolved.path_params);
+    let mut sensitive_query_names = snapshot_sensitive_names(&resolved.params, false);
+    let mut sensitive_header_names = snapshot_sensitive_names(&resolved.headers, true);
+
+    match &resolved.auth {
+        AuthConfig::Basic { .. } | AuthConfig::Bearer { .. }
+            if !has_configured_header(&resolved.headers, "authorization") =>
+        {
+            push_sensitive_name(&mut sensitive_header_names, "authorization");
+        }
+        AuthConfig::ApiKey { key, location, .. } => match location {
+            // A manual header can intentionally override the configured API-key value, but its
+            // value is still a credential under the configured custom header name. Record that
+            // name regardless of which source ultimately populated the HTTP header.
+            ApiKeyIn::Header if !key.trim().is_empty() => {
+                push_sensitive_name(&mut sensitive_header_names, key.trim());
+            }
+            ApiKeyIn::Cookie if !has_configured_header(&resolved.headers, "cookie") => {
+                push_sensitive_name(&mut sensitive_header_names, "cookie");
+            }
+            ApiKeyIn::Query if !key.trim().is_empty() => {
+                push_sensitive_name(&mut sensitive_query_names, key);
+            }
+            _ => {}
+        },
+        _ => {}
+    }
+
     ActualRequest {
         method: request.method().as_str().to_string(),
         url: request.url().as_str().to_string(),
@@ -1027,6 +1184,10 @@ fn snapshot_request(request: &reqwest::Request, resolved: &RequestSpec) -> Actua
         headers,
         body,
         body_params,
+        sensitive_path_param_names,
+        sensitive_path_values,
+        sensitive_query_names,
+        sensitive_header_names,
     }
 }
 

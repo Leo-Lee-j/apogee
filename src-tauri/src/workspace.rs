@@ -16,8 +16,12 @@
 //! 目录名只使用稳定 UUID，用户重命名不会移动路径；可读名称全部写在 YAML 中。
 
 use anyhow::{bail, Context, Result};
-use apogee_core::model::{ActualRequest, KeyValue};
+use apogee_core::model::KeyValue;
+use apogee_core::public::{
+    PublicActualRequest, PublicError, PublicRequestPreview, PublicResponseSummary,
+};
 use apogee_core::request::{AuthConfig, Body, RequestSettings, RequestSpec};
+#[cfg(test)]
 use apogee_core::response::ResponseSummary;
 use apogee_core::vars::Environment;
 use apogee_core::workspace::{
@@ -49,28 +53,6 @@ pub struct YapiWorkspaceImportResult {
     pub warnings: Vec<String>,
 }
 
-/// 持久化失败运行时的可渲染错误。`kind` 保持字符串，兼容事件层的兜底错误。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct HistoryHint {
-    pub label: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub action: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct HistoryError {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub code: Option<String>,
-    pub kind: String,
-    pub message: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub detail: Option<String>,
-    #[serde(default)]
-    pub hints: Vec<HistoryHint>,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HistoryEntry {
@@ -89,7 +71,8 @@ pub struct HistoryEntry {
 }
 
 /// 一条运行记录恰有一个结果：成功时有 `response` 和响应体文件，失败时有 `error`
-/// 及可选的最终请求快照。失败记录绝不伪造空响应体。
+/// 及可选的最终请求快照。该记录只使用公开 DTO，不能包含可执行请求、请求体或
+/// 认证凭据。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HistoryRecord {
@@ -99,28 +82,48 @@ pub struct HistoryRecord {
     pub debug_case_id: Option<Uuid>,
     #[serde(default)]
     pub environment_id: Option<Uuid>,
-    pub spec: RequestSpec,
+    #[serde(default)]
+    pub spec: PublicRequestPreview,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub response: Option<ResponseSummary>,
+    pub response: Option<PublicResponseSummary>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub error: Option<HistoryError>,
+    pub error: Option<PublicError>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub actual_request: Option<ActualRequest>,
-    /// 失败时没有 `ResponseSummary`，因此把从发送到终结事件的耗时单独保存。
+    pub actual_request: Option<PublicActualRequest>,
+    /// 失败时没有 `PublicResponseSummary`，因此把从发送到终结事件的耗时单独保存。
     #[serde(default)]
     pub duration_ms: f64,
+}
+
+impl HistoryRecord {
+    /// Old YAML may contain raw fields that serde ignores while reading the public DTO. Re-run
+    /// the DTO sanitizers before any history value is returned to a caller. The raw preview must
+    /// be consulted first because it is the only compatibility source for old actual snapshots
+    /// that predate `ActualRequest` sensitivity metadata.
+    fn redacted(mut self) -> Self {
+        let spec = std::mem::take(&mut self.spec);
+        self.response = self
+            .response
+            .map(|response| spec.redact_response_summary(response));
+        self.error = self.error.map(PublicError::redacted);
+        self.actual_request = self
+            .actual_request
+            .map(|actual_request| spec.redact_actual_request(actual_request));
+        self.spec = spec.redacted();
+        self
+    }
 }
 
 /// 将未收到 HTTP 响应的运行写入历史所需的领域输入。
 ///
 /// 它与持久化后的 [`HistoryRecord`] 分离：仓储负责生成记录 id 并固定失败记录
-/// 没有响应体的约束，调用方只提供本次运行的结果。
+/// 没有响应体的约束，调用方只能提供已净化的公开 DTO。
 #[derive(Debug)]
 pub struct FailedHistoryWriteInput {
     pub created_at_ms: u64,
-    pub spec: RequestSpec,
-    pub error: HistoryError,
-    pub actual_request: Option<ActualRequest>,
+    pub spec: PublicRequestPreview,
+    pub error: PublicError,
+    pub actual_request: Option<PublicActualRequest>,
     pub duration_ms: f64,
     pub debug_case_id: Option<Uuid>,
     pub environment_id: Option<Uuid>,
@@ -366,12 +369,17 @@ impl WorkspaceRepository {
     pub fn record_history(
         &self,
         created_at_ms: u64,
-        spec: RequestSpec,
-        response: ResponseSummary,
+        spec: PublicRequestPreview,
+        response: PublicResponseSummary,
         body_source: &Path,
         debug_case_id: Option<Uuid>,
         environment_id: Option<Uuid>,
     ) -> Result<()> {
+        // Defense in depth: IPC input must already be public, but callers can still construct a
+        // DTO manually or deserialize a legacy-shaped payload. Apply the raw preview's source
+        // annotations to the response before masking that preview itself.
+        let response = spec.redact_response_summary(response);
+        let spec = spec.redacted();
         let id = response.id;
         let duration_ms = response.timing.total_ms;
         let directory = self.history_directory();
@@ -400,7 +408,7 @@ impl WorkspaceRepository {
         self.trim_history()
     }
 
-    /// 记录未收到 HTTP 响应的运行；只持久化可显示的错误和最终请求，不创建 body 文件。
+    /// 记录未收到 HTTP 响应的运行；只持久化净化后的错误和最终请求，不创建 body 文件。
     pub fn record_failed_history(&self, input: FailedHistoryWriteInput) -> Result<()> {
         let FailedHistoryWriteInput {
             created_at_ms,
@@ -411,6 +419,10 @@ impl WorkspaceRepository {
             debug_case_id,
             environment_id,
         } = input;
+        // Keep legacy-shaped public input from bypassing a `Secret` / `File` row whose field name
+        // is neutral. The preview is still raw at this point and is only used to mask the actual
+        // snapshot before either value is persisted.
+        let actual_request = actual_request.map(|request| spec.redact_actual_request(request));
         let id = Uuid::new_v4();
         let directory = self.history_directory();
         fs::create_dir_all(&directory)?;
@@ -421,9 +433,9 @@ impl WorkspaceRepository {
                 created_at_ms,
                 debug_case_id,
                 environment_id,
-                spec,
+                spec: spec.redacted(),
                 response: None,
-                error: Some(error),
+                error: Some(error.redacted()),
                 actual_request,
                 duration_ms,
             },
@@ -470,6 +482,7 @@ impl WorkspaceRepository {
     pub fn read_history(&self, id: Uuid) -> Result<(HistoryRecord, Option<PathBuf>)> {
         let directory = self.history_directory();
         let record: HistoryRecord = read_yaml(&directory.join(format!("{id}.yaml")))?;
+        let record = record.redacted();
         if record.id != id {
             bail!("历史记录 id 不一致：{id}");
         }
@@ -503,7 +516,8 @@ impl WorkspaceRepository {
                 .extension()
                 .is_some_and(|extension| extension == "yaml")
             {
-                records.push(read_yaml(&path)?);
+                let record: HistoryRecord = read_yaml(&path)?;
+                records.push(record.redacted());
             }
         }
         Ok(records)
@@ -1489,7 +1503,10 @@ fn cleanup_temporary_after_failure(
 )]
 mod tests {
     use super::*;
-    use apogee_core::model::Timing;
+    use apogee_core::model::{ActualRequest, Timing, ValueKind};
+    use apogee_core::public::{
+        PublicError, PublicHint, PublicRequestPreview, PublicResponseSummary,
+    };
 
     #[test]
     fn opening_plain_directory_does_not_initialize_it() {
@@ -1560,7 +1577,7 @@ mod tests {
     }
 
     #[test]
-    fn history_round_trip_preserves_request_response_and_body() {
+    fn history_round_trip_preserves_public_request_response_and_body() {
         let root = std::env::temp_dir().join(format!("apogee-history-test-{}", Uuid::new_v4()));
         let repository = WorkspaceRepository::create(&root, "测试工作区".into()).unwrap();
         let response_id = Uuid::new_v4();
@@ -1578,13 +1595,21 @@ mod tests {
         let spec = default_request_spec();
 
         repository
-            .record_history(1234, spec, response, &source, None, None)
+            .record_history(
+                1234,
+                PublicRequestPreview::from(&spec),
+                PublicResponseSummary::from(&response),
+                &source,
+                None,
+                None,
+            )
             .unwrap();
         let listed = repository.list_history().unwrap();
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].status, Some(200));
         let (record, body) = repository.read_history(response_id).unwrap();
         assert_eq!(record.created_at_ms, 1234);
+        assert_eq!(record.spec.method, "GET");
         assert_eq!(
             fs::read(body.expect("成功历史必须有响应体")).unwrap(),
             br#"{"ok":true}"#
@@ -1596,7 +1621,7 @@ mod tests {
     }
 
     #[test]
-    fn failed_history_round_trip_preserves_error_without_body() {
+    fn failed_history_round_trip_preserves_safe_error_without_body() {
         let root =
             std::env::temp_dir().join(format!("apogee-failed-history-test-{}", Uuid::new_v4()));
         let repository = WorkspaceRepository::create(&root, "测试工作区".into()).unwrap();
@@ -1604,13 +1629,12 @@ mod tests {
         repository
             .record_failed_history(FailedHistoryWriteInput {
                 created_at_ms: 1234,
-                spec: default_request_spec(),
-                error: HistoryError {
+                spec: PublicRequestPreview::from(&default_request_spec()),
+                error: PublicError {
                     code: Some("CONNECT_FAILED".into()),
                     kind: "connect".into(),
-                    message: "无法连接到服务器".into(),
-                    detail: Some("connection refused".into()),
-                    hints: vec![HistoryHint {
+                    message: "任何输入消息都会在写入时转换为安全通用消息".into(),
+                    hints: vec![PublicHint {
                         label: "确认服务正在运行后重试".into(),
                         action: Some("retry".into()),
                     }],
@@ -1636,10 +1660,382 @@ mod tests {
         assert_eq!(error.code.as_deref(), Some("CONNECT_FAILED"));
         assert_eq!(error.kind, "connect");
         assert_eq!(error.message, "无法连接到服务器");
-        assert_eq!(error.detail.as_deref(), Some("connection refused"));
         assert_eq!(error.hints.len(), 1);
         assert_eq!(error.hints[0].action.as_deref(), Some("retry"));
 
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn history_yaml_persists_only_public_dto_fields() {
+        let root = std::env::temp_dir().join(format!(
+            "apogee-public-history-write-test-{}",
+            Uuid::new_v4()
+        ));
+        let repository = WorkspaceRepository::create(&root, "测试工作区".into()).unwrap();
+        let response_id = Uuid::new_v4();
+        let source = root.join("source.body");
+        fs::write(&source, b"ok").unwrap();
+        let mut spec = default_request_spec();
+        spec.method = "POST".into();
+        spec.url = "https://writer:writer-password@example.test/v1/path-secret?api_key=query-secret&safe=ok".into();
+        spec.params = vec![KeyValue {
+            enabled: true,
+            key: "token".into(),
+            value: "param-secret".into(),
+            description: Some("description-secret".into()),
+            kind: ValueKind::Secret,
+        }];
+        spec.path_params = vec![KeyValue {
+            enabled: true,
+            key: "secret".into(),
+            value: "path-secret".into(),
+            description: None,
+            kind: ValueKind::Text,
+        }];
+        spec.headers = vec![
+            KeyValue {
+                enabled: true,
+                key: "Authorization".into(),
+                value: "Bearer header-secret".into(),
+                description: None,
+                kind: ValueKind::Text,
+            },
+            KeyValue {
+                enabled: true,
+                key: "X-Trace".into(),
+                value: "safe-header".into(),
+                description: None,
+                kind: ValueKind::Text,
+            },
+        ];
+        spec.body = Body::Json {
+            content: "body-secret".into(),
+        };
+        spec.auth = AuthConfig::Bearer {
+            token: "auth-secret".into(),
+        };
+        spec.settings = RequestSettings {
+            proxy_url: Some("http://proxy-user:proxy-secret@proxy.test:8080".into()),
+            ..Default::default()
+        };
+        let mut response = ResponseSummary::without_http(response_id, 2, Timing::default());
+        response.status = Some(201);
+        response.headers = vec![
+            ("Set-Cookie".into(), "session=response-cookie-secret".into()),
+            ("X-Request-Id".into(), "safe-response-header".into()),
+        ];
+        response.actual_request = Some(ActualRequest {
+            method: "POST".into(),
+            url: "https://writer:writer-password@example.test/v1/path-secret/a%20b?token=actual-query-secret&q=actual-neutral-query-secret".into(),
+            path_params: vec![
+                ("secret".into(), "path-secret".into()),
+                ("id".into(), "a b".into()),
+            ],
+            headers: vec![
+                ("Cookie".into(), "session=actual-cookie-secret".into()),
+                ("X-My-Key".into(), "actual-neutral-header-secret".into()),
+            ],
+            common_header_names: Vec::new(),
+            body: Some("actual-body-secret".into()),
+            body_params: vec![("password".into(), "actual-body-param-secret".into())],
+            sensitive_path_param_names: vec!["id".into()],
+            sensitive_path_values: vec!["a b".into()],
+            sensitive_query_names: vec!["q".into()],
+            sensitive_header_names: vec!["X-My-Key".into()],
+        });
+
+        repository
+            .record_history(
+                1234,
+                PublicRequestPreview::from(&spec),
+                PublicResponseSummary::from(&response),
+                &source,
+                None,
+                None,
+            )
+            .unwrap();
+
+        let yaml = fs::read_to_string(
+            repository
+                .history_directory()
+                .join(format!("{response_id}.yaml")),
+        )
+        .unwrap();
+        for secret in [
+            "writer-password",
+            "query-secret",
+            "param-secret",
+            "description-secret",
+            "path-secret",
+            "header-secret",
+            "body-secret",
+            "auth-secret",
+            "proxy-secret",
+            "response-cookie-secret",
+            "actual-query-secret",
+            "actual-cookie-secret",
+            "actual-neutral-query-secret",
+            "actual-neutral-header-secret",
+            "a b",
+            "a%20b",
+            "actual-body-secret",
+            "actual-body-param-secret",
+        ] {
+            assert!(!yaml.contains(secret), "history YAML 泄露了 {secret}");
+        }
+        assert!(yaml.contains("safe-header"));
+        assert!(yaml.contains("safe-response-header"));
+        assert!(yaml.contains("status: 201"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn legacy_history_is_read_compatibly_but_sanitized_before_output() {
+        let root =
+            std::env::temp_dir().join(format!("apogee-legacy-history-test-{}", Uuid::new_v4()));
+        let repository = WorkspaceRepository::create(&root, "测试工作区".into()).unwrap();
+        let id = Uuid::new_v4();
+        let history = repository.history_directory();
+        fs::create_dir_all(&history).unwrap();
+        let path = history.join(format!("{id}.yaml"));
+        let legacy = format!(
+            r#"id: {id}
+createdAtMs: 5678
+spec:
+  method: POST
+  url: https://legacy-user:legacy-password@example.test/v1/legacy-path-secret?token=legacy-query-secret&safe=ok#private
+  params:
+    - enabled: true
+      key: token
+      value: legacy-param-secret
+      kind: text
+    - enabled: true
+      key: q
+      value: legacy-neutral-query-secret
+      kind: secret
+  pathParams:
+    - enabled: true
+      key: secret
+      value: legacy-path-secret
+      kind: secret
+    - enabled: true
+      key: id
+      value: legacy neutral path
+      kind: secret
+  headers:
+    - enabled: true
+      key: Authorization
+      value: Bearer legacy-header-secret
+      kind: text
+    - enabled: true
+      key: X-My-Key
+      value: legacy-neutral-header-secret
+      kind: secret
+    - enabled: true
+      key: X-Trace
+      value: safe-header
+      kind: text
+  body:
+    type: json
+    content: legacy-body-secret
+  auth:
+    type: bearer
+    token: legacy-auth-secret
+  settings:
+    proxyUrl: http://proxy-user:legacy-proxy-secret@proxy.test:8080
+error:
+  code: CONNECT_FAILED
+  kind: connect
+  message: legacy-message-secret
+  detail: Bearer legacy-detail-secret
+  hints:
+    - label: 检查 token legacy-hint-secret
+actualRequest:
+  method: POST
+  url: https://legacy-user:legacy-password@example.test/v1/legacy-path-secret/legacy%20neutral%20path?token=legacy-query-secret&q=legacy-neutral-query-secret&safe=ok
+  pathParams:
+    - - secret
+      - legacy-path-secret
+    - - id
+      - legacy neutral path
+  headers:
+    - - Cookie
+      - session=legacy-cookie-secret
+    - - X-My-Key
+      - legacy-neutral-header-secret
+    - - X-Trace
+      - safe-header
+  body: legacy-actual-body-secret
+  bodyParams:
+    - - password
+      - legacy-body-param-secret
+durationMs: 42.5
+"#,
+        );
+        fs::write(&path, &legacy).unwrap();
+
+        let listed = repository.list_history().unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].method, "POST");
+        assert_eq!(
+            listed[0].url,
+            "https://example.test/v1/[redacted]?token=%5Bredacted%5D&safe=ok"
+        );
+        assert!((listed[0].duration_ms - 42.5).abs() < f64::EPSILON);
+
+        let (record, body) = repository.read_history(id).unwrap();
+        assert!(body.is_none());
+        assert_eq!(record.spec.params[0].value, apogee_core::public::REDACTED);
+        assert_eq!(record.spec.params[1].value, apogee_core::public::REDACTED);
+        assert_eq!(record.spec.headers[0].value, apogee_core::public::REDACTED);
+        assert_eq!(record.spec.headers[1].value, apogee_core::public::REDACTED);
+        assert_eq!(record.spec.headers[2].value, "safe-header");
+        assert_eq!(record.error.as_ref().unwrap().message, "无法连接到服务器");
+        let actual = record.actual_request.as_ref().unwrap();
+        assert_eq!(actual.path_params[0].1, apogee_core::public::REDACTED);
+        assert_eq!(actual.path_params[1].1, apogee_core::public::REDACTED);
+        assert_eq!(actual.headers[0].1, apogee_core::public::REDACTED);
+        assert_eq!(actual.headers[1].1, apogee_core::public::REDACTED);
+        let public_json = serde_json::to_string(&record).unwrap();
+        for secret in [
+            "legacy-password",
+            "legacy-query-secret",
+            "legacy-param-secret",
+            "legacy-path-secret",
+            "legacy neutral path",
+            "legacy%20neutral%20path",
+            "legacy-neutral-query-secret",
+            "legacy-neutral-header-secret",
+            "legacy-header-secret",
+            "legacy-body-secret",
+            "legacy-auth-secret",
+            "legacy-proxy-secret",
+            "legacy-detail-secret",
+            "legacy-hint-secret",
+            "legacy-cookie-secret",
+            "legacy-actual-body-secret",
+            "legacy-body-param-secret",
+        ] {
+            assert!(
+                !public_json.contains(secret),
+                "公开 history 泄露了 {secret}"
+            );
+        }
+        assert!(!public_json.contains("proxyUrl"));
+
+        // Compatibility is read-only: the original legacy YAML is retained for the user and is
+        // not automatically rewritten or deleted merely because it was opened.
+        assert_eq!(fs::read_to_string(&path).unwrap(), legacy);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn legacy_custom_api_key_sources_redact_top_level_and_embedded_actual_requests() {
+        let root = std::env::temp_dir().join(format!(
+            "apogee-legacy-custom-api-key-history-test-{}",
+            Uuid::new_v4()
+        ));
+        let repository = WorkspaceRepository::create(&root, "测试工作区".into()).unwrap();
+        let failed_id = Uuid::new_v4();
+        let succeeded_id = Uuid::new_v4();
+        let history = repository.history_directory();
+        fs::create_dir_all(&history).unwrap();
+
+        let failed_yaml = format!(
+            r#"id: {failed_id}
+createdAtMs: 1
+spec:
+  method: GET
+  url: https://example.test/failed
+  auth:
+    type: apiKey
+    key: X-My-Key
+    value: legacy-header-auth-secret
+    location: header
+  headers:
+    - enabled: true
+      key: X-My-Key
+      value: legacy-preview-header-secret
+      kind: text
+actualRequest:
+  method: GET
+  url: https://example.test/failed
+  headers:
+    - - X-My-Key
+      - manual-header-secret
+    - - X-Trace
+      - safe-header
+durationMs: 1
+"#,
+        );
+        let succeeded_yaml = format!(
+            r#"id: {succeeded_id}
+createdAtMs: 2
+spec:
+  method: GET
+  url: https://example.test/search
+  auth:
+    type: apiKey
+    key: q
+    value: legacy-query-auth-secret
+    location: query
+response:
+  id: {succeeded_id}
+  actualRequest:
+    method: GET
+    url: https://example.test/search?q=embedded-query-secret&safe=ok
+    headers:
+      - - X-Trace
+        - safe-header
+durationMs: 2
+"#,
+        );
+        let failed_path = history.join(format!("{failed_id}.yaml"));
+        let succeeded_path = history.join(format!("{succeeded_id}.yaml"));
+        fs::write(&failed_path, &failed_yaml).unwrap();
+        fs::write(&succeeded_path, &succeeded_yaml).unwrap();
+        fs::write(history.join(format!("{succeeded_id}.body")), b"ok").unwrap();
+
+        let (failed, failed_body) = repository.read_history(failed_id).unwrap();
+        let (succeeded, succeeded_body) = repository.read_history(succeeded_id).unwrap();
+        assert!(failed_body.is_none());
+        assert!(succeeded_body.is_some());
+        assert_eq!(failed.spec.headers[0].value, apogee_core::public::REDACTED);
+        assert_eq!(
+            failed.actual_request.as_ref().unwrap().headers,
+            vec![
+                (
+                    "X-My-Key".to_string(),
+                    apogee_core::public::REDACTED.to_string()
+                ),
+                ("X-Trace".to_string(), "safe-header".to_string()),
+            ]
+        );
+        assert_eq!(
+            succeeded
+                .response
+                .as_ref()
+                .and_then(|response| response.actual_request.as_ref())
+                .map(|actual| actual.url.as_str()),
+            Some("https://example.test/search?q=%5Bredacted%5D&safe=ok")
+        );
+
+        let output = serde_json::to_string(&(failed, succeeded)).unwrap();
+        for secret in [
+            "legacy-header-auth-secret",
+            "legacy-preview-header-secret",
+            "manual-header-secret",
+            "legacy-query-auth-secret",
+            "embedded-query-secret",
+        ] {
+            assert!(
+                !output.contains(secret),
+                "公开 legacy history 泄露了 {secret}: {output}"
+            );
+        }
+        assert_eq!(fs::read_to_string(&failed_path).unwrap(), failed_yaml);
+        assert_eq!(fs::read_to_string(&succeeded_path).unwrap(), succeeded_yaml);
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -1769,11 +2165,13 @@ mod tests {
         let response_id = Uuid::new_v4();
         let source = root.join("source.body");
         fs::write(&source, b"runtime-history").unwrap();
+        let legacy_spec = default_request_spec();
+        let legacy_response = ResponseSummary::without_http(response_id, 15, Timing::default());
         repository
             .record_history(
                 1234,
-                default_request_spec(),
-                ResponseSummary::without_http(response_id, 15, Timing::default()),
+                PublicRequestPreview::from(&legacy_spec),
+                PublicResponseSummary::from(&legacy_response),
                 &source,
                 None,
                 None,

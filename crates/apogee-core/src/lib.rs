@@ -14,6 +14,7 @@ pub mod error;
 pub mod http;
 pub mod model;
 pub mod postman;
+pub mod public;
 pub mod request;
 pub mod response;
 pub mod vars;

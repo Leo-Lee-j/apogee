@@ -208,19 +208,14 @@ fn apply_webview_runtime_settings(context: &mut tauri::Context<tauri::Wry>) {
     }
 }
 
-/// 把 panic 信息打到 stderr + tracing。
+/// 记录不含运行时内容的 panic 信号。
 ///
-/// 在 `panic = "abort"` 下,Rust 会先调用 hook,再 abort,所以这是我们最后
-/// 一道「能看到点啥」的窗口。不写文件 —— 用户机器上日志目录路径不一定稳定,
-/// stderr 至少能被开发机抓到。
+/// panic payload 可能来自格式化的请求、响应或底层错误链，不能把它写入普通日志。
+/// 默认只保留发生过 panic 的事实；需要可审计的 reveal 机制前，不回显原始 payload。
 fn install_panic_hook() {
-    let previous = std::panic::take_hook();
-    std::panic::set_hook(Box::new(move |info| {
-        // 先把信息打到 stderr(同步,即使后面的 tracing 已经失效也能落地)。
-        eprintln!("[apogee panic] {}", info);
-        // 再走 tracing —— release 下若还有订阅者,会写到日志。
-        tracing::error!("PANIC: {}", info);
-        previous(info);
+    std::panic::set_hook(Box::new(|_| {
+        eprintln!("[apogee panic] unexpected panic");
+        tracing::error!("PANIC");
     }));
 }
 
@@ -228,11 +223,14 @@ mod commands {
     use super::state::AppState;
     use crate::app_settings::{AppSettings, AppSettingsRepository};
     use crate::workspace::WorkspaceRepository;
-    use crate::workspace::{HistoryEntry, HistoryError, HistoryRecord};
+    use crate::workspace::{HistoryEntry, HistoryRecord};
     use crate::workspace_registry::{WorkspaceDescriptor, WorkspaceRegistry};
     use apogee_core::error::AppError;
+    use apogee_core::public::{
+        PublicActualRequest, PublicError, PublicRequestPreview, PublicResponseSummary,
+    };
     use apogee_core::request::RequestSpec;
-    use apogee_core::response::{ResponseSummary, TreeNode};
+    use apogee_core::response::TreeNode;
     use apogee_core::vars::Environment;
     use apogee_core::workspace::{DebugCase, DebugCaseType, WorkspaceRequest, WorkspaceSnapshot};
     use serde::{Deserialize, Serialize};
@@ -527,9 +525,10 @@ mod commands {
     pub fn spike_make_response(
         state: State<'_, Arc<AppState>>,
         target_bytes: usize,
-    ) -> Result<ResponseSummary, String> {
+    ) -> Result<PublicResponseSummary, String> {
         state
             .make_synthetic(target_bytes)
+            .map(|summary| PublicResponseSummary::from(&summary))
             .map_err(|e| e.to_string())
     }
 
@@ -545,11 +544,12 @@ mod commands {
         workspace_id: String,
         session_id: String,
         response_id: String,
-    ) -> Result<ResponseSummary, String> {
+    ) -> Result<PublicResponseSummary, String> {
         let id = parse_id(&response_id)?;
         let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
         state
             .response_summary(workspace_id, session_id, id)
+            .map(|summary| PublicResponseSummary::from(&summary))
             .map_err(|error| error.to_string())
     }
 
@@ -563,11 +563,12 @@ mod commands {
         workspace_id: String,
         session_id: String,
         response_id: String,
-    ) -> Result<ResponseSummary, String> {
+    ) -> Result<PublicResponseSummary, String> {
         let id = parse_id(&response_id)?;
         let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
         state
             .index_response(workspace_id, session_id, id)
+            .map(|summary| PublicResponseSummary::from(&summary))
             .map_err(|error| format!("JSON 索引失败：{error}"))
     }
 
@@ -595,10 +596,11 @@ mod commands {
     pub fn spike_index_response(
         state: State<'_, Arc<AppState>>,
         response_id: String,
-    ) -> Result<ResponseSummary, String> {
+    ) -> Result<PublicResponseSummary, String> {
         let id = parse_id(&response_id)?;
         state
             .index_synthetic_response(id)
+            .map(|summary| PublicResponseSummary::from(&summary))
             .map_err(|error| format!("JSON 索引失败：{error}"))
     }
 
@@ -770,7 +772,11 @@ mod commands {
                 state2.finish_inflight(id_for_cleanup);
                 if let Err(error) = emitted {
                     if !response_access_lost(&error) {
-                        tracing::debug!(?error, %event, "投递请求终结事件失败");
+                        tracing::debug!(
+                            event,
+                            operation = "emit_terminal_event",
+                            "投递请求终结事件失败"
+                        );
                     }
                 }
             };
@@ -828,16 +834,16 @@ mod commands {
                                 state2.finish_inflight(id);
                                 return;
                             }
-                            Err(error) => {
-                                tracing::error!(?error, "记录 HTTP 响应失败");
+                            Err(_error) => {
+                                tracing::error!(operation = "record_http_response", "记录 HTTP 响应失败");
                                 cleanup(
                                     "request:error",
                                     serde_json::json!({
                                         "id": id,
                                         "workspaceId": event_workspace_id,
                                         "sessionId": event_session_id,
-                                        "error": { "kind": "Internal", "message": error.to_string() },
-                                        "actualRequest": meta.actual_request.clone(),
+                                        "error": PublicError::internal(),
+                                        "actualRequest": PublicActualRequest::from(&meta.actual_request),
                                     }),
                                 );
                                 return;
@@ -859,10 +865,9 @@ mod commands {
                                     state2.finish_inflight(id);
                                     return;
                                 }
-                                Err(error) => {
+                                Err(_error) => {
                                     tracing::debug!(
-                                        %error,
-                                        content_type = ?meta.content_type,
+                                        operation = "index_response",
                                         "响应体不是可索引的 JSON，跳过树索引"
                                     );
                                 }
@@ -882,7 +887,7 @@ mod commands {
                                         serde_json::json!({
                                             "workspaceId": event_workspace_id,
                                             "sessionId": event_session_id,
-                                            "response": summary,
+                                            "response": PublicResponseSummary::from(&summary),
                                         }),
                                     )
                                     .map_err(|error| anyhow::anyhow!(error))
@@ -892,16 +897,16 @@ mod commands {
                         match done {
                             Ok(()) => {}
                             Err(error) if response_access_lost(&error) => {}
-                            Err(error) => {
-                                tracing::error!(?error, "汇总响应或投递 request:done 失败");
+                            Err(_error) => {
+                                tracing::error!(operation = "emit_request_done", "汇总响应或投递 request:done 失败");
                                 cleanup(
                                     "request:error",
                                     serde_json::json!({
                                         "id": id,
                                         "workspaceId": event_workspace_id,
                                         "sessionId": event_session_id,
-                                        "error": { "kind": "Internal", "message": error.to_string() },
-                                        "actualRequest": meta.actual_request.clone(),
+                                        "error": PublicError::internal(),
+                                        "actualRequest": PublicActualRequest::from(&meta.actual_request),
                                     }),
                                 );
                             }
@@ -927,8 +932,11 @@ mod commands {
                                 "id": id,
                                 "workspaceId": event_workspace_id,
                                 "sessionId": event_session_id,
-                                "error": error,
-                                "actualRequest": actual_request,
+                                "error": PublicError::from(&error),
+                                "actualRequest": actual_request
+                                    .as_ref()
+                                    .as_ref()
+                                    .map(PublicActualRequest::from),
                             }),
                         );
                     }
@@ -937,20 +945,14 @@ mod commands {
             .catch_unwind()
             .await;
 
-            if let Err(panic_payload) = body {
-                // 兜底:即使 catch_unwind 抓到,后续 emit 仍可能 panic(emit 本身
-                // 不会,但保险起见再包一层 try)。
-                let detail = if let Some(s) = panic_payload.downcast_ref::<&'static str>() {
-                    (*s).to_string()
-                } else if let Some(s) = panic_payload.downcast_ref::<String>() {
-                    s.clone()
-                } else {
-                    "未知 panic".to_string()
-                };
+            if body.is_err() {
+                // The panic hook already records a generic signal. Do not serialize or log the
+                // payload: panics raised by formatters or dependency code may contain request
+                // credentials or response fragments.
                 tracing::error!(
-                    panic = %detail,
                     request_id = %id,
-                    "send_request 后台任务 panic,改为发送 request:error 兜底事件"
+                    operation = "send_request",
+                    "send_request 后台任务 panic，发送通用 request:error 事件"
                 );
                 cleanup(
                     "request:error",
@@ -958,10 +960,7 @@ mod commands {
                         "id": id,
                         "workspaceId": event_workspace_id,
                         "sessionId": event_session_id,
-                        "error": {
-                            "kind": "Internal",
-                            "message": format!("后台任务异常:{}", detail),
-                        },
+                        "error": PublicError::internal(),
                     }),
                 );
             }
@@ -993,8 +992,8 @@ mod commands {
         pub workspace_id: String,
         pub session_id: String,
         pub created_at_ms: u64,
-        pub spec: RequestSpec,
-        pub response: ResponseSummary,
+        pub spec: PublicRequestPreview,
+        pub response: PublicResponseSummary,
         pub debug_case_id: Option<String>,
         pub environment_id: Option<String>,
     }
@@ -1006,9 +1005,9 @@ mod commands {
         pub workspace_id: String,
         pub session_id: String,
         pub created_at_ms: u64,
-        pub spec: RequestSpec,
-        pub error: HistoryError,
-        pub actual_request: Option<apogee_core::model::ActualRequest>,
+        pub spec: PublicRequestPreview,
+        pub error: PublicError,
+        pub actual_request: Option<PublicActualRequest>,
         pub duration_ms: f64,
         pub debug_case_id: Option<String>,
         pub environment_id: Option<String>,
