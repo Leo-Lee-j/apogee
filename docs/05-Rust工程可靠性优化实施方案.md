@@ -20,7 +20,7 @@
 - `RequestLease` 在同一 session 临界区内固定取消句柄、response access 与 `Arc<ResponseRuntime>`；旧请求在 A → B 切换后最多收尾自己的 A runtime，不能向 B 发布 metadata、索引或终结事件。
 - 每个 session 使用 `<runtime>/responses/<sessionId>` 私有 spool。`open_workspace` / `close_workspace` 先切换 active runtime 并取消旧任务，最后一个旧 runtime lease 释放时再删除旧目录；旧任务不会删除或写入新 session 数据。
 - history body 恢复、Synthetic 生成和 JSON 索引采用“短锁捕获 runtime → 锁外 I/O/计算 → 发布前重新验证”的路径；Synthetic 通过 `Arc` 身份防止 open/close ABA。
-- history body 导入使用唯一 `.part` 文件、flush 后发布；同一 response 的并发恢复已有原子发布回归测试。response index 和 metadata 会在 session 切换时清理。
+- history body 导入使用唯一 `.part` 文件、flush 后以同目录 hard link 作为不可覆盖的发布点；已存在的 body 仅在与 history source 长度匹配时作为幂等恢复复用。若复制后的发布窗口发生竞争，只有明确的 `AlreadyExists` 才会复用匹配 body，其他发布/I/O 失败会原样返回；成功发布或复用后的临时删除失败同样可见为错误，`Spool::remove` 会回收该 response 遗留的 `.part`。history restore 不再以 `exists()` 裸短路。同一 response 的并发发布、已存在 body 的匹配复用、长度不匹配拒绝、`AlreadyExists` 竞争、非冲突失败传播、临时清理失败和 remove 回收均有回归测试。response index 和 metadata 会在 session 切换时清理。
 - Windows 单文件发布已移除“先删除旧文件再 rename”的空窗，应用设置、工作区状态和 YAML 写入在替换失败时保留旧可读文件；CI 也补充了声明 MSRV 与 stable 的 Rust 质量门禁。
 
 ### 已验证
@@ -31,21 +31,33 @@
 | --- | --- |
 | `cargo +stable fmt --all -- --check` | 通过 |
 | `cargo +stable clippy --workspace --all-targets --locked -- -D warnings` | 通过 |
-| `cargo +stable test --workspace --locked` | 通过（`apogee-core` 55、`apogee-desktop` 35） |
+| `cargo +stable test --workspace --locked` | 通过（`apogee-core` 61、`apogee-desktop` 35） |
 | `pnpm typecheck` | 通过 |
 | `pnpm exec vitest run --reporter=verbose` | 通过（3 个文件、11 个测试） |
 | `get_diagnostics`（`state.rs`、`lib.rs`）与 `git diff --check` | 无诊断/无空白错误（仅 CRLF 提示） |
 | `pnpm tauri dev` | Vite 与 `target\debug\apogee.exe` 成功启动 |
 
-新增的 Rust barrier 回归覆盖旧 request、history restore、index、Synthetic 在 session 切换时的隔离和旧 spool 延迟回收；测试不依赖 sleep。
+新增的 Rust barrier 回归覆盖旧 request、history restore、index、Synthetic 在 session 切换时的隔离和旧 spool 延迟回收；测试不依赖 sleep。`Spool::copy_from` 另有独立回归覆盖已存在 body 的匹配复用、大小不匹配拒绝、不可覆盖发布的 `AlreadyExists` 竞争、非冲突发布错误传播、临时清理失败、`Spool::remove` 回收残留和并发恢复。
 
 ### 下一轮优先级与已知边界
 
 1. **默认脱敏优先。** 当前失败 history 仍会持久化原始 `RequestSpec`、`ActualRequest` 和 error detail，可能含鉴权、Cookie、token、解析后的 URL、body 或本机路径；在其改为 `HistoryRequestView` / `PublicResponseSummary` 并补齐脱敏快照测试前，不能把本切片表述为完成数据安全基线。
-2. **收紧 `Spool::copy_from` 的失败语义。** 目前最终文件存在时会把任意 rename 失败当作并发发布成功；后续只应接受明确的“已存在”冲突，并校验已有 body 与源 body 的长度（必要时 hash）。
+2. **增强 body 完整性校验。** 本轮已验证已有 body 的长度并拒绝错误发布；同长度损坏尚不可区分。若威胁模型或恢复诊断需要，应引入可选 hash/长度元数据并权衡额外 I/O，而不是重新放开 `exists()` 裸短路。
 3. **完成 response runtime 的整体收敛。** 目前是 `ResponseRuntime`，而非目标中的完整 `WorkspaceRuntime`；repository、response registry、in-flight、mutation gate 和计划缓存仍未统一为同一 owning runtime。普通协议 URL 仍是 session 归属校验，尚不是随机、短期 response capability。
 4. **完成阶段 2 的持久化协议。** 尚无跨进程单写者锁、`MutationGate`、staging/journal/tombstone/recovery；成功 history body 复制也仍需拆为锁外复制、重新验证、发布的两阶段流程。
 5. **完成阶段 3 的资源与协议边界。** 尚无 500 MiB runtime 记账、构建前 JSON 预算/single-flight、统一 `ResponseRegistry`、完整 Range/MIME/受限协议 I/O 改造或默认 history/IPC/log 脱敏。
+
+### 下一轮建议：默认脱敏最小切片
+
+下一轮优先实现“**默认公开数据不得含执行秘密**”，但不迁移或修改用户工作区中保存的请求定义。为控制影响范围，首个切片只收敛 history 与普通请求终结事件：
+
+1. 在 Rust 侧新增明确的公开 DTO/净化函数，将 `RequestSpec`、`ActualRequest`、`ResponseSummary` 与 `HistoryError` 转为可显示/可持久化视图；默认掩码 `Authorization`、`Proxy-Authorization`、`Cookie`、`Set-Cookie`、API key、Bearer/token、密码和 `ValueKind::Secret`，移除完整 body、敏感 query 值及二进制/文件上传的绝对路径。
+2. 先改写入边界：`history_record` 与 `history_record_error` 在 `WorkspaceRepository` 持久化前接收净化后的 history DTO；失败 history 的 `RequestSpec`、`ActualRequest` 和 error detail 不再原样落入 YAML。
+3. 同步收紧外发边界：`request:done` / `request:error`、`history_read`、`history_list` 和前端 IPC 类型只能接收公开 DTO；普通日志改为仅记录安全的 code/kind/摘要，不能把 `AppError.detail` 或执行快照直接格式化输出。
+4. 对旧 YAML 保持读兼容但默认净化后再进入 IPC；本切片不自动重写或删除旧历史，也不提供 reveal。显式、短时、审计友好的 reveal 机制留待公开 DTO 和 capability 边界稳定后设计。
+5. 新增 Rust/前端回归：Bearer、Cookie、API key、`ValueKind::Secret`、JSON/text body、form-data 文件路径、binary path、敏感 query 和 error detail 均不得出现于 history YAML、`request:done` / `request:error`、`history_read`、`history_list` 或普通日志；同时验证非敏感 method、host、status、duration、大小和可操作 hints 仍保留。
+
+预计涉及 `crates/apogee-core/src/{model,http,error}.rs`、`src-tauri/src/{lib,workspace,state}.rs`、`src/ipc/index.ts`、`src/stores/request.ts` 与 history/response 视图组件。应把完整 response body 的本地 spool 保留与其公开 DTO 解耦；资源预算、hash 完整性、随机 response capability、跨进程写者锁和多文件事务继续留在后续切片。
 
 本文把 Rust 全局审查的结论转为可实施的工程计划。它不改变 Apogee 的产品定位：工作区 YAML 仍是用户数据真相来源，应用仍以本地优先、性能优先和可迁移为原则；优化目标是让当前实现真正满足已有文档承诺的工作区隔离、可靠写入、响应资源控制和敏感信息边界。
 
@@ -364,7 +376,7 @@ InternalResponseRecord ──> PublicResponseSummary（脱敏 IPC DTO）
 ### 7.2 Spool 发布、索引与协议
 
 1. `SpoolWriter` 以“是否已发布”而不是 `file.is_some()` 决定 Drop 清理；flush 或 rename 失败也必须删除 `.part` 或留下可识别恢复标记。
-2. `restore_history_response` 改为 `Spool::restore_from`：复制到唯一临时文件，校验大小（可选 hash），关闭后原子发布；已有目标先验证，不得只因 `exists()` 直接跳过。
+2. **已完成（长度验证与不可覆盖发布）。** `Spool::copy_from` 复制到唯一临时文件、flush 后以同目录 hard link 原子发布；已有目标只有与 history source 长度匹配时才可作为幂等恢复复用。若发布窗口遇到竞争，只有 `AlreadyExists` 且长度匹配才可复用，大小不匹配、非冲突 I/O 错误和无法在该卷创建 hard link 的情况都不得转换为成功。发布成功或复用后的临时删除失败也必须返回错误，`Spool::remove` 会回收该 response 残留的 `.part`。`restore_history_response_into` 始终委托该校验，不再因 `exists()` 裸短路。若需要识别同长度损坏，再在此基础上增加可选 hash/完整性元数据。
 3. JSON 索引改为有硬预算的构建器：
    - 在预分配前检查节点数与估算字节；使用 fallible reserve；
    - 对单容器 descriptor、对象键池和构建期临时内存设置上限；

@@ -97,33 +97,119 @@ impl Spool {
     /// 将一个已有响应体文件原子导入 spool。
     ///
     /// history 恢复不能直接复制到最终路径：读取方可能在发布前看见半截 body。
-    /// 与 [`Self::write_stream`] 一样，先写 `.part`，成功后才通过 rename 发布；
-    /// 临时名每次唯一，允许相同 history response 被并发恢复。先完成发布的调用决定
-    /// body，另一个调用检测到最终文件后复用它；复制失败时尽力清理自己的临时文件。
+    /// 复制先写唯一 `.part` 并 flush；再以同目录 hard link 作为不可覆盖的发布点，确保
+    /// 并发调用不会依赖平台相关的 rename 覆盖语义。已有 body 会先与来源文件校验长度，
+    /// 作为幂等恢复的缓存命中；若在复制期间发生竞争，只有明确的 `AlreadyExists` 发布
+    /// 冲突才会复用匹配的 body，任何其他发布失败都会原样返回。发布成功或成功复用后的
+    /// 临时清理失败也会返回错误；`Self::remove` 会回收该 response 遗留的 `.part` 文件。
     pub fn copy_from(&self, id: Uuid, source: impl AsRef<std::path::Path>) -> std::io::Result<u64> {
+        self.copy_from_with_publisher(id, source, |temporary, target| {
+            fs::hard_link(temporary, target)
+        })
+    }
+
+    /// 由可替换发布器执行 `copy_from` 的复制与发布流程。
+    ///
+    /// 生产路径使用同卷、不可覆盖的 hard link；测试通过注入发布器稳定覆盖竞争与 I/O
+    /// 失败分支，而不依赖文件系统调度时序。
+    fn copy_from_with_publisher(
+        &self,
+        id: Uuid,
+        source: impl AsRef<std::path::Path>,
+        publish: impl FnOnce(&std::path::Path, &std::path::Path) -> std::io::Result<()>,
+    ) -> std::io::Result<u64> {
+        self.copy_from_with_operations(id, source, publish, Self::remove_copy_temp)
+    }
+
+    /// 将发布和临时文件清理抽象为可注入操作，供故障路径回归测试使用。
+    fn copy_from_with_operations(
+        &self,
+        id: Uuid,
+        source: impl AsRef<std::path::Path>,
+        publish: impl FnOnce(&std::path::Path, &std::path::Path) -> std::io::Result<()>,
+        cleanup_temp: impl Fn(&std::path::Path) -> std::io::Result<()>,
+    ) -> std::io::Result<u64> {
         let path = self.path_for(id);
+        let mut input = File::open(source)?;
+        let source_size = input.metadata()?.len();
+        if let Some(existing_size) = Self::existing_body_size_if_matching(&path, source_size)? {
+            return Ok(existing_size);
+        }
+
         let tmp = path.with_extension(format!("{}.part", Uuid::new_v4()));
         let result = (|| {
-            let mut input = File::open(source)?;
             let mut output = File::create(&tmp)?;
             let written = std::io::copy(&mut input, &mut output)?;
             output.flush()?;
             drop(output);
-            match fs::rename(&tmp, &path) {
-                Ok(()) => Ok(written),
-                // Windows 不允许用 rename 覆盖已存在文件；这仅可能是同一 response 的
-                // 另一条恢复路径已经原子发布，直接复用其完整 body。
-                Err(_) if path.exists() => {
-                    let _ = fs::remove_file(&tmp);
-                    Ok(File::open(&path)?.metadata()?.len())
+            match publish(&tmp, &path) {
+                Ok(()) => {
+                    cleanup_temp(&tmp)?;
+                    Ok(written)
                 }
-                Err(error) => Err(error),
+                Err(error) => {
+                    let existing_size =
+                        Self::reuse_existing_body_after_copy_conflict(error, &path, written)?;
+                    cleanup_temp(&tmp)?;
+                    Ok(existing_size)
+                }
             }
         })();
         if result.is_err() {
-            let _ = fs::remove_file(&tmp);
+            let _ = cleanup_temp(&tmp);
         }
         result
+    }
+
+    /// 清理一个 copy-from 临时文件；已经被其他恢复流程清理的文件视为成功。
+    fn remove_copy_temp(path: &std::path::Path) -> std::io::Result<()> {
+        match fs::remove_file(path) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error),
+        }
+    }
+
+    /// 返回与预期长度相符的已发布 body；不存在时返回 `None`。
+    ///
+    /// history body 在持久化后不可变，因此长度是低成本的完整性边界；需要检测同长度
+    /// 损坏时，后续可在此处增加可选 hash，而无需再次开放 `exists()` 裸短路。
+    fn existing_body_size_if_matching(
+        path: &std::path::Path,
+        expected_size: u64,
+    ) -> std::io::Result<Option<u64>> {
+        let file = match File::open(path) {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        let actual_size = file.metadata()?.len();
+        if actual_size == expected_size {
+            Ok(Some(actual_size))
+        } else {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                format!(
+                    "已存在响应体大小不匹配：{}（期望 {expected_size} 字节，实际 {actual_size} 字节）",
+                    path.display()
+                ),
+            ))
+        }
+    }
+
+    /// 仅允许明确的目标已存在错误复用另一条恢复路径已发布的 body。
+    fn reuse_existing_body_after_copy_conflict(
+        error: std::io::Error,
+        path: &std::path::Path,
+        expected_size: u64,
+    ) -> std::io::Result<u64> {
+        if error.kind() != std::io::ErrorKind::AlreadyExists {
+            return Err(error);
+        }
+        match Self::existing_body_size_if_matching(path, expected_size)? {
+            Some(existing_size) => Ok(existing_size),
+            None => Err(error),
+        }
     }
 
     /// 增量写入句柄，供 async 场景逐块落盘。
@@ -169,8 +255,20 @@ impl Spool {
 
     pub fn remove(&self, id: Uuid) -> std::io::Result<()> {
         let path = self.path_for(id);
-        if path.exists() {
-            fs::remove_file(path)?;
+        match fs::remove_file(&path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+
+        let temporary_prefix = format!("{id}.");
+        for entry in fs::read_dir(&self.root)? {
+            let entry = entry?;
+            let file_name = entry.file_name();
+            let file_name = file_name.to_string_lossy();
+            if file_name.starts_with(&temporary_prefix) && file_name.ends_with(".part") {
+                Self::remove_copy_temp(&entry.path())?;
+            }
         }
         Ok(())
     }
@@ -1396,6 +1494,198 @@ mod tests {
         assert_eq!(first.join().unwrap().unwrap(), payload.len() as u64);
         assert_eq!(second.join().unwrap().unwrap(), payload.len() as u64);
         assert_eq!(std::fs::read(spool.path_for(id)).unwrap(), payload);
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn copy_from_reuses_matching_existing_body() {
+        let root = tmp_root("matching-existing-copy");
+        std::fs::create_dir_all(&root).unwrap();
+        let spool = Spool::new(root.join("spool")).unwrap();
+        let id = Uuid::new_v4();
+        let payload = b"persisted history body".to_vec();
+        let source = root.join("history.body");
+        std::fs::write(&source, &payload).unwrap();
+        std::fs::write(spool.path_for(id), &payload).unwrap();
+
+        assert_eq!(spool.copy_from(id, &source).unwrap(), payload.len() as u64);
+        assert_eq!(std::fs::read(spool.path_for(id)).unwrap(), payload);
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn copy_from_rejects_mismatched_existing_body() {
+        let root = tmp_root("mismatched-existing-copy");
+        std::fs::create_dir_all(&root).unwrap();
+        let spool = Spool::new(root.join("spool")).unwrap();
+        let id = Uuid::new_v4();
+        let source_payload = b"source history body".to_vec();
+        let stale_payload = b"stale".to_vec();
+        let source = root.join("history.body");
+        std::fs::write(&source, &source_payload).unwrap();
+        std::fs::write(spool.path_for(id), &stale_payload).unwrap();
+
+        let error = spool.copy_from(id, &source).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(std::fs::read(spool.path_for(id)).unwrap(), stale_payload);
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn copy_from_reuses_matching_body_after_already_exists_publish_conflict() {
+        let root = tmp_root("matching-copy-conflict");
+        std::fs::create_dir_all(&root).unwrap();
+        let spool = Spool::new(root.join("spool")).unwrap();
+        let id = Uuid::new_v4();
+        let payload = b"published history body".to_vec();
+        let source = root.join("history.body");
+        std::fs::write(&source, &payload).unwrap();
+        let published_payload = payload.clone();
+
+        assert_eq!(
+            spool
+                .copy_from_with_publisher(id, &source, move |_, target| {
+                    std::fs::write(target, &published_payload)?;
+                    Err(std::io::Error::new(
+                        std::io::ErrorKind::AlreadyExists,
+                        "simulated competing publish",
+                    ))
+                })
+                .unwrap(),
+            payload.len() as u64
+        );
+        assert_eq!(std::fs::read(spool.path_for(id)).unwrap(), payload);
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn copy_from_rejects_mismatched_body_after_already_exists_publish_conflict() {
+        let root = tmp_root("mismatched-copy-conflict");
+        std::fs::create_dir_all(&root).unwrap();
+        let spool = Spool::new(root.join("spool")).unwrap();
+        let id = Uuid::new_v4();
+        let source_payload = b"source history body".to_vec();
+        let stale_payload = b"stale".to_vec();
+        let source = root.join("history.body");
+        let target = spool.path_for(id);
+        std::fs::write(&source, &source_payload).unwrap();
+        let published_stale_payload = stale_payload.clone();
+
+        let error = spool
+            .copy_from_with_publisher(id, &source, move |_, published_target| {
+                std::fs::write(published_target, &published_stale_payload)?;
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::AlreadyExists,
+                    "simulated competing publish",
+                ))
+            })
+            .unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(std::fs::read(&target).unwrap(), stale_payload);
+        assert!(
+            std::fs::read_dir(target.parent().unwrap())
+                .unwrap()
+                .all(|entry| !entry
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .ends_with(".part")),
+            "失败发布不得遗留临时 body"
+        );
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn copy_from_propagates_unrelated_publish_failure() {
+        let root = tmp_root("copy-failure-kind");
+        std::fs::create_dir_all(&root).unwrap();
+        let spool = Spool::new(root.join("spool")).unwrap();
+        let id = Uuid::new_v4();
+        let payload = b"published body".to_vec();
+        let source = root.join("history.body");
+        let target = spool.path_for(id);
+        std::fs::write(&source, &payload).unwrap();
+        let published_payload = payload.clone();
+
+        let error = spool
+            .copy_from_with_publisher(id, &source, move |_, published_target| {
+                std::fs::write(published_target, &published_payload)?;
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "simulated publish failure",
+                ))
+            })
+            .unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+        assert_eq!(std::fs::read(&target).unwrap(), payload);
+        assert!(
+            std::fs::read_dir(target.parent().unwrap())
+                .unwrap()
+                .all(|entry| !entry
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .ends_with(".part")),
+            "失败发布不得遗留临时 body"
+        );
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn copy_from_reports_cleanup_failure_and_spool_remove_recovers_temporary() {
+        let root = tmp_root("copy-cleanup-failure");
+        std::fs::create_dir_all(&root).unwrap();
+        let spool = Spool::new(root.join("spool")).unwrap();
+        let id = Uuid::new_v4();
+        let payload = b"published body".to_vec();
+        let source = root.join("history.body");
+        let target = spool.path_for(id);
+        std::fs::write(&source, &payload).unwrap();
+
+        let error = spool
+            .copy_from_with_operations(
+                id,
+                &source,
+                |temporary, published_target| std::fs::hard_link(temporary, published_target),
+                |_| {
+                    Err(std::io::Error::new(
+                        std::io::ErrorKind::PermissionDenied,
+                        "simulated temporary cleanup failure",
+                    ))
+                },
+            )
+            .unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+        assert_eq!(std::fs::read(&target).unwrap(), payload);
+        assert!(
+            std::fs::read_dir(target.parent().unwrap())
+                .unwrap()
+                .any(|entry| entry
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .ends_with(".part")),
+            "注入的清理失败应保留临时文件供 remove 回收"
+        );
+
+        spool.remove(id).unwrap();
+        assert!(!target.exists());
+        assert!(
+            std::fs::read_dir(target.parent().unwrap())
+                .unwrap()
+                .all(|entry| !entry
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .ends_with(".part")),
+            "Spool::remove 必须回收该 response 的临时文件"
+        );
 
         std::fs::remove_dir_all(root).unwrap();
     }

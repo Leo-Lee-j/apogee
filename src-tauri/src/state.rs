@@ -889,12 +889,11 @@ impl AppState {
         mut summary: ResponseSummary,
         body: &std::path::Path,
     ) -> Result<ResponseSummary> {
-        let target = spool.path_for(summary.id);
-        if !target.exists() {
-            spool
-                .copy_from(summary.id, body)
-                .with_context(|| format!("恢复历史响应体失败：{}", body.display()))?;
-        }
+        // `copy_from` 会验证已有 body 的长度；不能用 `exists()` 裸短路，否则损坏或
+        // 同 ID 的错误文件会被当作已恢复响应直接发布。
+        spool
+            .copy_from(summary.id, body)
+            .with_context(|| format!("恢复历史响应体失败：{}", body.display()))?;
         summary.indexed = false;
         summary.total_nodes = None;
         summary.index_bytes = None;
@@ -1665,6 +1664,14 @@ mod tests {
             .join(first_session.to_string())
             .join(format!("{response_id}.bin"));
         assert_eq!(std::fs::read(&first_runtime_body).unwrap(), payload);
+
+        // 已恢复的 response id 再次读取时也必须验证现有 spool body，不能用 exists()
+        // 直接跳过，否则错误文件会重新作为历史响应发布。
+        std::fs::write(&first_runtime_body, b"stale").unwrap();
+        assert!(state
+            .read_history(first_workspace, first_session, response_id)
+            .is_err());
+        assert_eq!(std::fs::read(&first_runtime_body).unwrap(), b"stale");
 
         state
             .close_workspace(first_workspace, first_session)

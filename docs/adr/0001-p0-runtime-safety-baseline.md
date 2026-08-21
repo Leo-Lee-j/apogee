@@ -22,10 +22,10 @@ Apogee 的工作区 YAML 是用户数据真相，运行时响应、索引与历�
 
 - 已实现 `ResponseAccess` / `ResponseScope`、`RequestLease` 和 session 私有 `Arc<ResponseRuntime>`。普通 response IPC、协议读取、索引、history restore、Synthetic 及前端请求事件均按 `workspaceId + sessionId` 校验；旧 runtime 仅在最后一个锁外任务结束后回收其私有 spool。
 - 已实现 session 切换时清理 response metadata/index，并以 barrier 测试证明旧 request、history restore、index 与 Synthetic 不能向新 session 发布或写入其目录。此机制是隔离与延迟回收，不是 500 MiB runtime 配额或跨进程所有权协议。
-- 已完成部分单文件发布改进：Windows 替换不再先删除旧目标；history body 恢复先写唯一 `.part`、flush 后发布。它不等于多文件事务、断电恢复或跨进程单写者锁。
+- 已完成部分单文件发布改进：Windows 替换不再先删除旧目标；history body 恢复先写唯一 `.part`、flush 后以同目录 hard link 不可覆盖发布。`Spool::copy_from` 会把长度匹配的已有 target 作为幂等恢复复用；若在发布窗口发生竞争，只有明确的 `AlreadyExists` 且长度匹配才会复用 body。大小不匹配、其他发布/I/O 错误和不支持 hard link 的卷都会保持失败；成功发布或复用后的临时删除失败也返回错误，`Spool::remove` 会回收该 response 残留的 `.part`。`restore_history_response_into` 也不再使用 `exists()` 裸短路。它不等于多文件事务、断电恢复或跨进程单写者锁。
 - 当前普通 response URL 依赖 workspace/session 归属校验，尚不是目标模型中的随机、短期、不可伪造 response capability；完整 `WorkspaceRuntime`、`ResponseRegistry`、`MutationGate` 和资源预算仍待实现。
 - **安全边界仍未达标：**失败 history 目前会持久化原始 `RequestSpec`、`ActualRequest` 和 error detail，可能包含凭据、Cookie、token、body 或本机路径。必须先引入默认脱敏公开 DTO 与回归测试，才能宣称满足本 ADR 的历史/IPC/日志策略。
-- **下一个正确性修复：**`Spool::copy_from` 仍需仅把明确的“目标已存在”错误视为并发发布成功，并验证已有 body；不能把任意 rename 失败吞为成功。
+- **剩余完整性边界：**当前 `Spool::copy_from` 校验的是来源和已发布 body 的长度，因此能拒绝截断或不同长度的错误文件，但不能区分同长度损坏；如需该保证，应通过后续 ADR/实现引入可选 hash 或完整性元数据，并明确其 I/O 成本。
 
 ## 决策
 
