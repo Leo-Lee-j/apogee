@@ -44,7 +44,8 @@ async function open(entry: HistoryEntry) {
       title: historyTitle(entry), method: spec.method, url: spec.url,
       params: spec.params ?? [], pathParams: spec.pathParams ?? [], headers: spec.headers ?? [],
       body: spec.body ?? { type: 'none' }, auth: spec.auth ?? { type: 'none' }, settings: spec.settings ?? {},
-      response: record.response, dirty: false, preview: false,
+      response: record.response ?? null, error: record.error ?? null,
+      actualRequest: record.actualRequest ?? null, dirty: false, preview: false,
     })
     ui.historyOpen = false
   } catch (reason) { error.value = normalizeError(reason).message }

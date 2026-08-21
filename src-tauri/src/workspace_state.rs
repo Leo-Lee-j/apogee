@@ -1,3 +1,4 @@
+use crate::app_settings::atomic_replace;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -43,24 +44,40 @@ impl WorkspaceStateRepository {
         }
     }
 
+    /// 将状态写入临时文件后发布，避免 Windows 上删除旧状态再发布的空窗。
     pub fn save(&self, workspace_id: Uuid, state: &WorkspaceState) -> Result<()> {
+        self.save_with_replace(workspace_id, state, atomic_replace)
+    }
+
+    /// 为确定性故障测试保留发布边界；生产路径始终传入 [`atomic_replace`]。
+    fn save_with_replace(
+        &self,
+        workspace_id: Uuid,
+        state: &WorkspaceState,
+        replace: impl FnOnce(&Path, &Path) -> Result<()>,
+    ) -> Result<()> {
         fs::create_dir_all(&self.root)?;
         let target = self.path(workspace_id);
         let temporary = self
             .root
             .join(format!(".{workspace_id}.{}.tmp", Uuid::new_v4()));
         fs::write(&temporary, serde_json::to_vec_pretty(state)?)?;
-        match fs::rename(&temporary, &target) {
-            Ok(()) => Ok(()),
-            Err(_rename_error) if target.exists() => {
-                fs::remove_file(&target)
-                    .with_context(|| format!("替换旧工作区状态失败：{}", target.display()))?;
-                fs::rename(&temporary, &target)
-                    .with_context(|| format!("发布工作区状态失败：{}", target.display()))?;
-                Ok(())
+
+        if let Err(error) = replace(&temporary, &target) {
+            match fs::remove_file(&temporary) {
+                Ok(()) => {}
+                Err(cleanup_error) if cleanup_error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(cleanup_error) => {
+                    return Err(error.context(format!(
+                        "发布工作区状态失败，且无法清理临时文件 {}：{cleanup_error}",
+                        temporary.display()
+                    )));
+                }
             }
-            Err(rename_error) => Err(rename_error.into()),
+            return Err(error.context(format!("发布工作区状态失败：{}", target.display())));
         }
+
+        Ok(())
     }
 
     fn path(&self, workspace_id: Uuid) -> PathBuf {
@@ -104,6 +121,53 @@ mod tests {
                 .active_environment_id,
             None
         );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn failed_publish_preserves_existing_state_and_cleans_temporary_file() {
+        let root = std::env::temp_dir().join(format!("apogee-workspace-state-{}", Uuid::new_v4()));
+        let repository = WorkspaceStateRepository::new(&root);
+        let workspace_id = Uuid::new_v4();
+        let original = WorkspaceState {
+            active_environment_id: Some(Uuid::new_v4()),
+            active_environment_set: true,
+        };
+        repository.save(workspace_id, &original).unwrap();
+        let persisted_before = fs::read(repository.path(workspace_id)).unwrap();
+
+        let error = repository
+            .save_with_replace(
+                workspace_id,
+                &WorkspaceState {
+                    active_environment_id: None,
+                    active_environment_set: false,
+                },
+                |_, _| anyhow::bail!("injected replacement failure"),
+            )
+            .unwrap_err();
+
+        assert!(format!("{error:#}").contains("injected replacement failure"));
+        assert_eq!(
+            fs::read(repository.path(workspace_id)).unwrap(),
+            persisted_before
+        );
+        let restored = repository.load(workspace_id).unwrap();
+        assert_eq!(
+            restored.active_environment_id,
+            original.active_environment_id
+        );
+        assert_eq!(
+            restored.active_environment_set,
+            original.active_environment_set
+        );
+        assert!(fs::read_dir(root.join("workspace-state"))
+            .unwrap()
+            .all(|entry| !entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .ends_with(".tmp")));
         fs::remove_dir_all(root).unwrap();
     }
 

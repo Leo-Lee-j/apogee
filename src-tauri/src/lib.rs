@@ -70,6 +70,8 @@ pub fn run() {
             commands::system_font_families,
             commands::app_restart,
             commands::spike_make_response,
+            commands::spike_index_response,
+            commands::spike_get_response_tree,
             commands::get_response_meta,
             commands::index_response,
             commands::get_response_tree,
@@ -540,10 +542,15 @@ mod commands {
     #[tauri::command]
     pub fn get_response_meta(
         state: State<'_, Arc<AppState>>,
+        workspace_id: String,
+        session_id: String,
         response_id: String,
     ) -> Result<ResponseSummary, String> {
         let id = parse_id(&response_id)?;
-        state.summary(id).map_err(|e| e.to_string())
+        let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
+        state
+            .response_summary(workspace_id, session_id, id)
+            .map_err(|error| error.to_string())
     }
 
     /// 显式建 JSON 索引。
@@ -553,17 +560,50 @@ mod commands {
     #[tauri::command]
     pub fn index_response(
         state: State<'_, Arc<AppState>>,
+        workspace_id: String,
+        session_id: String,
         response_id: String,
     ) -> Result<ResponseSummary, String> {
         let id = parse_id(&response_id)?;
+        let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
         state
-            .index_response(id)
-            .map_err(|e| format!("JSON 索引失败：{e}"))
+            .index_response(workspace_id, session_id, id)
+            .map_err(|error| format!("JSON 索引失败：{error}"))
     }
 
     /// 取一页树节点。前端拿到的是扁平数组，不做递归构造（03 文档 §4.4）。
     #[tauri::command]
     pub fn get_response_tree(
+        state: State<'_, Arc<AppState>>,
+        workspace_id: String,
+        session_id: String,
+        response_id: String,
+        path: String,
+        offset: usize,
+        limit: usize,
+    ) -> Result<Vec<TreeNode>, String> {
+        let id = parse_id(&response_id)?;
+        let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
+        state
+            .response_tree_page(workspace_id, session_id, id, &path, offset, limit)
+            .map_err(|error| error.to_string())
+    }
+
+    /// Spike 使用显式的 Synthetic response scope；无论是否打开工作区，都不能通过
+    /// 此命令读取普通响应。
+    #[tauri::command]
+    pub fn spike_index_response(
+        state: State<'_, Arc<AppState>>,
+        response_id: String,
+    ) -> Result<ResponseSummary, String> {
+        let id = parse_id(&response_id)?;
+        state
+            .index_synthetic_response(id)
+            .map_err(|error| format!("JSON 索引失败：{error}"))
+    }
+
+    #[tauri::command]
+    pub fn spike_get_response_tree(
         state: State<'_, Arc<AppState>>,
         response_id: String,
         path: String,
@@ -572,7 +612,7 @@ mod commands {
     ) -> Result<Vec<TreeNode>, String> {
         let id = parse_id(&response_id)?;
         state
-            .tree_page(id, &path, offset, limit)
+            .synthetic_tree_page(id, &path, offset, limit)
             .map_err(|error| error.to_string())
     }
 
@@ -684,32 +724,55 @@ mod commands {
 
         let id = Uuid::new_v4();
         let tab_id = ctx.as_ref().and_then(|item| item.tab_id.clone());
-        let cancel_rx = state.register_inflight(id, tab_id);
-
-        let spool = state
-            .spool
-            .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .clone();
+        let lease = state
+            .begin_request(workspace_id, session_id, id, tab_id)
+            .map_err(|error| error.to_string())?;
+        let (runtime, cancel_rx, response_access) = lease.into_execution_parts();
         let state2 = state.inner().clone();
         let app2 = app.clone();
 
-        // 必须保证:无论 spawned future 是否 panic,都会发出一个终结事件。
-        // 否则前端按钮永远卡在「等待中」。
+        // 正常的 `Result` 路径必须发出终结事件，不能依赖 panic 恢复来维持前端状态。
         //
-        // release 下 `panic = "abort"`,task panic 直接整进程 abort,所以这里
-        // 用 `FutureExt::catch_unwind` 主动抓:tokio runtime 的默认行为是
-        // 在 panic hook 上报后继续运行,但我们要 fallback 事件,不能依赖 runtime。
+        // 在支持 unwind 的开发/测试构建中，`FutureExt::catch_unwind` 会把未预期的 task
+        // panic 转成诊断性 `request:error`。release 采用 `panic = "abort"`，进程会在
+        // 任何 Rust 兜底逻辑前结束，因此这不是 release 下的可靠性承诺。
         tokio::spawn(async move {
             use futures_util::FutureExt;
             use std::panic::AssertUnwindSafe;
 
             let app_for_cleanup = app2.clone();
+            let app_for_done = app2.clone();
+            let app_for_progress = app2.clone();
+            let state_for_progress = state2.clone();
             let id_for_cleanup = id;
+            let event_workspace_id = response_access.workspace_id();
+            let event_session_id = response_access.session_id();
 
+            fn response_access_lost(error: &anyhow::Error) -> bool {
+                matches!(
+                    error.to_string().as_str(),
+                    "当前没有打开的工作区"
+                        | "WORKSPACE_SESSION_EXPIRED"
+                        | "RESPONSE_SESSION_EXPIRED"
+                        | "RESPONSE_NOT_FOUND"
+                )
+            }
+
+            // 终结事件必须在仍有效的 workspace session 临界区内入队。若 close 已先
+            // 发生，整个 emit 会被跳过；若 emit 已入队，payload 里的 session 仍让前端
+            // 能在延迟送达且已切换工作区时安全丢弃它。
             let cleanup = |event: &str, payload: serde_json::Value| {
+                let emitted = state2.with_active_response_access(response_access, || {
+                    app_for_cleanup
+                        .emit(event, payload)
+                        .map_err(|error| anyhow::anyhow!(error))
+                });
                 state2.finish_inflight(id_for_cleanup);
-                let _ = app_for_cleanup.emit(event, payload);
+                if let Err(error) = emitted {
+                    if !response_access_lost(&error) {
+                        tracing::debug!(?error, %event, "投递请求终结事件失败");
+                    }
+                }
             };
 
             // 进度事件必须节流。`execute` 每收到一个 chunk 就回调一次，而 hyper
@@ -727,14 +790,20 @@ mod commands {
                     return;
                 }
                 last_progress = Some(now);
-                let _ = app2.emit(
-                    "request:progress",
-                    serde_json::json!({
-                        "id": id,
-                        "received": progress.received,
-                        "total": progress.total,
-                    }),
-                );
+                let _ = state_for_progress.with_active_response_access(response_access, || {
+                    app_for_progress
+                        .emit(
+                            "request:progress",
+                            serde_json::json!({
+                                "id": id,
+                                "workspaceId": event_workspace_id,
+                                "sessionId": event_session_id,
+                                "received": progress.received,
+                                "total": progress.total,
+                            }),
+                        )
+                        .map_err(|error| anyhow::anyhow!(error))
+                });
             };
 
             let body = AssertUnwindSafe(async {
@@ -743,7 +812,7 @@ mod commands {
                         id,
                         &spec,
                         environment.as_ref(),
-                        &spool,
+                        runtime.spool(),
                         cancel_rx,
                         on_progress,
                     )
@@ -751,19 +820,28 @@ mod commands {
 
                 match outcome {
                     apogee_core::http::Outcome::Done(meta) => {
-                        if let Err(error) = state2.record_http_meta(
-                            id, meta.size_bytes, meta.timing, meta.content_type.clone(),
-                        ) {
-                            tracing::error!(?error, "记录 HTTP 元信息失败");
-                            cleanup(
-                                "request:error",
-                                serde_json::json!({
-                                    "id": id,
-                                    "error": { "kind": "Internal", "message": error.to_string() },
-                                    "actualRequest": meta.actual_request.clone(),
-                                }),
-                            );
-                            return;
+                        match state2.record_http_response(response_access, &meta) {
+                            Ok(_) => {}
+                            Err(error) if response_access_lost(&error) => {
+                                // A 的网络任务可能在 close 后才结束。此时 response state 已经
+                                // 随 session 清理，不能把它重新注册到 B，也不能向 B 发送终结事件。
+                                state2.finish_inflight(id);
+                                return;
+                            }
+                            Err(error) => {
+                                tracing::error!(?error, "记录 HTTP 响应失败");
+                                cleanup(
+                                    "request:error",
+                                    serde_json::json!({
+                                        "id": id,
+                                        "workspaceId": event_workspace_id,
+                                        "sessionId": event_session_id,
+                                        "error": { "kind": "Internal", "message": error.to_string() },
+                                        "actualRequest": meta.actual_request.clone(),
+                                    }),
+                                );
+                                return;
+                            }
                         }
 
                         // 2MB 以下顺手建 JSON 索引，让树视图不必再等一次往返
@@ -775,40 +853,68 @@ mod commands {
                         // 也不按 Content-Type 预先筛:相当多的 API 返回 JSON 却标着
                         // text/plain,按头筛会让这些响应白丢树视图。
                         if meta.size_bytes < apogee_core::model::TIER_HIGHLIGHT_MAX {
-                            if let Err(error) = state2.index_response(id) {
-                                tracing::debug!(
-                                    %error,
-                                    content_type = ?meta.content_type,
-                                    "响应体不是可索引的 JSON，跳过树索引"
-                                );
+                            match state2.index_response_for_access(response_access, id) {
+                                Ok(_) => {}
+                                Err(error) if response_access_lost(&error) => {
+                                    state2.finish_inflight(id);
+                                    return;
+                                }
+                                Err(error) => {
+                                    tracing::debug!(
+                                        %error,
+                                        content_type = ?meta.content_type,
+                                        "响应体不是可索引的 JSON，跳过树索引"
+                                    );
+                                }
                             }
                         }
 
-                        let summary = match state2.summarize_http(&meta) {
-                            Ok(summary) => summary,
+                        // 索引或 metadata 写入期间也可能发生 close。摘要构造和
+                        // `request:done` 入队必须共用同一个 response/session 临界区；否则
+                        // 关闭可能插入在最后一次校验和 emit 之间。
+                        let done = state2.with_response_summary_for_access(
+                            response_access,
+                            id,
+                            |summary| {
+                                app_for_done
+                                    .emit(
+                                        "request:done",
+                                        serde_json::json!({
+                                            "workspaceId": event_workspace_id,
+                                            "sessionId": event_session_id,
+                                            "response": summary,
+                                        }),
+                                    )
+                                    .map_err(|error| anyhow::anyhow!(error))
+                            },
+                        );
+                        state2.finish_inflight(id);
+                        match done {
+                            Ok(()) => {}
+                            Err(error) if response_access_lost(&error) => {}
                             Err(error) => {
-                                tracing::error!(?error, "汇总响应失败");
+                                tracing::error!(?error, "汇总响应或投递 request:done 失败");
                                 cleanup(
                                     "request:error",
                                     serde_json::json!({
                                         "id": id,
+                                        "workspaceId": event_workspace_id,
+                                        "sessionId": event_session_id,
                                         "error": { "kind": "Internal", "message": error.to_string() },
-                                    "actualRequest": meta.actual_request.clone(),
+                                        "actualRequest": meta.actual_request.clone(),
                                     }),
                                 );
-                                return;
                             }
-                        };
-
-                        cleanup(
-                            "request:done",
-                            serde_json::json!({ "response": summary }),
-                        );
+                        }
                     }
                     apogee_core::http::Outcome::Cancelled => {
                         cleanup(
                             "request:cancelled",
-                            serde_json::json!({ "id": id }),
+                            serde_json::json!({
+                                "id": id,
+                                "workspaceId": event_workspace_id,
+                                "sessionId": event_session_id,
+                            }),
                         );
                     }
                     apogee_core::http::Outcome::Failed {
@@ -819,6 +925,8 @@ mod commands {
                             "request:error",
                             serde_json::json!({
                                 "id": id,
+                                "workspaceId": event_workspace_id,
+                                "sessionId": event_session_id,
                                 "error": error,
                                 "actualRequest": actual_request,
                             }),
@@ -848,6 +956,8 @@ mod commands {
                     "request:error",
                     serde_json::json!({
                         "id": id,
+                        "workspaceId": event_workspace_id,
+                        "sessionId": event_session_id,
                         "error": {
                             "kind": "Internal",
                             "message": format!("后台任务异常:{}", detail),
@@ -855,6 +965,10 @@ mod commands {
                     }),
                 );
             }
+
+            // 保持 runtime lease 到后台任务的全部终结路径完成。若 workspace 已切换，
+            // 最后一个 lease 的 drop 才会安全回收旧 session 的 spool 目录。
+            drop(runtime);
         });
 
         Ok(apogee_core::request::ExecHandle { id })
@@ -872,36 +986,68 @@ mod commands {
         Ok(state.cancel_inflight(id))
     }
 
+    /// 成功请求历史命令的 IPC 输入；前端仅需在 `input` 下传入当前扁平字段。
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct HistoryRecordInput {
+        pub workspace_id: String,
+        pub session_id: String,
+        pub created_at_ms: u64,
+        pub spec: RequestSpec,
+        pub response: ResponseSummary,
+        pub debug_case_id: Option<String>,
+        pub environment_id: Option<String>,
+    }
+
+    /// 未收到 HTTP 响应时写入失败历史的 IPC 输入。
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct HistoryRecordErrorInput {
+        pub workspace_id: String,
+        pub session_id: String,
+        pub created_at_ms: u64,
+        pub spec: RequestSpec,
+        pub error: HistoryError,
+        pub actual_request: Option<apogee_core::model::ActualRequest>,
+        pub duration_ms: f64,
+        pub debug_case_id: Option<String>,
+        pub environment_id: Option<String>,
+    }
+
     #[tauri::command]
     pub fn history_record(
         state: State<'_, Arc<AppState>>,
-        workspace_id: String,
-        session_id: String,
-        created_at_ms: u64,
-        spec: apogee_core::request::RequestSpec,
-        response: ResponseSummary,
-        debug_case_id: Option<String>,
-        environment_id: Option<String>,
+        input: HistoryRecordInput,
     ) -> Result<(), String> {
-        let body = state
-            .spool
-            .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .path_for(response.id);
+        let HistoryRecordInput {
+            workspace_id,
+            session_id,
+            created_at_ms,
+            spec,
+            response,
+            debug_case_id,
+            environment_id,
+        } = input;
         let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
         let debug_case_id = debug_case_id.as_deref().map(parse_id).transpose()?;
         let environment_id = environment_id.as_deref().map(parse_id).transpose()?;
         state
-            .with_workspace(workspace_id, session_id, |repository| {
-                repository.record_history(
-                    created_at_ms,
-                    spec,
-                    response,
-                    &body,
-                    debug_case_id,
-                    environment_id,
-                )
-            })
+            .with_workspace_and_response(
+                workspace_id,
+                session_id,
+                response.id,
+                |repository, runtime| {
+                    let body = runtime.spool().path_for(response.id);
+                    repository.record_history(
+                        created_at_ms,
+                        spec,
+                        response,
+                        &body,
+                        debug_case_id,
+                        environment_id,
+                    )
+                },
+            )
             .map_err(|error| error.to_string())
     }
 
@@ -909,22 +1055,25 @@ mod commands {
     #[tauri::command]
     pub fn history_record_error(
         state: State<'_, Arc<AppState>>,
-        workspace_id: String,
-        session_id: String,
-        created_at_ms: u64,
-        spec: apogee_core::request::RequestSpec,
-        error: HistoryError,
-        actual_request: Option<apogee_core::model::ActualRequest>,
-        duration_ms: f64,
-        debug_case_id: Option<String>,
-        environment_id: Option<String>,
+        input: HistoryRecordErrorInput,
     ) -> Result<(), String> {
+        let HistoryRecordErrorInput {
+            workspace_id,
+            session_id,
+            created_at_ms,
+            spec,
+            error,
+            actual_request,
+            duration_ms,
+            debug_case_id,
+            environment_id,
+        } = input;
         let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
         let debug_case_id = debug_case_id.as_deref().map(parse_id).transpose()?;
         let environment_id = environment_id.as_deref().map(parse_id).transpose()?;
         state
             .with_workspace(workspace_id, session_id, |repository| {
-                repository.record_failed_history(
+                repository.record_failed_history(crate::workspace::FailedHistoryWriteInput {
                     created_at_ms,
                     spec,
                     error,
@@ -932,7 +1081,7 @@ mod commands {
                     duration_ms,
                     debug_case_id,
                     environment_id,
-                )
+                })
             })
             .map_err(|error| error.to_string())
     }
@@ -960,19 +1109,9 @@ mod commands {
     ) -> Result<HistoryRecord, String> {
         let id = parse_id(&history_id)?;
         let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
-        let (mut record, body) = state
-            .with_workspace(workspace_id, session_id, |repository| {
-                repository.read_history(id)
-            })
-            .map_err(|error| error.to_string())?;
-        if let (Some(response), Some(body)) = (record.response.take(), body) {
-            record.response = Some(
-                state
-                    .restore_history_response(response, &body)
-                    .map_err(|error| error.to_string())?,
-            );
-        }
-        Ok(record)
+        state
+            .read_history(workspace_id, session_id, id)
+            .map_err(|error| error.to_string())
     }
 
     #[tauri::command]

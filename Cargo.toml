@@ -25,8 +25,9 @@ base64 = "0.22"
 curl-parser = { version = "0.6", default-features = false, features = ["uri"] }
 url = "2.5"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util", "time", "sync"] }
-# 仅用于 `FutureExt::catch_unwind`,把 spawned task 的 panic 转成 `request:error`
-# 事件而非 abort 整进程(`panic = "abort"` 下)。Release 不引入异步运行时,体积增量可忽略。
+# 仅在支持 unwind 的开发/测试构建中，用 `FutureExt::catch_unwind` 将 spawned task 的
+# 未预期 panic 转成诊断性 `request:error`。release 使用 `panic = "abort"`，不能从
+# panic 恢复，也不得把该依赖视为 release 可靠性机制。Release 不引入异步运行时，体积增量可忽略。
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 fontdb = "0.23"
 uuid = { version = "1", features = ["v4", "serde"] }

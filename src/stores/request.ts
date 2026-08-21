@@ -8,6 +8,8 @@ import {
   type AppError,
   type DoneEvent,
   type ErrorEvent,
+  type CancelledEvent,
+  type WorkspaceSession,
 } from '@/ipc'
 import { useTabsStore } from '@/stores/tabs'
 import { useWorkspaceStore } from '@/stores/workspace'
@@ -41,7 +43,18 @@ import { ref, onMounted, onUnmounted } from 'vue'
 type Settlement =
   | { kind: 'done'; event: DoneEvent }
   | { kind: 'error'; event: ErrorEvent }
-  | { kind: 'cancelled' }
+  | { kind: 'cancelled'; event: CancelledEvent }
+
+function eventSession(settlement: Settlement): WorkspaceSession {
+  return {
+    workspaceId: settlement.event.workspaceId,
+    sessionId: settlement.event.sessionId,
+  }
+}
+
+function sameSession(left: WorkspaceSession, right: WorkspaceSession): boolean {
+  return left.workspaceId === right.workspaceId && left.sessionId === right.sessionId
+}
 
 /**
  * 早到/迟到事件的缓存条数上限。
@@ -56,9 +69,28 @@ export function useRequest() {
   const workspace = useWorkspaceStore()
   const sending = ref(false)
   /** 当前在飞的请求：句柄 id → 它属于哪个标签。 */
-  const active = ref<{ handle: string; tabId: string; spec: RequestSpec; startedAt: number } | null>(null)
+  const active = ref<{
+    handle: string
+    tabId: string
+    session: WorkspaceSession
+    spec: RequestSpec
+    startedAt: number
+    debugCaseId?: string
+    environmentId?: string
+  } | null>(null)
   /** 还没找到主人的终结事件，按句柄 id 存。见文件头注释的竞态 2。 */
   const orphans = new Map<string, Settlement>()
+
+  function currentSession(): WorkspaceSession | null {
+    const workspaceId = workspace.workspaceId
+    const sessionId = workspace.sessionId
+    return workspaceId && sessionId ? { workspaceId, sessionId } : null
+  }
+
+  function isCurrentSession(session: WorkspaceSession): boolean {
+    const current = currentSession()
+    return current !== null && sameSession(current, session)
+  }
 
   let unlisten: (() => void) | undefined
   /** 兜底超时句柄：防止后端任务崩溃/丢失事件导致按钮永远卡在「等待中」。 */
@@ -85,7 +117,15 @@ export function useRequest() {
   }
 
   /** 把一个终结状态落到 UI 上，并复位发送状态。 */
-  function apply(tabId: string, settlement: Settlement, spec?: RequestSpec, startedAt?: number) {
+  function apply(
+    tabId: string,
+    settlement: Settlement,
+    session: WorkspaceSession,
+    spec?: RequestSpec,
+    startedAt?: number,
+    debugCaseId?: string,
+    environmentId?: string,
+  ) {
     if (settlement.kind === 'done') {
       tabs.patch(tabId, {
         response: settlement.event.response,
@@ -94,16 +134,41 @@ export function useRequest() {
         dirty: false,
       })
       if (inTauri && spec) {
-        void ipc.historyRecord(startedAt ?? Date.now(), spec, settlement.event.response)
+        void ipc.historyRecord(
+          startedAt ?? Date.now(),
+          spec,
+          settlement.event.response,
+          debugCaseId,
+          environmentId,
+          session,
+        )
           .catch((error) => console.error('[history] 保存请求历史失败', error))
       }
     } else if (settlement.kind === 'error') {
       // 网络失败也保留后端在发送前构造的最终请求，供 ResponsePanel 显示。
+      const errorEvent = settlement.event
       tabs.patch(tabId, {
         response: null,
-        error: settlement.event.error,
-        actualRequest: settlement.event.actualRequest ?? null,
+        error: errorEvent.error,
+        actualRequest: errorEvent.actualRequest ?? null,
       })
+      // 错误运行同样是调试用例的结果。它没有响应体，因此写入专门的失败历史记录，
+      // 保留错误、实际请求和耗时，而不是伪造一个空 ResponseSummary。
+      if (inTauri && spec) {
+        const completedAt = Date.now()
+        const createdAtMs = startedAt ?? completedAt
+        void ipc.historyRecordError(
+          createdAtMs,
+          spec,
+          errorEvent.error,
+          errorEvent.actualRequest ?? null,
+          Math.max(0, completedAt - createdAtMs),
+          debugCaseId,
+          environmentId,
+          session,
+        )
+          .catch((error) => console.error('[history] 保存失败请求历史失败', error))
+      }
     }
     sending.value = false
     active.value = null
@@ -117,9 +182,22 @@ export function useRequest() {
    * 旧请求的迟到事件。两者都**不能**碰当前的 `sending`。
    */
   function settle(id: string, settlement: Settlement) {
+    const session = eventSession(settlement)
+    // Tauri 事件可能在 Rust 已切换 workspace 后才送达 WebView。只要事件的
+    // originating session 不再是当前 session，就既不写 UI，也不缓存为 orphan。
+    if (!isCurrentSession(session)) return
+
     const current = active.value
-    if (current && current.handle === id) {
-      apply(current.tabId, settlement, current.spec, current.startedAt)
+    if (current && current.handle === id && sameSession(current.session, session)) {
+      apply(
+        current.tabId,
+        settlement,
+        session,
+        current.spec,
+        current.startedAt,
+        current.debugCaseId,
+        current.environmentId,
+      )
       return
     }
     if (orphans.size >= MAX_ORPHANS) {
@@ -133,7 +211,7 @@ export function useRequest() {
     unlisten = onRequestEvents({
       onDone: (event) => settle(event.response.id, { kind: 'done', event }),
       onError: (event) => settle(event.id, { kind: 'error', event }),
-      onCancelled: (event) => settle(event.id, { kind: 'cancelled' }),
+      onCancelled: (event) => settle(event.id, { kind: 'cancelled', event }),
     })
   })
 
@@ -174,6 +252,9 @@ export function useRequest() {
       settings: tab.settings,
     }
     const startedAt = Date.now()
+    // 将运行关联和环境在发送前固定下来。发送期间切换环境不能改写本次用例结果归属。
+    const debugCaseId = tab.debugCaseId
+    const environmentId = workspace.activeEnvironmentId ?? undefined
 
     // 新请求开始后清除上一次错误和快照；旧响应先保留，直到新请求成功或失败。
     tabs.patch(tab.id, { error: null, actualRequest: null })
@@ -196,19 +277,46 @@ export function useRequest() {
         return
       }
 
+      const requestSession = currentSession()
+      if (!requestSession) {
+        // 工作区在保存环境期间已关闭或切换；不能再让默认 sessionArgs() 误把这次
+        // 发送绑定到新 workspace。
+        sending.value = false
+        active.value = null
+        clearPendingTimeout()
+        return
+      }
+
       const ctx: ExecContext = {
         tabId: tab.id,
-        environmentId: workspace.activeEnvironmentId ?? undefined,
-        requestNodeId: tab.nodeId,
+        environmentId,
+        // 用例标签不具备可写 nodeId，仍需其来源请求来解析集合/文件夹继承。
+        requestNodeId: tab.nodeId ?? tab.sourceRequestId,
       }
-      const handle = await ipc.sendRequest(spec, ctx)
+      const handle = await ipc.sendRequest(spec, ctx, requestSession)
       const early = orphans.get(handle.id)
-      if (early) {
+      if (!isCurrentSession(requestSession)) {
+        // RPC 句柄可能在工作区切换后才回到前端；它及其早到事件不属于新 UI。
+        orphans.delete(handle.id)
+        sending.value = false
+        active.value = null
+        clearPendingTimeout()
+      } else if (early && sameSession(eventSession(early), requestSession)) {
         // 事件跑在句柄前面了，在这里补做。
         orphans.delete(handle.id)
-        apply(tab.id, early, spec, startedAt)
+        apply(tab.id, early, requestSession, spec, startedAt, debugCaseId, environmentId)
       } else {
-        active.value = { handle: handle.id, tabId: tab.id, spec, startedAt }
+        // 即便 UUID 理论上不会复用，也不能把不同 session 的 orphan 留给本次请求。
+        orphans.delete(handle.id)
+        active.value = {
+          handle: handle.id,
+          tabId: tab.id,
+          session: requestSession,
+          spec,
+          startedAt,
+          debugCaseId,
+          environmentId,
+        }
       }
     } catch (error) {
       // invoke 本身失败（命令注册问题等）也进入同一套错误展示。

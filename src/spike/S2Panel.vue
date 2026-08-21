@@ -127,8 +127,8 @@ export interface ProtoProbe {
  * 量测台只能看到「超时」，拿不到根因。诊断信息要在最靠近失败点的地方取。
  */
 async function probeProtocol(responseId: string): Promise<ProtoProbe> {
-  const { responseUrl } = await import('@/ipc')
-  const url = responseUrl(responseId)
+  const { spikeResponseUrl } = await import('@/ipc')
+  const url = spikeResponseUrl(responseId)
   try {
     const res = await fetch(url, { headers: { Range: 'bytes=0-1023' } })
     const buf = await res.arrayBuffer()
@@ -170,14 +170,14 @@ async function measureFullFetch(
   id: string,
   totalBytes: number,
 ): Promise<{ ms: number; bytes: number; chars: number }> {
-  const { fetchResponseRange } = await import('@/ipc')
+  const { fetchSpikeResponseRange } = await import('@/ipc')
   const STEP = 4 * 1024 * 1024
   const t = performance.now()
   let off = 0
   let bytes = 0
   const parts: string[] = []
   while (off < totalBytes) {
-    const chunk = await fetchResponseRange(id, off, STEP)
+    const chunk = await fetchSpikeResponseRange(id, off, STEP)
     if (chunk.bytes === 0) break
     parts.push(chunk.text)
     bytes += chunk.bytes
@@ -271,7 +271,7 @@ async function runAll() {
         stage.value = `${s.label}：Rust 侧建 JSON 索引`
         try {
           const t = performance.now()
-          const indexed = await ipc.indexResponse(meta.id)
+          const indexed = await ipc.spikeIndexResponse(meta.id)
           row.indexMs = performance.now() - t
           row.totalNodes = indexed.totalNodes ?? null
           row.indexBytes = indexed.indexBytes ?? null
@@ -280,7 +280,7 @@ async function runAll() {
             : row.indexBytes / meta.sizeBytes
 
           const t2 = performance.now()
-          await ipc.getResponseTree(meta.id, '', 0, 200)
+          await ipc.spikeGetResponseTree(meta.id, '', 0, 200)
           row.treePageMs = performance.now() - t2
 
           const memAfter = await ipc.processMemory().catch(() => null)
@@ -430,6 +430,7 @@ defineExpose({ runAll })
         :response-id="probe.id"
         :total-bytes="probe.bytes"
         :highlight="probe.highlight"
+        :response-scope="'spike'"
         :first-chunk-bytes="FIRST_CHUNK"
         @metrics="onMetrics"
         @failed="onFailed"

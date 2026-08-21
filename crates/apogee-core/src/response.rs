@@ -94,6 +94,38 @@ impl Spool {
         Ok(written)
     }
 
+    /// 将一个已有响应体文件原子导入 spool。
+    ///
+    /// history 恢复不能直接复制到最终路径：读取方可能在发布前看见半截 body。
+    /// 与 [`Self::write_stream`] 一样，先写 `.part`，成功后才通过 rename 发布；
+    /// 临时名每次唯一，允许相同 history response 被并发恢复。先完成发布的调用决定
+    /// body，另一个调用检测到最终文件后复用它；复制失败时尽力清理自己的临时文件。
+    pub fn copy_from(&self, id: Uuid, source: impl AsRef<std::path::Path>) -> std::io::Result<u64> {
+        let path = self.path_for(id);
+        let tmp = path.with_extension(format!("{}.part", Uuid::new_v4()));
+        let result = (|| {
+            let mut input = File::open(source)?;
+            let mut output = File::create(&tmp)?;
+            let written = std::io::copy(&mut input, &mut output)?;
+            output.flush()?;
+            drop(output);
+            match fs::rename(&tmp, &path) {
+                Ok(()) => Ok(written),
+                // Windows 不允许用 rename 覆盖已存在文件；这仅可能是同一 response 的
+                // 另一条恢复路径已经原子发布，直接复用其完整 body。
+                Err(_) if path.exists() => {
+                    let _ = fs::remove_file(&tmp);
+                    Ok(File::open(&path)?.metadata()?.len())
+                }
+                Err(error) => Err(error),
+            }
+        })();
+        if result.is_err() {
+            let _ = fs::remove_file(&tmp);
+        }
+        result
+    }
+
     /// 增量写入句柄，供 async 场景逐块落盘。
     ///
     /// 为什么不能用 `write_stream`：它的签名是 `IntoIterator`，而 reqwest 的响应流
@@ -1242,6 +1274,14 @@ impl ResponseStore {
         cache.order.retain(|cached| *cached != id);
     }
 
+    /// 工作区 runtime 切换时释放全部索引，避免旧 response id 被新 session 复用。
+    pub fn clear(&self) {
+        let mut cache = self.lock_inner();
+        cache.entries.clear();
+        cache.order.clear();
+        cache.total_bytes = 0;
+    }
+
     pub fn indexed_count(&self) -> usize {
         self.lock_inner().entries.len()
     }
@@ -1322,6 +1362,42 @@ mod tests {
         assert!(spool.read_range(id, 999, 4).unwrap().is_empty());
         assert_eq!(spool.read_range(id, 12, 100).unwrap(), b"cdef");
         spool.remove(id).unwrap();
+    }
+
+    #[test]
+    fn concurrent_copy_from_same_response_id_is_atomic() {
+        use std::sync::{Arc, Barrier};
+        use std::thread;
+
+        let root = tmp_root("concurrent-copy");
+        std::fs::create_dir_all(&root).unwrap();
+        let spool = Spool::new(root.join("spool")).unwrap();
+        let id = Uuid::new_v4();
+        let payload = vec![b'x'; 2 * 1024 * 1024];
+        let source = root.join("history.body");
+        std::fs::write(&source, &payload).unwrap();
+        let start = Arc::new(Barrier::new(2));
+
+        let first_spool = spool.clone();
+        let first_source = source.clone();
+        let first_start = Arc::clone(&start);
+        let first = thread::spawn(move || {
+            first_start.wait();
+            first_spool.copy_from(id, first_source)
+        });
+        let second_spool = spool.clone();
+        let second_source = source.clone();
+        let second_start = Arc::clone(&start);
+        let second = thread::spawn(move || {
+            second_start.wait();
+            second_spool.copy_from(id, second_source)
+        });
+
+        assert_eq!(first.join().unwrap().unwrap(), payload.len() as u64);
+        assert_eq!(second.join().unwrap().unwrap(), payload.len() as u64);
+        assert_eq!(std::fs::read(spool.path_for(id)).unwrap(), payload);
+
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

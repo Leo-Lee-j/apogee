@@ -111,6 +111,21 @@ pub struct HistoryRecord {
     pub duration_ms: f64,
 }
 
+/// 将未收到 HTTP 响应的运行写入历史所需的领域输入。
+///
+/// 它与持久化后的 [`HistoryRecord`] 分离：仓储负责生成记录 id 并固定失败记录
+/// 没有响应体的约束，调用方只提供本次运行的结果。
+#[derive(Debug)]
+pub struct FailedHistoryWriteInput {
+    pub created_at_ms: u64,
+    pub spec: RequestSpec,
+    pub error: HistoryError,
+    pub actual_request: Option<ActualRequest>,
+    pub duration_ms: f64,
+    pub debug_case_id: Option<Uuid>,
+    pub environment_id: Option<Uuid>,
+}
+
 pub struct WorkspaceRepository {
     root: PathBuf,
     runtime_root: Option<PathBuf>,
@@ -386,16 +401,16 @@ impl WorkspaceRepository {
     }
 
     /// 记录未收到 HTTP 响应的运行；只持久化可显示的错误和最终请求，不创建 body 文件。
-    pub fn record_failed_history(
-        &self,
-        created_at_ms: u64,
-        spec: RequestSpec,
-        error: HistoryError,
-        actual_request: Option<ActualRequest>,
-        duration_ms: f64,
-        debug_case_id: Option<Uuid>,
-        environment_id: Option<Uuid>,
-    ) -> Result<()> {
+    pub fn record_failed_history(&self, input: FailedHistoryWriteInput) -> Result<()> {
+        let FailedHistoryWriteInput {
+            created_at_ms,
+            spec,
+            error,
+            actual_request,
+            duration_ms,
+            debug_case_id,
+            environment_id,
+        } = input;
         let id = Uuid::new_v4();
         let directory = self.history_directory();
         fs::create_dir_all(&directory)?;
@@ -1418,8 +1433,17 @@ fn write_yaml<T: Serialize>(path: &Path, value: &T) -> Result<()> {
 }
 
 /// 先写同目录临时文件，再替换目标文件，避免崩溃留下半个 YAML。
-/// Windows 不能直接 rename 覆盖已有文件，因此仅在替换阶段先移除旧文件。
+/// Windows 使用系统替换原语发布，失败时保留旧文件而不先删除目标。
 fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
+    atomic_write_with_replace(path, bytes, crate::app_settings::atomic_replace)
+}
+
+/// 为可控故障测试保留发布边界；生产路径始终传入平台原子替换实现。
+fn atomic_write_with_replace(
+    path: &Path,
+    bytes: &[u8],
+    replace: impl FnOnce(&Path, &Path) -> Result<()>,
+) -> Result<()> {
     let parent = path
         .parent()
         .with_context(|| format!("目标文件没有父目录：{}", path.display()))?;
@@ -1429,18 +1453,33 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
         .and_then(|name| name.to_str())
         .unwrap_or("workspace.yaml");
     let temporary = parent.join(format!(".{file_name}.{}.tmp", Uuid::new_v4()));
-    fs::write(&temporary, bytes)?;
 
-    match fs::rename(&temporary, path) {
-        Ok(()) => Ok(()),
-        Err(_rename_error) if path.exists() => {
-            fs::remove_file(path).with_context(|| format!("替换旧文件失败：{}", path.display()))?;
-            fs::rename(&temporary, path)
-                .with_context(|| format!("发布临时文件失败：{}", path.display()))?;
-            Ok(())
-        }
-        Err(rename_error) => Err(rename_error.into()),
+    if let Err(error) = fs::write(&temporary, bytes) {
+        return cleanup_temporary_after_failure(&temporary, error.into(), "写入 YAML 临时文件失败");
     }
+    if let Err(error) = replace(&temporary, path) {
+        return cleanup_temporary_after_failure(&temporary, error, "发布 YAML 临时文件失败");
+    }
+
+    Ok(())
+}
+
+fn cleanup_temporary_after_failure(
+    temporary: &Path,
+    error: anyhow::Error,
+    action: &str,
+) -> Result<()> {
+    match fs::remove_file(temporary) {
+        Ok(()) => {}
+        Err(cleanup_error) if cleanup_error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(cleanup_error) => {
+            return Err(error.context(format!(
+                "{action}，且无法清理临时文件 {}：{cleanup_error}",
+                temporary.display()
+            )));
+        }
+    }
+    Err(error.context(format!("{action}：{}", temporary.display())))
 }
 
 #[cfg(test)]
@@ -1458,6 +1497,31 @@ mod tests {
         fs::create_dir_all(&root).unwrap();
         assert!(WorkspaceRepository::open(&root).is_err());
         assert!(!root.join("apogee.yaml").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn failed_history_yaml_publish_preserves_existing_record_and_cleans_temporary_file() {
+        let root =
+            std::env::temp_dir().join(format!("apogee-history-write-test-{}", Uuid::new_v4()));
+        let history = root.join(HISTORY_DIR);
+        fs::create_dir_all(&history).unwrap();
+        let target = history.join("record.yaml");
+        let previous = b"history: previous\n";
+        fs::write(&target, previous).unwrap();
+
+        let error = atomic_write_with_replace(&target, b"history: replacement\n", |_, _| {
+            anyhow::bail!("injected history publish failure")
+        })
+        .unwrap_err();
+
+        assert!(format!("{error:#}").contains("injected history publish failure"));
+        assert_eq!(fs::read(&target).unwrap(), previous);
+        assert!(fs::read_dir(&history).unwrap().all(|entry| !entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .ends_with(".tmp")));
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -1528,6 +1592,54 @@ mod tests {
 
         repository.clear_history().unwrap();
         assert!(repository.list_history().unwrap().is_empty());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn failed_history_round_trip_preserves_error_without_body() {
+        let root =
+            std::env::temp_dir().join(format!("apogee-failed-history-test-{}", Uuid::new_v4()));
+        let repository = WorkspaceRepository::create(&root, "测试工作区".into()).unwrap();
+
+        repository
+            .record_failed_history(FailedHistoryWriteInput {
+                created_at_ms: 1234,
+                spec: default_request_spec(),
+                error: HistoryError {
+                    code: Some("CONNECT_FAILED".into()),
+                    kind: "connect".into(),
+                    message: "无法连接到服务器".into(),
+                    detail: Some("connection refused".into()),
+                    hints: vec![HistoryHint {
+                        label: "确认服务正在运行后重试".into(),
+                        action: Some("retry".into()),
+                    }],
+                },
+                actual_request: None,
+                duration_ms: 42.5,
+                debug_case_id: None,
+                environment_id: None,
+            })
+            .unwrap();
+
+        let listed = repository.list_history().unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].status, None);
+        assert!((listed[0].duration_ms - 42.5).abs() < f64::EPSILON);
+
+        let (record, body) = repository.read_history(listed[0].id).unwrap();
+        assert_eq!(record.created_at_ms, 1234);
+        assert!(record.response.is_none());
+        assert!(record.actual_request.is_none());
+        assert!(body.is_none());
+        let error = record.error.expect("失败历史必须保留错误");
+        assert_eq!(error.code.as_deref(), Some("CONNECT_FAILED"));
+        assert_eq!(error.kind, "connect");
+        assert_eq!(error.message, "无法连接到服务器");
+        assert_eq!(error.detail.as_deref(), Some("connection refused"));
+        assert_eq!(error.hints.len(), 1);
+        assert_eq!(error.hints[0].action.as_deref(), Some("retry"));
+
         fs::remove_dir_all(root).unwrap();
     }
 

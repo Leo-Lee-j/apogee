@@ -23,6 +23,15 @@ use uuid::Uuid;
 /// 单次响应的上限，与 apogee_core::response::MAX_RANGE_BYTES 对齐。
 const MAX_CHUNK: u64 = 4 * 1024 * 1024;
 
+#[derive(Clone, Copy)]
+enum ProtocolResponseAccess {
+    Workspace {
+        workspace_id: Uuid,
+        session_id: Uuid,
+    },
+    Synthetic,
+}
+
 pub fn handle(state: &AppState, request: &Request<Vec<u8>>) -> Response<Vec<u8>> {
     let path = request.uri().path().to_string();
 
@@ -33,15 +42,14 @@ pub fn handle(state: &AppState, request: &Request<Vec<u8>>) -> Response<Vec<u8>>
     let Ok(id) = Uuid::parse_str(id_str) else {
         return err(StatusCode::BAD_REQUEST, "非法的响应 id");
     };
+    let access = match parse_response_access(request) {
+        Ok(access) => access,
+        Err(message) => return err(StatusCode::FORBIDDEN, message),
+    };
 
-    let spool = state
-        .spool
-        .read()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .clone();
-    let total = match spool.size_of(id) {
+    let total = match response_size(state, access, id) {
         Ok(n) => n,
-        Err(_) => return err(StatusCode::NOT_FOUND, "响应体不存在或已被缓存淘汰"),
+        Err(_) => return err(StatusCode::NOT_FOUND, "响应已过期或不存在"),
     };
 
     let range = request
@@ -53,9 +61,9 @@ pub fn handle(state: &AppState, request: &Request<Vec<u8>>) -> Response<Vec<u8>>
     match range {
         Some((start, end)) => {
             let len = (end - start + 1).min(MAX_CHUNK);
-            match spool.read_range(id, start, len) {
+            match response_range(state, access, id, start, len) {
                 Ok(buf) => {
-                    let real_end = start + buf.len() as u64 - 1;
+                    let real_end = start + buf.len().saturating_sub(1) as u64;
                     Response::builder()
                         .status(StatusCode::PARTIAL_CONTENT)
                         .header(header::CONTENT_TYPE, "application/json; charset=utf-8")
@@ -75,7 +83,7 @@ pub fn handle(state: &AppState, request: &Request<Vec<u8>>) -> Response<Vec<u8>>
                         .body(buf)
                         .unwrap_or_else(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "构造响应失败"))
                 }
-                Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, &format!("读取失败：{e}")),
+                Err(_) => err(StatusCode::NOT_FOUND, "响应已过期或不存在"),
             }
         }
         None => {
@@ -84,7 +92,7 @@ pub fn handle(state: &AppState, request: &Request<Vec<u8>>) -> Response<Vec<u8>>
             // 产品代码里不应该走到这里。所以加了硬上限，防止误用把 100MB
             // 一次性塞进 WebView。
             let len = total.min(MAX_CHUNK);
-            match spool.read_range(id, 0, len) {
+            match response_range(state, access, id, 0, len) {
                 Ok(buf) => {
                     let truncated = total > len;
                     let mut b = Response::builder()
@@ -108,8 +116,74 @@ pub fn handle(state: &AppState, request: &Request<Vec<u8>>) -> Response<Vec<u8>>
                     b.body(buf)
                         .unwrap_or_else(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "构造响应失败"))
                 }
-                Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, &format!("读取失败：{e}")),
+                Err(_) => err(StatusCode::NOT_FOUND, "响应已过期或不存在"),
             }
+        }
+    }
+}
+
+fn parse_response_access(
+    request: &Request<Vec<u8>>,
+) -> Result<ProtocolResponseAccess, &'static str> {
+    let mut workspace_id = None;
+    let mut session_id = None;
+    let mut scope = None;
+    for pair in request.uri().query().unwrap_or_default().split('&') {
+        let Some((key, value)) = pair.split_once('=') else {
+            continue;
+        };
+        match key {
+            "workspaceId" => workspace_id = Some(value),
+            "sessionId" => session_id = Some(value),
+            "scope" => scope = Some(value),
+            _ => {}
+        }
+    }
+
+    match (workspace_id, session_id, scope) {
+        (Some(workspace_id), Some(session_id), None) => {
+            let workspace_id =
+                Uuid::parse_str(workspace_id).map_err(|_| "响应 URL 的 workspaceId 非法")?;
+            let session_id =
+                Uuid::parse_str(session_id).map_err(|_| "响应 URL 的 sessionId 非法")?;
+            Ok(ProtocolResponseAccess::Workspace {
+                workspace_id,
+                session_id,
+            })
+        }
+        (None, None, Some("spike")) => Ok(ProtocolResponseAccess::Synthetic),
+        _ => Err("响应 URL 缺少有效 session"),
+    }
+}
+
+fn response_size(
+    state: &AppState,
+    access: ProtocolResponseAccess,
+    response_id: Uuid,
+) -> anyhow::Result<u64> {
+    match access {
+        ProtocolResponseAccess::Workspace {
+            workspace_id,
+            session_id,
+        } => state.response_size(workspace_id, session_id, response_id),
+        ProtocolResponseAccess::Synthetic => state.synthetic_response_size(response_id),
+    }
+}
+
+fn response_range(
+    state: &AppState,
+    access: ProtocolResponseAccess,
+    response_id: Uuid,
+    start: u64,
+    len: u64,
+) -> anyhow::Result<Vec<u8>> {
+    match access {
+        ProtocolResponseAccess::Workspace {
+            workspace_id,
+            session_id,
+        } => state.response_range(workspace_id, session_id, response_id, start, len),
+        ProtocolResponseAccess::Synthetic => {
+            state.synthetic_response_range(response_id, start, len)
         }
     }
 }

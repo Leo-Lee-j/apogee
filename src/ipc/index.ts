@@ -309,15 +309,25 @@ async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> 
   }
 }
 
-let workspaceSession: { workspaceId: string; sessionId: string } | null = null
+export interface WorkspaceSession {
+  workspaceId: string
+  sessionId: string
+}
 
-function sessionArgs() {
+let workspaceSession: WorkspaceSession | null = null
+
+function sessionArgs(): WorkspaceSession {
   if (!workspaceSession) throw new Error('当前没有打开的工作区')
   return workspaceSession
 }
 
-export function setWorkspaceSession(session: { workspaceId: string; sessionId: string } | null) {
-  workspaceSession = session
+export function setWorkspaceSession(session: WorkspaceSession | null) {
+  // `workspaceOpen` 返回的对象还带 descriptor/snapshot；只保留授权边界需要的两项，
+  // 避免以后把整个打开结果意外透传给每个 command。
+  workspaceSession = session && {
+    workspaceId: session.workspaceId,
+    sessionId: session.sessionId,
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -375,7 +385,7 @@ export const ipc = {
 
   /** 取响应摘要。**不含 body。** */
   getResponseMeta(responseId: string): Promise<ResponseSummary> {
-    return call('get_response_meta', { responseId })
+    return call('get_response_meta', { ...sessionArgs(), responseId })
   },
 
   /** 按路径取一页树节点。path 为空字符串表示根。 */
@@ -385,12 +395,26 @@ export const ipc = {
     offset: number,
     limit: number,
   ): Promise<TreeNode[]> {
-    return call('get_response_tree', { responseId, path, offset, limit })
+    return call('get_response_tree', { ...sessionArgs(), responseId, path, offset, limit })
   },
 
   /** 让 Rust 侧解析 JSON 并建索引。大 body 下这一步是显式的、可跳过的。 */
   indexResponse(responseId: string): Promise<ResponseSummary> {
-    return call('index_response', { responseId })
+    return call('index_response', { ...sessionArgs(), responseId })
+  },
+
+  /** Spike 只访问 Rust 标记为 Synthetic 的响应，不携带普通 workspace response scope。 */
+  spikeIndexResponse(responseId: string): Promise<ResponseSummary> {
+    return call('spike_index_response', { responseId })
+  },
+
+  spikeGetResponseTree(
+    responseId: string,
+    path: string,
+    offset: number,
+    limit: number,
+  ): Promise<TreeNode[]> {
+    return call('spike_get_response_tree', { responseId, path, offset, limit })
   },
 
   /** 当前进程内存。供「性能自检」面板与性能基准使用（PRD §5.2）。 */
@@ -447,7 +471,7 @@ export const ipc = {
 
   async workspaceClose(): Promise<void> {
     const session = sessionArgs()
-    await call('workspace_close', session)
+    await call('workspace_close', { ...session })
     setWorkspaceSession(null)
   },
 
@@ -465,7 +489,7 @@ export const ipc = {
 
   /** 读取 Rust 侧已经扁平化的集合树。 */
   workspaceLoad(): Promise<WorkspaceSnapshot> {
-    return call('workspace_load', sessionArgs())
+    return call('workspace_load', { ...sessionArgs() })
   },
 
   workspaceCreateEnvironment(name: string): Promise<Environment> {
@@ -539,8 +563,12 @@ export const ipc = {
   // ── 请求执行（03 文档 §3.2 / §4.5）─────────────────────────────────
 
   /** 发送一个 HTTP 请求。立即返回 ExecHandle，不等网络。 */
-  sendRequest(spec: RequestSpec, ctx?: ExecContext): Promise<ExecHandle> {
-    return call('send_request', { ...sessionArgs(), spec, ctx })
+  sendRequest(
+    spec: RequestSpec,
+    ctx?: ExecContext,
+    session: WorkspaceSession = sessionArgs(),
+  ): Promise<ExecHandle> {
+    return call('send_request', { ...session, spec, ctx })
   },
 
   /** 取消一个正在执行的请求。返回 false 表示请求已结束或不存在。 */
@@ -554,14 +582,17 @@ export const ipc = {
     response: ResponseSummary,
     debugCaseId?: string,
     environmentId?: string,
+    session: WorkspaceSession = sessionArgs(),
   ): Promise<void> {
     return call('history_record', {
-      ...sessionArgs(),
-      createdAtMs,
-      spec,
-      response,
-      debugCaseId,
-      environmentId,
+      input: {
+        ...session,
+        createdAtMs,
+        spec,
+        response,
+        debugCaseId,
+        environmentId,
+      },
     })
   },
 
@@ -574,21 +605,24 @@ export const ipc = {
     durationMs: number,
     debugCaseId?: string,
     environmentId?: string,
+    session: WorkspaceSession = sessionArgs(),
   ): Promise<void> {
     return call('history_record_error', {
-      ...sessionArgs(),
-      createdAtMs,
-      spec,
-      error,
-      actualRequest,
-      durationMs,
-      debugCaseId,
-      environmentId,
+      input: {
+        ...session,
+        createdAtMs,
+        spec,
+        error,
+        actualRequest,
+        durationMs,
+        debugCaseId,
+        environmentId,
+      },
     })
   },
 
   historyList(): Promise<HistoryEntry[]> {
-    return call('history_list', sessionArgs())
+    return call('history_list', { ...sessionArgs() })
   },
 
   historyRead(historyId: string): Promise<HistoryRecord> {
@@ -596,7 +630,7 @@ export const ipc = {
   },
 
   historyClear(): Promise<void> {
-    return call('history_clear', sessionArgs())
+    return call('history_clear', { ...sessionArgs() })
   },
 
   curlImport(command: string): Promise<{ spec: RequestSpec; warnings: string[] }> {
@@ -640,24 +674,29 @@ export const ipc = {
 
 import { listen as tauriListen } from '@tauri-apps/api/event'
 
-export interface ProgressEvent {
+export interface RequestEventScope {
+  workspaceId: string
+  sessionId: string
+}
+
+export interface ProgressEvent extends RequestEventScope {
   id: string
   received: number
   total: number | null
 }
 
-export interface DoneEvent {
+export interface DoneEvent extends RequestEventScope {
   response: ResponseSummary
 }
 
-export interface ErrorEvent {
+export interface ErrorEvent extends RequestEventScope {
   id: string
   error: AppError
   /** 请求已组装后发生网络错误时携带，用于仍然展示实际请求。 */
   actualRequest?: ActualRequest | null
 }
 
-export interface CancelledEvent {
+export interface CancelledEvent extends RequestEventScope {
   id: string
 }
 
@@ -816,11 +855,27 @@ const PROTOCOL_SCHEME = 'apogee'
  * Windows/Android 上 Tauri 的自定义协议要走 `http://<scheme>.localhost/`；
  * 其它平台是 `<scheme>://`。这里做平台差异归一。
  */
-export function responseUrl(responseId: string): string {
+function protocolResponseUrl(responseId: string, query: string): string {
   const isWindows = typeof navigator !== 'undefined' && /Windows/i.test(navigator.userAgent)
-  return isWindows
+  const base = isWindows
     ? `http://${PROTOCOL_SCHEME}.localhost/response/${responseId}`
     : `${PROTOCOL_SCHEME}://localhost/response/${responseId}`
+  return `${base}?${query}`
+}
+
+/** 普通响应 URL；有工作区时必须附带当前 workspace session。 */
+export function responseUrl(responseId: string): string {
+  // 无工作区的独立 Spike 保持现有调用方式；工作区内的 Spike 必须显式使用
+  // `spikeResponseUrl`，避免普通 response view 意外获得 Synthetic scope。
+  const query = workspaceSession
+    ? `workspaceId=${encodeURIComponent(workspaceSession.workspaceId)}&sessionId=${encodeURIComponent(workspaceSession.sessionId)}`
+    : 'scope=spike'
+  return protocolResponseUrl(responseId, query)
+}
+
+/** Spike 的显式 Synthetic scope URL；它永远不能读取普通 workspace 响应。 */
+export function spikeResponseUrl(responseId: string): string {
+  return protocolResponseUrl(responseId, 'scope=spike')
 }
 
 export interface RangeResult {
@@ -839,14 +894,14 @@ export interface RangeResult {
  * 用 fetch + Range 头，让 WebView 自己处理传输，前端只拿需要的那一段。
  * CodeMirror 的分段加载就架在这个函数上。
  */
-export async function fetchResponseRange(
-  responseId: string,
+async function fetchResponseRangeAt(
+  url: string,
   start: number,
   length: number,
 ): Promise<RangeResult> {
   const t0 = performance.now()
   const end = start + length - 1
-  const res = await fetch(responseUrl(responseId), {
+  const res = await fetch(url, {
     headers: { Range: `bytes=${start}-${end}` },
   })
   const buf = await res.arrayBuffer()
@@ -862,6 +917,23 @@ export async function fetchResponseRange(
     totalBytes,
     fetchMs,
   }
+}
+
+export function fetchResponseRange(
+  responseId: string,
+  start: number,
+  length: number,
+): Promise<RangeResult> {
+  return fetchResponseRangeAt(responseUrl(responseId), start, length)
+}
+
+/** Spike 使用显式 Synthetic scope 读取量测 body，不依赖当前 workspace session。 */
+export function fetchSpikeResponseRange(
+  responseId: string,
+  start: number,
+  length: number,
+): Promise<RangeResult> {
+  return fetchResponseRangeAt(spikeResponseUrl(responseId), start, length)
 }
 
 // ─────────────────────────────────────────────────────────────────────

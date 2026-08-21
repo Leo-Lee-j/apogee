@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, shallowRef, computed, onMounted, onBeforeUnmount, watch } from 'vue'
-import { fetchResponseRange } from '@/ipc'
+import { fetchResponseRange, fetchSpikeResponseRange } from '@/ipc'
 import { useUiStore } from '@/stores/ui'
 import type { EditorView } from '@codemirror/view'
 
@@ -30,6 +30,8 @@ const props = defineProps<{
   formatJson?: boolean
   /** 首屏拉取字节数。S2 会扫不同取值。 */
   firstChunkBytes?: number
+  /** S2 的合成响应走显式 Synthetic scope；产品响应保持 workspace session scope。 */
+  responseScope?: 'workspace' | 'spike'
 }>()
 
 type TextMode = 'raw' | 'pretty' | 'compact' | 'escaped'
@@ -89,7 +91,10 @@ async function mountEditor() {
       lightweight.value ? Promise.resolve(null) : import('@codemirror/search'),
     ])
 
-    const chunk = await fetchResponseRange(props.responseId, 0, FIRST_CHUNK())
+    const loadRange = props.responseScope === 'spike'
+      ? fetchSpikeResponseRange
+      : fetchResponseRange
+    const chunk = await loadRange(props.responseId, 0, FIRST_CHUNK())
     loadedBytes.value = chunk.bytes
     const documentText = mode.value === 'pretty'
       ? JSON.stringify(JSON.parse(chunk.text), null, 2)
