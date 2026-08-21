@@ -1,4 +1,4 @@
-use crate::app_settings::atomic_replace;
+use crate::persistence::{atomic_replace, atomic_write_with_replace};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -49,35 +49,17 @@ impl WorkspaceStateRepository {
         self.save_with_replace(workspace_id, state, atomic_replace)
     }
 
-    /// 为确定性故障测试保留发布边界；生产路径始终传入 [`atomic_replace`]。
+    /// 为确定性故障测试保留发布边界；生产路径始终通过共享 atomic write 先同步临时文件。
     fn save_with_replace(
         &self,
         workspace_id: Uuid,
         state: &WorkspaceState,
         replace: impl FnOnce(&Path, &Path) -> Result<()>,
     ) -> Result<()> {
-        fs::create_dir_all(&self.root)?;
         let target = self.path(workspace_id);
-        let temporary = self
-            .root
-            .join(format!(".{workspace_id}.{}.tmp", Uuid::new_v4()));
-        fs::write(&temporary, serde_json::to_vec_pretty(state)?)?;
-
-        if let Err(error) = replace(&temporary, &target) {
-            match fs::remove_file(&temporary) {
-                Ok(()) => {}
-                Err(cleanup_error) if cleanup_error.kind() == std::io::ErrorKind::NotFound => {}
-                Err(cleanup_error) => {
-                    return Err(error.context(format!(
-                        "发布工作区状态失败，且无法清理临时文件 {}：{cleanup_error}",
-                        temporary.display()
-                    )));
-                }
-            }
-            return Err(error.context(format!("发布工作区状态失败：{}", target.display())));
-        }
-
-        Ok(())
+        let payload = serde_json::to_vec_pretty(state)?;
+        atomic_write_with_replace(&target, &payload, replace)
+            .with_context(|| format!("发布工作区状态失败：{}", target.display()))
     }
 
     fn path(&self, workspace_id: Uuid) -> PathBuf {

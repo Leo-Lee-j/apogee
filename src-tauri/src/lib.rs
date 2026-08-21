@@ -13,6 +13,7 @@
 
 mod app_settings;
 mod mem;
+mod persistence;
 mod protocol;
 mod state;
 mod workspace;
@@ -435,41 +436,48 @@ mod commands {
         state: &State<'_, Arc<AppState>>,
         repository: WorkspaceRepository,
     ) -> Result<WorkspaceOpenResult, String> {
-        let snapshot = repository.snapshot().map_err(|error| error.to_string())?;
-        let descriptor = registry(app)?
-            .register(&repository)
-            .map_err(|error| error.to_string())?;
-        let data_dir = super::app_data_dir(app)?;
-        let mut workspace_state = crate::workspace_state::WorkspaceStateRepository::new(&data_dir)
-            .load(snapshot.id)
-            .map_err(|error| error.to_string())?;
-        if !workspace_state.active_environment_set {
-            workspace_state.active_environment_id = snapshot
-                .environments
-                .first()
-                .map(|environment| environment.id);
-        } else if workspace_state.active_environment_id.is_some_and(|id| {
-            !snapshot
-                .environments
-                .iter()
-                .any(|environment| environment.id == id)
-        }) {
-            workspace_state.active_environment_id = None;
-        }
-        let runtime_root = data_dir.join("runtime").join(snapshot.id.to_string());
-        let repository = repository
-            .with_runtime_root(&runtime_root)
-            .map_err(|error| error.to_string())?;
-        let (workspace_id, session_id) = state
-            .open_workspace(repository, &runtime_root)
-            .map_err(|error| error.to_string())?;
-        Ok(WorkspaceOpenResult {
-            descriptor,
-            workspace_id,
-            session_id,
-            snapshot,
-            state: workspace_state,
-        })
+        // 打开前的 recovery、snapshot、注册表与 runtime migration 必须是同一个
+        // open/close transition 的一部分；同根 reload 会先等待旧 mutation 完成，避免
+        // recovery 观察到 journal/staging/tombstone 的活动中间状态。
+        let root = repository.root().to_path_buf();
+        state
+            .with_workspace_open_transition(&root, |write_lock| {
+                repository.recover_pending_transactions()?;
+                let snapshot = repository.snapshot()?;
+                let descriptor = registry(app)
+                    .map_err(anyhow::Error::msg)?
+                    .register(&repository)
+                    .map_err(anyhow::Error::msg)?;
+                let data_dir = super::app_data_dir(app).map_err(anyhow::Error::msg)?;
+                let mut workspace_state =
+                    crate::workspace_state::WorkspaceStateRepository::new(&data_dir)
+                        .load(snapshot.id)?;
+                if !workspace_state.active_environment_set {
+                    workspace_state.active_environment_id = snapshot
+                        .environments
+                        .first()
+                        .map(|environment| environment.id);
+                } else if workspace_state.active_environment_id.is_some_and(|id| {
+                    !snapshot
+                        .environments
+                        .iter()
+                        .any(|environment| environment.id == id)
+                }) {
+                    workspace_state.active_environment_id = None;
+                }
+                let runtime_root = data_dir.join("runtime").join(snapshot.id.to_string());
+                let repository = repository.with_runtime_root(&runtime_root)?;
+                let (workspace_id, session_id) =
+                    state.open_workspace_with_write_lock(repository, &runtime_root, write_lock)?;
+                Ok(WorkspaceOpenResult {
+                    descriptor,
+                    workspace_id,
+                    session_id,
+                    snapshot,
+                    state: workspace_state,
+                })
+            })
+            .map_err(|error| error.to_string())
     }
 
     fn registry(app: &tauri::AppHandle) -> Result<WorkspaceRegistry, String> {
@@ -1031,7 +1039,7 @@ mod commands {
         let debug_case_id = debug_case_id.as_deref().map(parse_id).transpose()?;
         let environment_id = environment_id.as_deref().map(parse_id).transpose()?;
         state
-            .with_workspace_and_response(
+            .with_workspace_and_response_mutation(
                 workspace_id,
                 session_id,
                 response.id,
@@ -1071,7 +1079,7 @@ mod commands {
         let debug_case_id = debug_case_id.as_deref().map(parse_id).transpose()?;
         let environment_id = environment_id.as_deref().map(parse_id).transpose()?;
         state
-            .with_workspace(workspace_id, session_id, |repository| {
+            .with_workspace_mutation(workspace_id, session_id, |repository| {
                 repository.record_failed_history(crate::workspace::FailedHistoryWriteInput {
                     created_at_ms,
                     spec,
@@ -1121,7 +1129,7 @@ mod commands {
     ) -> Result<(), String> {
         let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
         state
-            .with_workspace(workspace_id, session_id, |repository| {
+            .with_workspace_mutation(workspace_id, session_id, |repository| {
                 repository.clear_history()
             })
             .map_err(|error| error.to_string())
@@ -1213,7 +1221,7 @@ mod commands {
                     .unwrap_or_else(|| "Postman 集合中没有可导入的请求".into()));
             }
             state
-                .with_workspace(workspace_id, session_id, |repository| {
+                .with_workspace_mutation(workspace_id, session_id, |repository| {
                     use apogee_core::workspace::WorkspaceNodeKind;
                     use std::collections::HashMap;
 
@@ -1317,7 +1325,7 @@ mod commands {
                 .map_err(|error| error.to_string())?;
             let variable_count = imported.environment.variables.len();
             state
-                .with_workspace(workspace_id, session_id, |repository| {
+                .with_workspace_mutation(workspace_id, session_id, |repository| {
                     emit_postman_import_progress(&app, &import_id, 55, 100, "创建环境");
                     let created =
                         repository.create_environment(imported.environment.name.clone())?;
@@ -1393,7 +1401,7 @@ mod commands {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .remove(&plan_id)
             .ok_or_else(|| "YApi 导入计划已失效，请重新分析项目".to_string())?;
-        let result = state.with_workspace(workspace_id, session_id, |repository| {
+        let result = state.with_workspace_mutation(workspace_id, session_id, |repository| {
             repository.import_yapi_plan(
                 &plan,
                 options.collection_name.as_deref(),
@@ -1470,7 +1478,7 @@ mod commands {
         let id = parse_id(&request_id)?;
         let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
         state
-            .with_workspace(workspace_id, session_id, |repository| {
+            .with_workspace_mutation(workspace_id, session_id, |repository| {
                 repository.save_request(id, name, spec)
             })
             .map_err(|error| error.to_string())
@@ -1505,7 +1513,7 @@ mod commands {
         let request_id = parse_id(&request_id)?;
         let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
         state
-            .with_workspace(workspace_id, session_id, |repository| {
+            .with_workspace_mutation(workspace_id, session_id, |repository| {
                 repository.create_debug_case(request_id, name, case_type, spec)
             })
             .map_err(|error| error.to_string())
@@ -1523,7 +1531,7 @@ mod commands {
         let case_id = parse_id(&case_id)?;
         let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
         state
-            .with_workspace(workspace_id, session_id, |repository| {
+            .with_workspace_mutation(workspace_id, session_id, |repository| {
                 repository.delete_debug_case(request_id, case_id)
             })
             .map_err(|error| error.to_string())
@@ -1554,7 +1562,7 @@ mod commands {
     ) -> Result<apogee_core::workspace::WorkspaceContainer, String> {
         let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
         state
-            .with_workspace(workspace_id, session_id, |repository| {
+            .with_workspace_mutation(workspace_id, session_id, |repository| {
                 repository.save_container(container)
             })
             .map_err(|error| error.to_string())
@@ -1570,7 +1578,7 @@ mod commands {
     ) -> Result<Environment, String> {
         let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
         state
-            .with_workspace(workspace_id, session_id, |repository| {
+            .with_workspace_mutation(workspace_id, session_id, |repository| {
                 repository.create_environment(name)
             })
             .map_err(|error| error.to_string())
@@ -1586,7 +1594,7 @@ mod commands {
     ) -> Result<Environment, String> {
         let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
         state
-            .with_workspace(workspace_id, session_id, |repository| {
+            .with_workspace_mutation(workspace_id, session_id, |repository| {
                 repository.save_environment(environment)
             })
             .map_err(|error| error.to_string())
@@ -1602,7 +1610,7 @@ mod commands {
         let environment_id = parse_id(&environment_id)?;
         let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
         state
-            .with_workspace(workspace_id, session_id, |repository| {
+            .with_workspace_mutation(workspace_id, session_id, |repository| {
                 repository.delete_environment(environment_id)
             })
             .map_err(|error| error.to_string())
@@ -1620,17 +1628,16 @@ mod commands {
         if !workspace_state.active_environment_set {
             return Err("工作区状态缺少环境选择标记".into());
         }
+        let data_dir = super::app_data_dir(&app)?;
+        let workspace_state_repository =
+            crate::workspace_state::WorkspaceStateRepository::new(&data_dir);
         state
-            .with_workspace(workspace_id, session_id, |repository| {
+            .with_workspace_mutation(workspace_id, session_id, |repository| {
                 if let Some(environment_id) = workspace_state.active_environment_id {
                     repository.read_environment(environment_id)?;
                 }
-                Ok(())
+                workspace_state_repository.save(workspace_id, &workspace_state)
             })
-            .map_err(|error| error.to_string())?;
-        let data_dir = super::app_data_dir(&app)?;
-        crate::workspace_state::WorkspaceStateRepository::new(&data_dir)
-            .save(workspace_id, &workspace_state)
             .map_err(|error| error.to_string())
     }
 
@@ -1644,7 +1651,7 @@ mod commands {
     ) -> Result<WorkspaceSnapshot, String> {
         let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
         state
-            .with_workspace(workspace_id, session_id, |repository| {
+            .with_workspace_mutation(workspace_id, session_id, |repository| {
                 repository.create_collection(name)
             })
             .map_err(|error| error.to_string())
@@ -1662,7 +1669,7 @@ mod commands {
         let parent = parse_id(&parent_id)?;
         let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
         state
-            .with_workspace(workspace_id, session_id, |repository| {
+            .with_workspace_mutation(workspace_id, session_id, |repository| {
                 repository.create_folder(parent, name)
             })
             .map_err(|error| error.to_string())
@@ -1680,7 +1687,7 @@ mod commands {
         let parent = parse_id(&parent_id)?;
         let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
         state
-            .with_workspace(workspace_id, session_id, |repository| {
+            .with_workspace_mutation(workspace_id, session_id, |repository| {
                 repository.create_request(parent, name)
             })
             .map_err(|error| error.to_string())
@@ -1698,7 +1705,7 @@ mod commands {
         let id = parse_id(&node_id)?;
         let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
         state
-            .with_workspace(workspace_id, session_id, |repository| {
+            .with_workspace_mutation(workspace_id, session_id, |repository| {
                 repository.rename_node(id, name)
             })
             .map_err(|error| error.to_string())
@@ -1715,7 +1722,7 @@ mod commands {
         let id = parse_id(&node_id)?;
         let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
         state
-            .with_workspace(workspace_id, session_id, |repository| {
+            .with_workspace_mutation(workspace_id, session_id, |repository| {
                 repository.delete_node(id)
             })
             .map_err(|error| error.to_string())

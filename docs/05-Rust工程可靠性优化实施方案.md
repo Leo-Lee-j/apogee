@@ -1,6 +1,6 @@
 # Rust 工程可靠性优化实施方案
 
-> 状态：实施中（已落地 session-bound response runtime 与 P0 默认脱敏子切片；完整 P0 尚未完成）
+> 状态：实施中（已落地 session-bound response runtime、P0 默认脱敏子切片与 P0 阶段 2 最小持久化切片；完整 P0 尚未完成）
 >
 > 初稿：2026-08-20；最近更新：2026-08-21
 >
@@ -12,7 +12,7 @@
 
 ## 实施状态快照（2026-08-21）
 
-本轮已完成 **P0 的 session-scoped response runtime、局部单文件安全发布与默认脱敏子切片**；这仍不是完整的运行态/数据安全基线。下文 §1.1 的审查数据是 2026-08-20 的初始发现；以下内容为当前实现和继续工作的权威进度记录。
+本轮已完成 **P0 的 session-scoped response runtime、局部单文件安全发布、默认脱敏子切片，以及阶段 2 的最小可验证持久化切片**；这仍不是完整的运行态/数据安全基线。下文 §1.1 的审查数据是 2026-08-20 的初始发现；以下内容为当前实现和继续工作的权威进度记录。
 
 ### 已落地
 
@@ -22,6 +22,10 @@
 - history body 恢复、Synthetic 生成和 JSON 索引采用“短锁捕获 runtime → 锁外 I/O/计算 → 发布前重新验证”的路径；Synthetic 通过 `Arc` 身份防止 open/close ABA。
 - history body 导入使用唯一 `.part` 文件、flush 后以同目录 hard link 作为不可覆盖的发布点；已存在的 body 仅在与 history source 长度匹配时作为幂等恢复复用。若复制后的发布窗口发生竞争，只有明确的 `AlreadyExists` 才会复用匹配 body，其他发布/I/O 失败会原样返回；成功发布或复用后的临时删除失败同样可见为错误，`Spool::remove` 会回收该 response 遗留的 `.part`。history restore 不再以 `exists()` 裸短路。同一 response 的并发发布、已存在 body 的匹配复用、长度不匹配拒绝、`AlreadyExists` 竞争、非冲突失败传播、临时清理失败和 remove 回收均有回归测试。response index 和 metadata 会在 session 切换时清理。
 - Windows 单文件发布已移除“先删除旧文件再 rename”的空窗，应用设置、工作区状态和 YAML 写入在替换失败时保留旧可读文件；CI 也补充了声明 MSRV 与 stable 的 Rust 质量门禁。
+- **P0 阶段 2 最小持久化切片已落地。** `WorkspaceWriteLock` 以 canonical workspace root 的 `.apogee.lock` 持有 OS advisory exclusive lock（Windows `LockFileEx`、Unix `flock`）；session 生命周期持有锁，第二个进程/窗口得到稳定 `WORKSPACE_LOCKED`，遗留锁文件本身不代表占用。
+- `MutationGate` 已覆盖工作区持久化命令、history 与 import apply 的短提交窗口；`WorkspaceAccessGate` 让读取共享、提交与 recovery 独占，避免读取跨 manifest 与环境文件时看到中间态。open/close transition 在同根 reload 时先等待旧 mutation，再执行 recovery、snapshot、registry/runtime 工作和 session 替换，防止活动事务被错误恢复。
+- 共享 `atomic_write` 使用同目录唯一临时文件、`write_all`、`sync_all` 和平台 replace；app settings、workspace state、registry 与 YAML 写入均复用该边界。它只承诺进程级旧完整文件或新完整文件可见性，不承诺任意断电时机的完整耐久性。
+- 环境 create/delete 已成为可恢复代表路径：create 使用 `journal → staging → publish → manifest`；delete 以 manifest 移除引用为提交点，再执行 target/tombstone cleanup。`.apogee-tx` journal 只保存 UUID，打开工作区时会按 manifest 清理未提交 create 或完成已提交 delete；失败注入、同根 reload、读删交错和提交后恢复均有确定性测试。
 - **P0 默认脱敏子切片已落地，并已按安全复审补强。** `apogee-core::public` 定义了 `PublicRequestPreview`、`PublicActualRequest`、`PublicResponseSummary`、`PublicError`/`PublicHint` 与安全的键值、设置投影；完整 body、auth、代理 URL、文件路径、错误 detail 和不安全提示不会进入这些 DTO。URL 会移除 userinfo/fragment，并依据敏感来源遮蔽中性名称的 query、header、Cookie、Bearer/Basic/API key、`ValueKind::Secret` 与 `ValueKind::File`；路径值同时遮蔽原文及 URL 编码形式（百分号十六进制大小写无关）。
 - `ActualRequest` 仅在执行内存中保留且不会 serde 化的敏感来源元数据；`snapshot_request` 从解析后的 request、鉴权和 API key 采集它们，公开投影可遮蔽中性字段名（例如 `id`、`q`、`X-My-Key`）以及 URL 编码后的路径值（例如 `a b` → `a%20b`）。配置的自定义 API-key Header 即使被同名手写 Header 覆盖，仍被视为敏感来源；实际请求和 history preview 的同名行都会遮蔽覆盖值。
 - history YAML、新旧 history 读取、`request:done` / `request:error`、`get_response_meta`、`index_response` 和相关 Spike 响应均只使用公开 DTO。旧 history 继续只读兼容，读取时会在原始 `Secret`/`File` 标记尚可用时补偿净化实际请求；旧 `auth` 则仅解析无值的 `type`/`key`/`location` 脱敏来源，因此自定义 API-key Header/Query 也会在 legacy preview 行、失败记录和嵌入 response 的 actual request 中被遮蔽，且旧 YAML 不会自动重写或删除。
@@ -38,13 +42,15 @@
 | `cargo +stable test -p apogee-desktop legacy_custom_api_key_sources_redact_top_level_and_embedded_actual_requests --lib --locked` | 通过（legacy 自定义 API-key Header/Query 的失败与成功 actual request 脱敏） |
 | `cargo +stable test -p apogee-desktop workspace::tests::history --lib --locked` | 通过（公开 history YAML 持久化和读取） |
 | `get_diagnostics`（脱敏相关 Rust 文件） | 无诊断 |
+| `cargo +stable test -p apogee-desktop --lib --locked` | 通过（49 项；含跨进程锁生命周期、同根 reload、读删交错、环境 create/delete 的失败回滚与恢复） |
+| `cargo +stable fmt --all -- --check` 与 `get_diagnostics`（阶段 2 Rust 文件） | 通过 / 无诊断 |
 
-本切片已按受影响范围完成完整门禁且全部通过：`cargo +stable fmt --all -- --check`、`cargo +stable clippy --workspace --all-targets --locked -- -D warnings`、`cargo +stable test --workspace --locked`（`apogee-core` 72、`apogee-desktop` 38）、`pnpm typecheck`、`pnpm exec vitest run --reporter=verbose`（5 个文件、16 项测试）与 `git diff --check`。前端 IPC preview 与 history preview 不可执行回归均包含在该门禁内。
+截至 2026-08-21，当前工作树已按受影响范围完成完整门禁且全部通过：`cargo +stable fmt --all -- --check`、`cargo +stable clippy --workspace --all-targets --locked -- -D warnings`、`cargo +stable test --workspace --locked`（`apogee-core` 72、`apogee-desktop` 49）、`pnpm typecheck`、`pnpm exec vitest run --reporter=verbose`（5 个文件、16 项测试）与 `git diff --check`。前端 IPC preview 与 history preview 不可执行回归均包含在该门禁内。
 
 ### 下一轮优先级与已知边界
 
 1. **完成 response runtime 的整体收敛。** 目前是 `ResponseRuntime`，而非目标中的完整 `WorkspaceRuntime`；repository、response registry、in-flight、mutation gate 和计划缓存仍未统一为同一 owning runtime。普通协议 URL 仍是 session 归属校验，尚不是随机、短期 response capability。
-2. **完成阶段 2 的持久化协议。** 尚无跨进程单写者锁、`MutationGate`、staging/journal/tombstone/recovery；成功 history body 复制也仍需拆为锁外复制、重新验证、发布的两阶段流程。
+2. **完成阶段 2 的剩余迁移。** 当前已具备跨进程单写者锁、`MutationGate`、共享原子写、环境 create/delete journal/staging/tombstone/recovery 及读写一致性边界；尚未将 collection/request/debug case/save environment、history、Postman/YApi 全量 apply 和 legacy history 跨卷迁移全部升级为同一可恢复事务。下一轮应按 collection delete/rename、单文件多写一致性、history/import apply 的顺序扩展，并为每个新增提交点补故障恢复测试。
 3. **完成阶段 3 的资源与协议边界。** 尚无 500 MiB runtime 记账、构建前 JSON 预算/single-flight、统一 `ResponseRegistry`、完整 Range/MIME/受限协议 I/O 改造。
 4. **增强 body 完整性校验。** 本轮已验证已有 body 的长度并拒绝错误发布；同长度损坏尚不可区分。若威胁模型或恢复诊断需要，应引入可选 hash/长度元数据并权衡额外 I/O，而不是重新放开 `exists()` 裸短路。
 5. **设计受控 reveal。** 本切片不提供 reveal；若未来确有排障需求，必须先定义显式同意、短时 capability、工作区绑定、审计和过期语义，不能把公开 DTO 重新变成默认明文通道。
@@ -59,7 +65,7 @@
 4. 请求终结事件、response metadata/index 与前端 IPC 均使用公开 DTO；history 打开不会恢复可执行 body/auth，且 tab-level `historyPreview` 会在 `useRequest().send()` 的执行入口被拒绝。响应 UI 不再暴露 actual body/body 参数/error detail；普通日志只保留安全 code/kind/摘要。
 5. 回归覆盖 body/auth 变体、Cookie/Authorization、API key、Secret/File、中性 `id`/`q`/`X-My-Key`、大小写不同的编码路径、API-key Header 覆盖及其 history preview、旧 history YAML 的 custom API-key Header/Query、不可执行 history preview、非敏感摘要以及前端 history preview。明确不包含 reveal、旧数据自动清理、工作区请求 YAML 改写或新的第三方依赖。
 
-本切片涉及 `crates/apogee-core/src/{model,http,public}.rs`、`src-tauri/src/{lib,workspace,state}.rs`、`src/ipc/index.ts`、`src/stores/request.ts` 与 history/response 视图组件。应把完整 response body 的本地 spool 保留与其公开 DTO 解耦；资源预算、hash 完整性、随机 response capability、跨进程写者锁和多文件事务继续留在后续切片。
+本切片涉及 `crates/apogee-core/src/{model,http,public}.rs`、`src-tauri/src/{lib,workspace,state}.rs`、`src/ipc/index.ts`、`src/stores/request.ts` 与 history/response 视图组件。应把完整 response body 的本地 spool 保留与其公开 DTO 解耦；资源预算、hash 完整性、随机 response capability，以及阶段 2 尚未迁移的 CRUD/import/history 多文件事务继续留在后续切片。
 
 本文把 Rust 全局审查的结论转为可实施的工程计划。它不改变 Apogee 的产品定位：工作区 YAML 仍是用户数据真相来源，应用仍以本地优先、性能优先和可迁移为原则；优化目标是让当前实现真正满足已有文档承诺的工作区隔离、可靠写入、响应资源控制和敏感信息边界。
 
@@ -169,7 +175,7 @@ WorkspaceRuntime
 
 - 临时文件必须与目标在同一目录/卷；写入后显式 flush，替换前关闭句柄。
 - Windows 使用不含“先删旧文件”空窗的 replace 原语；Unix 使用同目录 rename。平台对断电耐久性的差异必须写入实现注释和测试结论，不能把“进程级原子替换”笼统称为“断电绝不丢失”。
-- 创建采用隐藏 staging，验证后以 manifest 最后提交；删除先移入 tombstone，提交 manifest 后再清理。
+- 创建采用隐藏 staging，验证后以 manifest 最后提交；删除以 manifest 移除引用为提交点，提交前保留原文件，提交后将遗留 target 移入 tombstone 并清理。
 - 需要跨卷搬运的数据（例如 legacy history 到 AppData runtime）使用“复制到目标临时文件 → 校验 → 发布 → 删除源”的可重试流程，不能依赖 `rename`。
 - 工作区同时被多个进程打开时必须有明确策略：首版采用单工作区单写者锁，无法获得锁时返回 `WORKSPACE_LOCKED`；未来多窗口协作前再设计跨进程事务协议。
 
@@ -324,10 +330,12 @@ InternalResponseRecord ──> PublicResponseSummary（脱敏 IPC DTO）
 
 `MutationGate` 只保护提交事务，不包住网络分析、JSON 解码、Postman 文件读取或 UI 进度通知。大型 import 的正确流程是：在锁外解析为 `ImportPlan`，在 staging 构建并验证；仅在发布和 manifest 提交的短窗口内获取 mutation gate。
 
+**当前最小切片（2026-08-21）。** 实现已集中到 `src-tauri/src/persistence.rs`：`WorkspaceWriteLock`、`MutationGate`、`WorkspaceAccessGate` 与 `atomic_write` 可由 workspace/session 层复用。现阶段没有抽象通用 `FileOps`，而是在 atomic replace 与 manifest writer 保留可控失败 seam；环境 create/delete 已验证 journal/recovery 协议，其他 CRUD、history 和 import 的完整事务化仍按 §6.3 迁移。
+
 ### 6.3 逐项迁移顺序
 
-1. 先替换 `workspace_state`、settings、registry 的原子替换实现，清除所有“目标存在则 remove_file”的 fallback。
-2. 将环境创建、保存、删除迁移为 transaction；保留并泛化现有 environment tombstone 正例。
+1. **已完成。** `workspace_state`、settings、registry 和 YAML 已统一委托共享 atomic replace，清除所有“目标存在则 remove_file”的 fallback。
+2. **已完成最小环境事务切片。** 环境 create/delete 已迁移为 journal 协议；create 使用 staging，delete 以 manifest 为提交点并在后续清理 target/tombstone。`save_environment` 仍是两个单文件写入，尚未升级为可恢复跨文件事务。
 3. 将 collection 创建、重命名、删除迁移为 transaction。
    - collection 删除必须先 rename 至 tombstone；manifest 成功提交后才能物理删除。
    - collection 重命名的 marker 与 manifest 必须在同一事务中保持可恢复一致。
@@ -340,7 +348,7 @@ InternalResponseRecord ──> PublicResponseSummary（脱敏 IPC DTO）
 | 操作 | 提交点 | 中断后允许状态 | 恢复动作 |
 | --- | --- | --- | --- |
 | 创建集合/环境 | manifest 写入完成 | 不可见 staging 或完整可见对象 | 删除无引用 staging；保留完整提交 |
-| 删除集合/环境 | manifest 移除引用完成 | 原对象或 tombstone | 未提交则恢复原位置；已提交则清理 tombstone |
+| 删除集合/环境 | manifest 移除引用完成 | 提交前为原对象；提交后可能残留 target 或 tombstone | 未提交则保留/恢复原对象；已提交则清理 target 与 tombstone |
 | 保存单文件 | 原子替换成功 | 旧文件或完整新文件 | 清理临时文件 |
 | 导入 | manifest 发布完成 | staging、完整导入或可回滚 tombstone | 依据 journal 恢复/清理，不允许“半导入可见” |
 | 历史恢复 | spool 正式文件 rename 完成 | 无文件或完整文件 | 删除 `.part`，按长度/hash 决定是否重试 |

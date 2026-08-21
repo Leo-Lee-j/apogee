@@ -5,7 +5,8 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
-use crate::app_settings::{atomic_replace, clean_windows_path};
+use crate::app_settings::clean_windows_path;
+use crate::persistence::atomic_write;
 use crate::workspace::WorkspaceRepository;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -137,12 +138,8 @@ impl WorkspaceRegistry {
     }
 
     fn write(&self, registry: &Registry) -> Result<()> {
-        let parent = self.path.parent().context("工作区注册表没有父目录")?;
-        fs::create_dir_all(parent)?;
-        let temporary = parent.join(format!(".workspaces.{}.tmp", Uuid::new_v4()));
-        fs::write(&temporary, serde_json::to_vec_pretty(registry)?)?;
-        atomic_replace(&temporary, &self.path)?;
-        Ok(())
+        let payload = serde_json::to_vec_pretty(registry)?;
+        atomic_write(&self.path, &payload)
     }
 }
 

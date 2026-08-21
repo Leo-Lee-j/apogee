@@ -41,6 +41,37 @@ const FOLDER_MARKER: &str = "_folder.yaml";
 const ENVIRONMENT_DIR: &str = "environments";
 const HISTORY_DIR: &str = "history";
 const HISTORY_LIMIT: usize = 200;
+const TRANSACTION_DIR: &str = ".apogee-tx";
+const TRANSACTION_VERSION: u32 = 1;
+
+/// 可恢复多文件操作的持久化标记。journal 只保存由 UUID 推导的对象身份，绝不接受
+/// 外部路径；恢复路径因此不会因损坏/手写 journal 删除工作区外的任意文件。
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkspaceTransactionJournal {
+    version: u32,
+    operation: WorkspaceTransactionOperation,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+enum WorkspaceTransactionOperation {
+    EnvironmentCreate { environment_id: Uuid },
+    EnvironmentDelete { environment_id: Uuid },
+}
+
+impl WorkspaceTransactionOperation {
+    fn journal_file_name(&self) -> String {
+        match self {
+            Self::EnvironmentCreate { environment_id } => {
+                format!("environment-create-{environment_id}.json")
+            }
+            Self::EnvironmentDelete { environment_id } => {
+                format!("environment-delete-{environment_id}.json")
+            }
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -288,6 +319,163 @@ impl WorkspaceRepository {
 
     pub fn root(&self) -> &Path {
         &self.root
+    }
+
+    /// 在取得 workspace OS 写锁后恢复或回滚未完成的环境事务。
+    ///
+    /// 调用方必须在任何 snapshot、registry 更新或 runtime migration 前调用它。恢复不
+    /// 修改已提交 manifest 的业务含义：create 的 manifest 尚未引用对象时删除孤儿；
+    /// delete 的 manifest 仍引用对象时把 tombstone 放回原位。
+    pub(crate) fn recover_pending_transactions(&self) -> Result<()> {
+        let directory = self.transaction_directory();
+        if !directory.exists() {
+            return Ok(());
+        }
+        if !directory.is_dir() {
+            bail!("工作区事务目录不是目录：{}", directory.display());
+        }
+
+        let manifest = self.read_manifest()?;
+        let mut journals = fs::read_dir(&directory)?.collect::<std::result::Result<Vec<_>, _>>()?;
+        journals.sort_by_key(|entry| entry.file_name());
+        for entry in journals {
+            if !entry.file_type()?.is_file()
+                || entry.path().extension().and_then(|item| item.to_str()) != Some("json")
+            {
+                continue;
+            }
+            let path = entry.path();
+            let journal: WorkspaceTransactionJournal = serde_json::from_slice(&fs::read(&path)?)
+                .with_context(|| format!("读取工作区事务 journal 失败：{}", path.display()))?;
+            if journal.version != TRANSACTION_VERSION {
+                bail!(
+                    "不支持的工作区事务 journal 版本 {}：{}",
+                    journal.version,
+                    path.display()
+                );
+            }
+            match journal.operation {
+                WorkspaceTransactionOperation::EnvironmentCreate { environment_id } => {
+                    self.recover_environment_create(&manifest, environment_id, &path)?;
+                }
+                WorkspaceTransactionOperation::EnvironmentDelete { environment_id } => {
+                    self.recover_environment_delete(&manifest, environment_id, &path)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn transaction_directory(&self) -> PathBuf {
+        self.root.join(TRANSACTION_DIR)
+    }
+
+    fn begin_transaction(&self, operation: WorkspaceTransactionOperation) -> Result<PathBuf> {
+        let path = self
+            .transaction_directory()
+            .join(operation.journal_file_name());
+        if path.exists() {
+            bail!("检测到未恢复的工作区事务：{}", path.display());
+        }
+        let journal = WorkspaceTransactionJournal {
+            version: TRANSACTION_VERSION,
+            operation,
+        };
+        let payload = serde_json::to_vec_pretty(&journal)?;
+        crate::persistence::atomic_write(&path, &payload)
+            .with_context(|| format!("写入工作区事务 journal 失败：{}", path.display()))?;
+        Ok(path)
+    }
+
+    fn finish_transaction(&self, path: &Path) -> Result<()> {
+        remove_file_if_exists(path)
+            .with_context(|| format!("清理工作区事务 journal 失败：{}", path.display()))
+    }
+
+    fn environment_create_staging_path(&self, id: Uuid) -> PathBuf {
+        self.root
+            .join(ENVIRONMENT_DIR)
+            .join(format!(".environment-create-{id}.staging"))
+    }
+
+    fn environment_delete_tombstone_path(&self, id: Uuid) -> PathBuf {
+        self.root
+            .join(ENVIRONMENT_DIR)
+            .join(format!(".environment-delete-{id}.tombstone"))
+    }
+
+    fn recover_environment_create(
+        &self,
+        manifest: &WorkspaceManifest,
+        id: Uuid,
+        journal: &Path,
+    ) -> Result<()> {
+        let target = self.environment_path(id);
+        let staging = self.environment_create_staging_path(id);
+        let committed = manifest.environments.iter().any(|entry| entry.id == id);
+        if committed {
+            if !target.is_file() {
+                bail!("环境创建事务已提交但目标文件缺失：{}", target.display());
+            }
+            remove_file_if_exists(&staging)?;
+        } else {
+            // manifest 未引用该 UUID，说明 publish 在提交点前中断；删除 stage 或已发布
+            // orphan 后再移除 journal，避免它在下次打开时再次成为可见半成品。
+            remove_file_if_exists(&staging)?;
+            remove_file_if_exists(&target)?;
+        }
+        self.finish_transaction(journal)
+    }
+
+    fn recover_environment_delete(
+        &self,
+        manifest: &WorkspaceManifest,
+        id: Uuid,
+        journal: &Path,
+    ) -> Result<()> {
+        let target = self.environment_path(id);
+        let tombstone = self.environment_delete_tombstone_path(id);
+        let committed = manifest.environments.iter().all(|entry| entry.id != id);
+        if committed {
+            // manifest 是删除提交点。若进程在清理文件前中断，目标文件或 tombstone 都
+            // 已不再被 manifest 引用，可安全移除。
+            remove_file_if_exists(&tombstone)?;
+            remove_file_if_exists(&target)?;
+        } else if target.exists() {
+            if tombstone.exists() {
+                bail!(
+                    "环境删除恢复发现目标与 tombstone 同时存在：{}",
+                    tombstone.display()
+                );
+            }
+        } else if tombstone.exists() {
+            fs::rename(&tombstone, &target)
+                .with_context(|| format!("恢复未提交的环境删除失败：{}", target.display()))?;
+        } else {
+            bail!(
+                "环境删除事务未提交但目标和 tombstone 均缺失：{}",
+                target.display()
+            );
+        }
+        self.finish_transaction(journal)
+    }
+
+    fn rollback_environment_create(
+        &self,
+        journal: &Path,
+        staging: &Path,
+        target: &Path,
+        published: bool,
+    ) -> Result<()> {
+        if published {
+            remove_file_if_exists(target)?;
+        }
+        remove_file_if_exists(staging)?;
+        self.finish_transaction(journal)
+    }
+
+    fn rollback_environment_delete(&self, journal: &Path) -> Result<()> {
+        self.finish_transaction(journal)
     }
 
     /// Bind history and other session data to the application-owned runtime
@@ -635,10 +823,29 @@ impl WorkspaceRepository {
     }
 
     pub fn read_environment(&self, id: Uuid) -> Result<Environment> {
+        self.read_environment_after_manifest(id, || Ok(()))
+    }
+
+    /// 为跨文件读取的并发回归测试保留的暂停边界。生产读取没有额外回调。
+    #[cfg(test)]
+    pub(crate) fn read_environment_with_after_manifest(
+        &self,
+        id: Uuid,
+        after_manifest: impl FnOnce() -> Result<()>,
+    ) -> Result<Environment> {
+        self.read_environment_after_manifest(id, after_manifest)
+    }
+
+    fn read_environment_after_manifest(
+        &self,
+        id: Uuid,
+        after_manifest: impl FnOnce() -> Result<()>,
+    ) -> Result<Environment> {
         let manifest = self.read_manifest()?;
         if !manifest.environments.iter().any(|entry| entry.id == id) {
             bail!("未知的环境：{id}");
         }
+        after_manifest()?;
         let environment: Environment =
             read_yaml(&self.environment_path(id)).with_context(|| {
                 format!("读取环境文件失败：{}", self.environment_path(id).display())
@@ -653,6 +860,18 @@ impl WorkspaceRepository {
     }
 
     pub fn create_environment(&self, name: String) -> Result<Environment> {
+        self.create_environment_with_manifest_writer(name, |path, manifest| {
+            write_yaml(path, manifest)
+        })
+    }
+
+    /// 以 journal → staging → publish → manifest 的顺序创建环境。测试可注入 manifest
+    /// 发布失败，验证失败时不会留下已发布但未引用的 environment 文件。
+    pub(crate) fn create_environment_with_manifest_writer(
+        &self,
+        name: String,
+        write_manifest: impl FnOnce(&Path, &WorkspaceManifest) -> Result<()>,
+    ) -> Result<Environment> {
         let name = required_name(&name)?;
         let environment = Environment {
             id: Uuid::new_v4(),
@@ -660,14 +879,116 @@ impl WorkspaceRepository {
             host: String::new(),
             variables: Vec::new(),
         };
-        write_yaml(&self.environment_path(environment.id), &environment)?;
+        let journal = self.begin_transaction(WorkspaceTransactionOperation::EnvironmentCreate {
+            environment_id: environment.id,
+        })?;
+        let staging = self.environment_create_staging_path(environment.id);
+        let target = self.environment_path(environment.id);
+        let mut published = false;
 
-        let mut manifest = self.read_manifest()?;
+        if let Err(error) = write_yaml(&staging, &environment) {
+            let rollback = self.rollback_environment_create(&journal, &staging, &target, published);
+            return match rollback {
+                Ok(()) => Err(error),
+                Err(cleanup) => Err(error.context(format!(
+                    "环境创建写入 staging 失败，且回滚失败：{cleanup:#}"
+                ))),
+            };
+        }
+        let staged = read_yaml::<Environment>(&staging)
+            .with_context(|| format!("校验环境 staging 失败：{}", staging.display()));
+        match staged {
+            Ok(staged) if staged.id == environment.id => {}
+            Ok(_) => {
+                let error = anyhow::anyhow!("环境 staging 的 id 与事务不一致");
+                let rollback =
+                    self.rollback_environment_create(&journal, &staging, &target, published);
+                return match rollback {
+                    Ok(()) => Err(error),
+                    Err(cleanup) => Err(error.context(format!(
+                        "环境创建 staging 校验失败，且回滚失败：{cleanup:#}"
+                    ))),
+                };
+            }
+            Err(error) => {
+                let rollback =
+                    self.rollback_environment_create(&journal, &staging, &target, published);
+                return match rollback {
+                    Ok(()) => Err(error),
+                    Err(cleanup) => Err(error.context(format!(
+                        "环境创建 staging 校验失败，且回滚失败：{cleanup:#}"
+                    ))),
+                };
+            }
+        }
+
+        if target.exists() {
+            let error = anyhow::anyhow!("环境创建目标已存在：{}", target.display());
+            let rollback = self.rollback_environment_create(&journal, &staging, &target, published);
+            return match rollback {
+                Ok(()) => Err(error),
+                Err(cleanup) => Err(error.context(format!(
+                    "环境创建不能发布到已有目标，且回滚失败：{cleanup:#}"
+                ))),
+            };
+        }
+        if let Err(error) = fs::rename(&staging, &target)
+            .with_context(|| format!("发布环境 staging 失败：{}", target.display()))
+        {
+            let rollback = self.rollback_environment_create(&journal, &staging, &target, published);
+            return match rollback {
+                Ok(()) => Err(error),
+                Err(cleanup) => {
+                    Err(error.context(format!("环境创建发布失败，且回滚失败：{cleanup:#}")))
+                }
+            };
+        }
+        published = true;
+
+        let mut manifest = match self.read_manifest() {
+            Ok(manifest) => manifest,
+            Err(error) => {
+                let rollback =
+                    self.rollback_environment_create(&journal, &staging, &target, published);
+                return match rollback {
+                    Ok(()) => Err(error),
+                    Err(cleanup) => Err(error.context(format!(
+                        "环境创建读取 manifest 失败，且回滚失败：{cleanup:#}"
+                    ))),
+                };
+            }
+        };
+        if manifest
+            .environments
+            .iter()
+            .any(|entry| entry.id == environment.id)
+        {
+            let error = anyhow::anyhow!("环境创建 UUID 已存在于 manifest：{}", environment.id);
+            let rollback = self.rollback_environment_create(&journal, &staging, &target, published);
+            return match rollback {
+                Ok(()) => Err(error),
+                Err(cleanup) => {
+                    Err(error.context(format!("环境创建 manifest 冲突，且回滚失败：{cleanup:#}")))
+                }
+            };
+        }
         manifest.environments.push(EnvironmentEntry {
             id: environment.id,
             name,
         });
-        write_yaml(&self.manifest_path(), &manifest)?;
+        if let Err(error) = write_manifest(&self.manifest_path(), &manifest) {
+            let rollback = self.rollback_environment_create(&journal, &staging, &target, published);
+            return match rollback {
+                Ok(()) => Err(error),
+                Err(cleanup) => Err(error.context(format!(
+                    "环境创建 manifest 发布失败，且回滚失败：{cleanup:#}"
+                ))),
+            };
+        }
+        if let Err(error) = self.finish_transaction(&journal) {
+            return Err(error.context("环境创建已提交，但无法清理恢复 journal"));
+        }
+
         Ok(environment)
     }
 
@@ -687,34 +1008,65 @@ impl WorkspaceRepository {
     }
 
     pub fn delete_environment(&self, id: Uuid) -> Result<WorkspaceSnapshot> {
+        self.delete_environment_with_manifest_writer(id, |path, manifest| {
+            write_yaml(path, manifest)
+        })
+    }
+
+    /// 以 journal → manifest → tombstone cleanup 的顺序删除环境。manifest 是提交点：
+    /// 在它发布前，读取者始终能找到旧环境文件；发布后，读取者会忽略尚待清理的
+    /// 文件。测试可注入 manifest 发布失败，验证未提交删除不会改变可见环境。
+    pub(crate) fn delete_environment_with_manifest_writer(
+        &self,
+        id: Uuid,
+        write_manifest: impl FnOnce(&Path, &WorkspaceManifest) -> Result<()>,
+    ) -> Result<WorkspaceSnapshot> {
         let mut manifest = self.read_manifest()?;
         let original_len = manifest.environments.len();
         manifest.environments.retain(|entry| entry.id != id);
         if manifest.environments.len() == original_len {
             bail!("未知的环境：{id}");
         }
-        let path = self.environment_path(id);
-        let tombstone = path
-            .parent()
-            .map(|parent| parent.join(format!(".{id}.{}.deleted", Uuid::new_v4())));
-        if let Some(tombstone) = &tombstone {
-            if path.exists() {
-                fs::rename(&path, tombstone)
-                    .with_context(|| format!("暂存待删除环境失败：{}", path.display()))?;
-            }
-        }
-        if let Err(error) = write_yaml(&self.manifest_path(), &manifest) {
-            if let Some(tombstone) = &tombstone {
-                if tombstone.exists() {
-                    let _ = fs::rename(tombstone, &path);
+
+        let journal = self.begin_transaction(WorkspaceTransactionOperation::EnvironmentDelete {
+            environment_id: id,
+        })?;
+        let target = self.environment_path(id);
+        let tombstone = self.environment_delete_tombstone_path(id);
+        if tombstone.exists() {
+            let error = anyhow::anyhow!("环境删除 tombstone 已存在：{}", tombstone.display());
+            let rollback = self.rollback_environment_delete(&journal);
+            return match rollback {
+                Ok(()) => Err(error),
+                Err(cleanup) => {
+                    Err(error.context(format!("环境删除无法开始，且回滚失败：{cleanup:#}")))
                 }
-            }
-            return Err(error);
+            };
         }
-        if let Some(tombstone) = tombstone {
-            if tombstone.exists() {
-                let _ = fs::remove_file(tombstone);
+        if let Err(error) = write_manifest(&self.manifest_path(), &manifest) {
+            let rollback = self.rollback_environment_delete(&journal);
+            return match rollback {
+                Ok(()) => Err(error),
+                Err(cleanup) => Err(error.context(format!(
+                    "环境删除 manifest 发布失败，且回滚失败：{cleanup:#}"
+                ))),
+            };
+        }
+
+        // manifest 发布后删除已提交：即使文件清理失败也不能回滚 manifest，而是保留
+        // journal 让下次打开根据已提交 manifest 完成 target/tombstone 清理。
+        if target.exists() {
+            if let Err(error) = fs::rename(&target, &tombstone)
+                .with_context(|| format!("暂存已提交的待删除环境失败：{}", target.display()))
+            {
+                return Err(error.context("环境删除已提交，但无法暂存待清理环境"));
             }
+        }
+        if let Err(error) = remove_file_if_exists(&tombstone) {
+            return Err(error.context("环境删除已提交，但无法清理 tombstone"));
+        }
+        if let Err(error) = self.finish_transaction(&journal) {
+            return Err(error.context("环境删除已提交，但无法清理恢复 journal"));
         }
         self.snapshot()
     }
@@ -1436,6 +1788,14 @@ fn required_name(name: &str) -> Result<String> {
     Ok(value.to_string())
 }
 
+fn remove_file_if_exists(path: &Path) -> Result<()> {
+    match fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.into()),
+    }
+}
+
 fn read_yaml<T: DeserializeOwned>(path: &Path) -> Result<T> {
     let contents = fs::read_to_string(path)?;
     Ok(serde_yaml_ng::from_str(&contents)?)
@@ -1446,54 +1806,19 @@ fn write_yaml<T: Serialize>(path: &Path, value: &T) -> Result<()> {
     atomic_write(path, contents.as_bytes())
 }
 
-/// 先写同目录临时文件，再替换目标文件，避免崩溃留下半个 YAML。
-/// Windows 使用系统替换原语发布，失败时保留旧文件而不先删除目标。
+/// 兼容现有 YAML 调用点，同时统一委托给带 `sync_all` 的共享发布基础。
 fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
-    atomic_write_with_replace(path, bytes, crate::app_settings::atomic_replace)
+    crate::persistence::atomic_write(path, bytes)
 }
 
-/// 为可控故障测试保留发布边界；生产路径始终传入平台原子替换实现。
+/// 为可控故障测试保留发布边界；生产路径始终传入共享平台原子替换实现。
+#[cfg(test)]
 fn atomic_write_with_replace(
     path: &Path,
     bytes: &[u8],
     replace: impl FnOnce(&Path, &Path) -> Result<()>,
 ) -> Result<()> {
-    let parent = path
-        .parent()
-        .with_context(|| format!("目标文件没有父目录：{}", path.display()))?;
-    fs::create_dir_all(parent)?;
-    let file_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("workspace.yaml");
-    let temporary = parent.join(format!(".{file_name}.{}.tmp", Uuid::new_v4()));
-
-    if let Err(error) = fs::write(&temporary, bytes) {
-        return cleanup_temporary_after_failure(&temporary, error.into(), "写入 YAML 临时文件失败");
-    }
-    if let Err(error) = replace(&temporary, path) {
-        return cleanup_temporary_after_failure(&temporary, error, "发布 YAML 临时文件失败");
-    }
-
-    Ok(())
-}
-
-fn cleanup_temporary_after_failure(
-    temporary: &Path,
-    error: anyhow::Error,
-    action: &str,
-) -> Result<()> {
-    match fs::remove_file(temporary) {
-        Ok(()) => {}
-        Err(cleanup_error) if cleanup_error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(cleanup_error) => {
-            return Err(error.context(format!(
-                "{action}，且无法清理临时文件 {}：{cleanup_error}",
-                temporary.display()
-            )));
-        }
-    }
-    Err(error.context(format!("{action}：{}", temporary.display())))
+    crate::persistence::atomic_write_with_replace(path, bytes, replace)
 }
 
 #[cfg(test)]
@@ -1557,6 +1882,203 @@ mod tests {
             .iter()
             .any(|item| item.id == environment.id));
         assert!(repository.read_environment(environment.id).is_err());
+        let transaction_directory = root.join(TRANSACTION_DIR);
+        assert!(
+            !transaction_directory.exists()
+                || fs::read_dir(&transaction_directory)
+                    .unwrap()
+                    .next()
+                    .is_none(),
+            "已提交删除不得遗留可恢复 journal"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn failed_environment_manifest_publish_rolls_back_staging_and_journal() {
+        let root = std::env::temp_dir().join(format!(
+            "apogee-environment-create-rollback-test-{}",
+            Uuid::new_v4()
+        ));
+        let repository = WorkspaceRepository::create(&root, "测试工作区".into()).unwrap();
+        let environment_directory = root.join(ENVIRONMENT_DIR);
+        let file_count_before = fs::read_dir(&environment_directory).unwrap().count();
+
+        let error = repository
+            .create_environment_with_manifest_writer("不会提交".into(), |_, _| {
+                anyhow::bail!("injected manifest publish failure")
+            })
+            .unwrap_err();
+
+        assert!(format!("{error:#}").contains("injected manifest publish failure"));
+        assert_eq!(repository.read_manifest().unwrap().environments.len(), 1);
+        assert_eq!(
+            fs::read_dir(&environment_directory).unwrap().count(),
+            file_count_before
+        );
+        let transaction_directory = root.join(TRANSACTION_DIR);
+        assert!(
+            !transaction_directory.exists()
+                || fs::read_dir(&transaction_directory)
+                    .unwrap()
+                    .next()
+                    .is_none(),
+            "失败创建不得遗留 staging 或 journal"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn failed_environment_delete_manifest_publish_preserves_file_and_cleans_journal() {
+        let root = std::env::temp_dir().join(format!(
+            "apogee-environment-delete-rollback-test-{}",
+            Uuid::new_v4()
+        ));
+        let repository = WorkspaceRepository::create(&root, "测试工作区".into()).unwrap();
+        let environment = repository.create_environment("不会删除".into()).unwrap();
+        let target = repository.environment_path(environment.id);
+        let tombstone = repository.environment_delete_tombstone_path(environment.id);
+        let target_before_publish = target.clone();
+        let tombstone_before_publish = tombstone.clone();
+
+        let error = repository
+            .delete_environment_with_manifest_writer(environment.id, move |_, _| {
+                assert!(
+                    target_before_publish.is_file(),
+                    "manifest 提交前读取者必须仍能找到环境文件"
+                );
+                assert!(
+                    !tombstone_before_publish.exists(),
+                    "manifest 提交前不得移动环境文件到 tombstone"
+                );
+                anyhow::bail!("injected manifest publish failure")
+            })
+            .unwrap_err();
+
+        assert!(format!("{error:#}").contains("injected manifest publish failure"));
+        assert!(target.is_file(), "删除失败必须保留原环境文件");
+        assert!(!tombstone.exists(), "删除失败不得遗留 tombstone");
+        assert!(
+            repository
+                .read_manifest()
+                .unwrap()
+                .environments
+                .iter()
+                .any(|entry| entry.id == environment.id),
+            "删除失败不得发布移除环境的 manifest"
+        );
+        assert_eq!(
+            repository.read_environment(environment.id).unwrap().name,
+            "不会删除"
+        );
+        let transaction_directory = root.join(TRANSACTION_DIR);
+        assert!(
+            !transaction_directory.exists()
+                || fs::read_dir(&transaction_directory)
+                    .unwrap()
+                    .next()
+                    .is_none(),
+            "失败删除不得遗留 tombstone 或 journal"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn recovery_completes_committed_environment_delete_before_file_cleanup() {
+        let root = std::env::temp_dir().join(format!(
+            "apogee-environment-delete-commit-recovery-test-{}",
+            Uuid::new_v4()
+        ));
+        let repository = WorkspaceRepository::create(&root, "测试工作区".into()).unwrap();
+        let environment = repository.create_environment("已提交删除".into()).unwrap();
+        let target = repository.environment_path(environment.id);
+        let journal = repository
+            .begin_transaction(WorkspaceTransactionOperation::EnvironmentDelete {
+                environment_id: environment.id,
+            })
+            .unwrap();
+        let mut manifest = repository.read_manifest().unwrap();
+        manifest
+            .environments
+            .retain(|entry| entry.id != environment.id);
+        write_yaml(&repository.manifest_path(), &manifest).unwrap();
+
+        repository.recover_pending_transactions().unwrap();
+
+        assert!(!target.exists(), "已提交删除的遗留目标文件必须被恢复清理");
+        assert!(!journal.exists());
+        assert!(!repository
+            .read_manifest()
+            .unwrap()
+            .environments
+            .iter()
+            .any(|entry| entry.id == environment.id));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn recovery_removes_published_environment_create_before_manifest_commit() {
+        let root = std::env::temp_dir().join(format!(
+            "apogee-environment-create-recovery-test-{}",
+            Uuid::new_v4()
+        ));
+        let repository = WorkspaceRepository::create(&root, "测试工作区".into()).unwrap();
+        let environment = Environment {
+            id: Uuid::new_v4(),
+            name: "中断创建".into(),
+            host: String::new(),
+            variables: Vec::new(),
+        };
+        let journal = repository
+            .begin_transaction(WorkspaceTransactionOperation::EnvironmentCreate {
+                environment_id: environment.id,
+            })
+            .unwrap();
+        let staging = repository.environment_create_staging_path(environment.id);
+        let target = repository.environment_path(environment.id);
+        write_yaml(&staging, &environment).unwrap();
+        fs::rename(&staging, &target).unwrap();
+
+        repository.recover_pending_transactions().unwrap();
+
+        assert!(!staging.exists());
+        assert!(!target.exists());
+        assert!(!journal.exists());
+        assert!(!repository
+            .read_manifest()
+            .unwrap()
+            .environments
+            .iter()
+            .any(|entry| entry.id == environment.id));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn recovery_restores_uncommitted_environment_delete() {
+        let root = std::env::temp_dir().join(format!(
+            "apogee-environment-delete-recovery-test-{}",
+            Uuid::new_v4()
+        ));
+        let repository = WorkspaceRepository::create(&root, "测试工作区".into()).unwrap();
+        let environment = repository.create_environment("中断删除".into()).unwrap();
+        let target = repository.environment_path(environment.id);
+        let tombstone = repository.environment_delete_tombstone_path(environment.id);
+        let journal = repository
+            .begin_transaction(WorkspaceTransactionOperation::EnvironmentDelete {
+                environment_id: environment.id,
+            })
+            .unwrap();
+        fs::rename(&target, &tombstone).unwrap();
+
+        repository.recover_pending_transactions().unwrap();
+
+        assert!(target.is_file());
+        assert!(!tombstone.exists());
+        assert!(!journal.exists());
+        assert_eq!(
+            repository.read_environment(environment.id).unwrap().name,
+            "中断删除"
+        );
         fs::remove_dir_all(root).unwrap();
     }
 

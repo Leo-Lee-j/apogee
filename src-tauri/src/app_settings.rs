@@ -1,91 +1,8 @@
+use crate::persistence::atomic_write;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
-use uuid::Uuid;
-
-pub(crate) fn atomic_replace(temporary: &Path, target: &Path) -> Result<()> {
-    #[cfg(windows)]
-    {
-        use windows_sys::Win32::Storage::FileSystem::{MoveFileExW, ReplaceFileW};
-
-        let from = windows_wide_path(temporary);
-        let to = windows_wide_path(target);
-
-        if target.exists() {
-            let ok = unsafe {
-                ReplaceFileW(
-                    to.as_ptr(),
-                    from.as_ptr(),
-                    std::ptr::null(),
-                    0,
-                    std::ptr::null(),
-                    std::ptr::null(),
-                )
-            };
-            if ok == 0 {
-                let replace_error = std::io::Error::last_os_error();
-                anyhow::bail!("无法原子替换文件：{}（{replace_error}）", target.display());
-            }
-            return Ok(());
-        }
-
-        let ok = unsafe { MoveFileExW(from.as_ptr(), to.as_ptr(), 0) };
-        if ok == 0 {
-            let move_error = std::io::Error::last_os_error();
-            anyhow::bail!("无法发布新文件：{}（{move_error}）", target.display());
-        }
-        Ok(())
-    }
-    #[cfg(not(windows))]
-    {
-        fs::rename(temporary, target)?;
-        Ok(())
-    }
-}
-
-/// 将绝对 Windows 路径转换为 Win32 长路径形式，供直接调用宽字符文件 API 使用。
-/// 相对路径维持原样，以保留调用者显式选择的当前目录语义。
-#[cfg(windows)]
-fn windows_wide_path(path: &Path) -> Vec<u16> {
-    use std::os::windows::ffi::OsStrExt;
-
-    const BACKSLASH: u16 = b'\\' as u16;
-    const SLASH: u16 = b'/' as u16;
-    const QUESTION: u16 = b'?' as u16;
-    const UPPER_U: u16 = b'U' as u16;
-    const UPPER_N: u16 = b'N' as u16;
-    const UPPER_C: u16 = b'C' as u16;
-
-    let mut wide: Vec<u16> = path.as_os_str().encode_wide().collect();
-    if path.is_absolute() {
-        for character in &mut wide {
-            if *character == SLASH {
-                *character = BACKSLASH;
-            }
-        }
-    }
-
-    let verbatim_prefix = [BACKSLASH, BACKSLASH, QUESTION, BACKSLASH];
-    if path.is_absolute() && !wide.starts_with(&verbatim_prefix) {
-        let mut extended = if wide.starts_with(&[BACKSLASH, BACKSLASH]) {
-            vec![
-                BACKSLASH, BACKSLASH, QUESTION, BACKSLASH, UPPER_U, UPPER_N, UPPER_C, BACKSLASH,
-            ]
-        } else {
-            vec![BACKSLASH, BACKSLASH, QUESTION, BACKSLASH]
-        };
-        extended.extend_from_slice(if wide.starts_with(&[BACKSLASH, BACKSLASH]) {
-            &wide[2..]
-        } else {
-            &wide
-        });
-        wide = extended;
-    }
-
-    wide.push(0);
-    wide
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -252,13 +169,8 @@ impl AppSettingsRepository {
             ),
         };
         fs::create_dir_all(&self.app_data_dir)?;
-        let temporary = self
-            .app_data_dir
-            .join(format!(".settings.{}.tmp", Uuid::new_v4()));
-        fs::write(&temporary, serde_json::to_vec_pretty(&normalized_settings)?)?;
-        let target = self.path();
-        atomic_replace(&temporary, &target)?;
-        Ok(())
+        let payload = serde_json::to_vec_pretty(&normalized_settings)?;
+        atomic_write(&self.path(), &payload)
     }
 
     fn path(&self) -> PathBuf {

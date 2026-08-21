@@ -14,7 +14,7 @@ use memmap2::MmapOptions;
 use std::collections::HashMap;
 use std::fs::File;
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Instant;
 use tokio::sync::oneshot;
 use uuid::Uuid;
@@ -23,6 +23,14 @@ pub struct WorkspaceSession {
     pub id: Uuid,
     pub workspace_id: Uuid,
     pub repository: WorkspaceRepository,
+    /// 每个 session 都持有一份 OS 写锁引用；close 后仍在执行的 mutation 继续持有
+    /// clone，避免锁在提交中途被新进程取得。
+    write_lock: Arc<crate::persistence::WorkspaceWriteLock>,
+    /// 只串行化同一 workspace 的短持久化提交窗口。
+    mutation_gate: Arc<crate::persistence::MutationGate>,
+    /// 多文件工作区访问的一致性边界。读取持共享锁；提交和 recovery 持独占锁，
+    /// 让读取者只观察到事务前或事务后的完整快照。
+    access_gate: Arc<crate::persistence::WorkspaceAccessGate>,
 }
 
 /// 单个 response runtime 的引用计数所有者。
@@ -146,6 +154,9 @@ pub struct AppState {
     response_scopes: RwLock<HashMap<Uuid, ResponseScope>>,
     /// 当前窗口绑定的工作区会话。启动入口阶段为 None。
     pub workspace: RwLock<Option<WorkspaceSession>>,
+    /// 串行化 open/close 的完整会话转换；同根 reload 会在此范围内等待活动 mutation
+    /// 的提交完成，再执行 recovery/snapshot 并替换 session。
+    workspace_transition: Mutex<()>,
     /// 尚未确认落盘的 YApi 导入计划。计划不包含项目 Token。
     pub yapi_plans: RwLock<HashMap<Uuid, apogee_core::yapi::YapiImportPlan>>,
     /// 请求中注册表。key 是 ExecHandle.id（= 响应 id）。
@@ -169,6 +180,7 @@ impl AppState {
             semantic_meta: RwLock::new(HashMap::new()),
             response_scopes: RwLock::new(HashMap::new()),
             workspace: RwLock::new(None),
+            workspace_transition: Mutex::new(()),
             yapi_plans: RwLock::new(HashMap::new()),
             in_flight: RwLock::new(HashMap::new()),
         })
@@ -190,15 +202,42 @@ impl AppState {
         self.store.clear();
     }
 
+    #[cfg(test)]
+    /// 为直接 state 测试保留的便捷入口。它与命令层一样，在同根 reload 时先等待
+    /// 旧 session 的 mutation gate，再恢复未完成事务并替换 session。
     pub fn open_workspace(
         &self,
         repository: WorkspaceRepository,
         runtime_root: impl AsRef<std::path::Path>,
     ) -> Result<(Uuid, Uuid)> {
+        let root = repository.root().to_path_buf();
+        self.with_workspace_open_transition(&root, |write_lock| {
+            repository.recover_pending_transactions()?;
+            self.open_workspace_with_write_lock(repository, runtime_root, write_lock)
+        })
+    }
+
+    /// 在已受 open/close transition 保护且工作区锁已取得时发布新 session。
+    ///
+    /// 调用方必须先在 [`Self::with_workspace_open_transition`] 内执行 recovery、snapshot
+    /// 及其他打开前 I/O；同根 reload 只有在旧 mutation 完成后才能进入这些步骤。
+    pub(crate) fn open_workspace_with_write_lock(
+        &self,
+        repository: WorkspaceRepository,
+        runtime_root: impl AsRef<std::path::Path>,
+        write_lock: Arc<crate::persistence::WorkspaceWriteLock>,
+    ) -> Result<(Uuid, Uuid)> {
+        let expected_root =
+            crate::persistence::WorkspaceWriteLock::canonical_root(repository.root())?;
+        if write_lock.root() != expected_root {
+            bail!("WORKSPACE_LOCK_MISMATCH");
+        }
+
         let workspace_id = repository.id()?;
         let session_id = Uuid::new_v4();
         // response body 只属于本次 session；同一 workspace 重开也绝不复用旧 body。
-        // 在取得全局写锁前创建唯一目录，避免目录 I/O 延长工作区切换临界区。
+        // runtime 目录在取得跨进程工作区锁后、取得进程内 workspace 写锁前创建，避免
+        // 目录 I/O 延长 session 切换临界区。
         let runtime = ResponseRuntime::new(
             runtime_root
                 .as_ref()
@@ -228,6 +267,9 @@ impl AppState {
             id: session_id,
             workspace_id,
             repository,
+            write_lock,
+            mutation_gate: Arc::new(crate::persistence::MutationGate::default()),
+            access_gate: Arc::new(crate::persistence::WorkspaceAccessGate::default()),
         });
         drop(guard);
         if replaced {
@@ -240,7 +282,91 @@ impl AppState {
         Ok((workspace_id, session_id))
     }
 
+    /// 串行化完整的 open/close 状态转换，并在复用当前 root 的 OS lock 前先取得旧
+    /// session 的 mutation gate。这样 recovery 不会观察或回滚活动事务的中间状态。
+    ///
+    /// 闭包在 transition 与（若为同 root）mutation gate 均持有时运行；它应完成该
+    /// workspace 的 recovery、snapshot、registry/runtime migration，并最终调用
+    /// [`Self::open_workspace_with_write_lock`] 发布新 session。
+    pub(crate) fn with_workspace_open_transition<T>(
+        &self,
+        root: &std::path::Path,
+        operation: impl FnOnce(Arc<crate::persistence::WorkspaceWriteLock>) -> Result<T>,
+    ) -> Result<T> {
+        let _transition = self
+            .workspace_transition
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let canonical_root = crate::persistence::WorkspaceWriteLock::canonical_root(root)?;
+        let existing = {
+            let guard = self
+                .workspace
+                .read()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            guard.as_ref().and_then(|session| {
+                (session.write_lock.root() == canonical_root).then(|| {
+                    (
+                        Arc::clone(&session.write_lock),
+                        Arc::clone(&session.mutation_gate),
+                        Arc::clone(&session.access_gate),
+                    )
+                })
+            })
+        };
+        let (write_lock, mutation_gate, access_gate) = match existing {
+            Some((write_lock, mutation_gate, access_gate)) => {
+                (write_lock, Some(mutation_gate), Some(access_gate))
+            }
+            None => (
+                Arc::new(crate::persistence::WorkspaceWriteLock::acquire_canonical(
+                    canonical_root,
+                )?),
+                None,
+                None,
+            ),
+        };
+        let _mutation = mutation_gate.as_ref().map(|gate| gate.lock());
+        let _access = access_gate.as_ref().map(|gate| gate.write());
+        operation(write_lock)
+    }
+
+    /// 在共享访问边界内执行工作区读取。读取者彼此并发；它们只会在一个实际提交或
+    /// recovery 正在发布多文件状态时短暂等待，因此不会观察到旧 manifest 与新文件
+    /// 清理交错的半成品。
     pub fn with_workspace<T>(
+        &self,
+        workspace_id: Uuid,
+        session_id: Uuid,
+        operation: impl FnOnce(&WorkspaceRepository) -> Result<T>,
+    ) -> Result<T> {
+        let access_gate = self.workspace_access_gate(workspace_id, session_id)?;
+        let _access = access_gate.read();
+        self.with_workspace_after_access_gate(workspace_id, session_id, operation)
+    }
+
+    /// 在不持有 workspace 读锁时捕获当前 session 的多文件访问 gate。等待 gate 后
+    /// 必须重新校验 session，避免 close/open 与等待中的调用形成锁环。
+    fn workspace_access_gate(
+        &self,
+        workspace_id: Uuid,
+        session_id: Uuid,
+    ) -> Result<Arc<crate::persistence::WorkspaceAccessGate>> {
+        let guard = self
+            .workspace
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let session = guard
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("当前没有打开的工作区"))?;
+        if session.workspace_id != workspace_id || session.id != session_id {
+            bail!("WORKSPACE_SESSION_EXPIRED");
+        }
+        Ok(Arc::clone(&session.access_gate))
+    }
+
+    /// 调用方已持有 session 的 access gate 后，重新校验 session 并在整个仓储操作
+    /// 期间持有 workspace 读锁；close/open 因而不能在文件读取或提交中途替换 session。
+    fn with_workspace_after_access_gate<T>(
         &self,
         workspace_id: Uuid,
         session_id: Uuid,
@@ -259,12 +385,66 @@ impl AppState {
         operation(&session.repository)
     }
 
-    /// 在同一 session 临界区内将工作区仓储与其 response runtime 提供给短事务。
-    ///
-    /// 锁顺序与 `open_workspace`/`begin_request` 一致：先读取 workspace，再读取 runtime。
+    /// 在不持有 workspace 读锁时先取得当前 session 的提交与访问 gate，再重新校验
+    /// session。这样 close/open 不会在等待另一个 mutation 时形成锁环；读取只会等待
+    /// 正在执行的实际提交，不会等待排队中的 mutation。
+    fn mutation_context(
+        &self,
+        workspace_id: Uuid,
+        session_id: Uuid,
+    ) -> Result<(
+        Arc<crate::persistence::MutationGate>,
+        Arc<crate::persistence::WorkspaceWriteLock>,
+        Arc<crate::persistence::WorkspaceAccessGate>,
+    )> {
+        let guard = self
+            .workspace
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let session = guard
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("当前没有打开的工作区"))?;
+        if session.workspace_id != workspace_id || session.id != session_id {
+            bail!("WORKSPACE_SESSION_EXPIRED");
+        }
+        Ok((
+            Arc::clone(&session.mutation_gate),
+            Arc::clone(&session.write_lock),
+            Arc::clone(&session.access_gate),
+        ))
+    }
+
+    /// 对当前 workspace 执行短持久化提交。调用者必须先在该闭包外完成解析、网络
+    /// 和 staging；这里仅用于读改写、发布与其必要的 snapshot。独占 access gate
+    /// 覆盖整个闭包，使跨 manifest/文件的读取只观察到提交前或提交后状态。
+    pub fn with_workspace_mutation<T>(
+        &self,
+        workspace_id: Uuid,
+        session_id: Uuid,
+        operation: impl FnOnce(&WorkspaceRepository) -> Result<T>,
+    ) -> Result<T> {
+        let (mutation_gate, _workspace_lock, access_gate) =
+            self.mutation_context(workspace_id, session_id)?;
+        let _mutation = mutation_gate.lock();
+        let _access = access_gate.write();
+        self.with_workspace_after_access_gate(workspace_id, session_id, operation)
+    }
+
+    /// 在共享 access gate 内将工作区仓储与其 response runtime 提供给短读取。
     /// 长路径可以在闭包中 clone `Arc<ResponseRuntime>`，释放锁后继续持有 runtime lease；
     /// 这保证旧 session 的目录不会在锁外 I/O 期间被提前回收。
     fn with_workspace_runtime<T>(
+        &self,
+        workspace_id: Uuid,
+        session_id: Uuid,
+        operation: impl FnOnce(&WorkspaceRepository, &Arc<ResponseRuntime>) -> Result<T>,
+    ) -> Result<T> {
+        let access_gate = self.workspace_access_gate(workspace_id, session_id)?;
+        let _access = access_gate.read();
+        self.with_workspace_runtime_after_access_gate(workspace_id, session_id, operation)
+    }
+
+    fn with_workspace_runtime_after_access_gate<T>(
         &self,
         workspace_id: Uuid,
         session_id: Uuid,
@@ -287,10 +467,10 @@ impl AppState {
         operation(&session.repository, &runtime_guard)
     }
 
-    /// 在同一 session 临界区内执行既依赖工作区仓储、又依赖指定响应 body 的短操作。
+    /// 在同一 session 临界区内执行既依赖工作区仓储、又依赖指定响应 body 的短读取。
     ///
-    /// 回调获得 owning runtime lease 而非裸 `Spool`；若未来确实需要锁外工作，只能
-    /// clone 该 `Arc` 以延迟目录回收，不能脱离 runtime 保存 spool 路径。
+    /// 此入口仅由 state 回归测试使用；生产的 history 持久化走下方的 mutation 版本。
+    #[cfg(test)]
     pub(crate) fn with_workspace_and_response<T>(
         &self,
         workspace_id: Uuid,
@@ -298,25 +478,72 @@ impl AppState {
         response_id: Uuid,
         operation: impl FnOnce(&WorkspaceRepository, &Arc<ResponseRuntime>) -> Result<T>,
     ) -> Result<T> {
+        let access_gate = self.workspace_access_gate(workspace_id, session_id)?;
+        let _access = access_gate.read();
+        self.with_workspace_and_response_after_access_gate(
+            workspace_id,
+            session_id,
+            response_id,
+            operation,
+        )
+    }
+
+    fn with_workspace_and_response_after_access_gate<T>(
+        &self,
+        workspace_id: Uuid,
+        session_id: Uuid,
+        response_id: Uuid,
+        operation: impl FnOnce(&WorkspaceRepository, &Arc<ResponseRuntime>) -> Result<T>,
+    ) -> Result<T> {
         let access = Self::response_access(workspace_id, session_id);
-        self.with_workspace_runtime(workspace_id, session_id, |repository, runtime| {
-            let scope = self
-                .response_scopes
-                .read()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .get(&response_id)
-                .copied();
-            match scope {
-                Some(ResponseScope::Workspace(owner)) if owner == access => {
-                    operation(repository, runtime)
+        self.with_workspace_runtime_after_access_gate(
+            workspace_id,
+            session_id,
+            |repository, runtime| {
+                let scope = self
+                    .response_scopes
+                    .read()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .get(&response_id)
+                    .copied();
+                match scope {
+                    Some(ResponseScope::Workspace(owner)) if owner == access => {
+                        operation(repository, runtime)
+                    }
+                    Some(_) => bail!("RESPONSE_SESSION_EXPIRED"),
+                    None => bail!("RESPONSE_NOT_FOUND"),
                 }
-                Some(_) => bail!("RESPONSE_SESSION_EXPIRED"),
-                None => bail!("RESPONSE_NOT_FOUND"),
-            }
-        })
+            },
+        )
+    }
+
+    /// 与 [`Self::with_workspace_mutation`] 相同，但还在同一 session 临界区校验
+    /// response scope；history 等会同时持久化 workspace 元数据和读取 response body
+    /// 的路径必须使用它，不能绕开 mutation/access gate。
+    pub(crate) fn with_workspace_and_response_mutation<T>(
+        &self,
+        workspace_id: Uuid,
+        session_id: Uuid,
+        response_id: Uuid,
+        operation: impl FnOnce(&WorkspaceRepository, &Arc<ResponseRuntime>) -> Result<T>,
+    ) -> Result<T> {
+        let (mutation_gate, _workspace_lock, access_gate) =
+            self.mutation_context(workspace_id, session_id)?;
+        let _mutation = mutation_gate.lock();
+        let _access = access_gate.write();
+        self.with_workspace_and_response_after_access_gate(
+            workspace_id,
+            session_id,
+            response_id,
+            operation,
+        )
     }
 
     pub fn close_workspace(&self, workspace_id: Uuid, session_id: Uuid) -> Result<()> {
+        let _transition = self
+            .workspace_transition
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         // 提前创建启动页 runtime，使目录 I/O 不进入 workspace 写锁临界区；若随后发现
         // session 已失效，局部 Arc 会立即删除这个尚未发布的临时目录。
         let startup_runtime = Self::new_startup_runtime()?;
@@ -1249,6 +1476,304 @@ mod tests {
             .unwrap();
         state
             .close_workspace(second_workspace, second_session)
+            .unwrap();
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn workspace_write_lock_rejects_second_app_state_until_first_closes() {
+        let root = std::env::temp_dir().join(format!(
+            "apogee-workspace-session-lock-test-{}",
+            Uuid::new_v4()
+        ));
+        let workspace_root = root.join("workspace");
+        let first_state = AppState::new().unwrap();
+        let second_state = AppState::new().unwrap();
+        let repository = WorkspaceRepository::create(&workspace_root, "First".into()).unwrap();
+        let (workspace_id, first_session) = first_state
+            .open_workspace(repository, root.join("runtime-first"))
+            .unwrap();
+
+        let error = second_state
+            .open_workspace(
+                WorkspaceRepository::open(&workspace_root).unwrap(),
+                root.join("runtime-second"),
+            )
+            .unwrap_err();
+        assert_eq!(error.to_string(), "WORKSPACE_LOCKED");
+
+        first_state
+            .close_workspace(workspace_id, first_session)
+            .unwrap();
+        let (reopened_workspace, second_session) = second_state
+            .open_workspace(
+                WorkspaceRepository::open(&workspace_root).unwrap(),
+                root.join("runtime-second"),
+            )
+            .unwrap();
+        assert_eq!(reopened_workspace, workspace_id);
+        second_state
+            .close_workspace(reopened_workspace, second_session)
+            .unwrap();
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn mutation_gate_serializes_writes_while_queued_mutations_leave_reads_available() {
+        use std::sync::{
+            mpsc::{self, TryRecvError},
+            Arc,
+        };
+        use std::thread;
+        use std::time::Duration;
+
+        let root =
+            std::env::temp_dir().join(format!("apogee-mutation-gate-test-{}", Uuid::new_v4()));
+        let workspace_root = root.join("workspace");
+        let runtime_root = root.join("runtime");
+        let state = Arc::new(AppState::new().unwrap());
+        let repository = WorkspaceRepository::create(&workspace_root, "First".into()).unwrap();
+        let (workspace_id, session_id) = state.open_workspace(repository, &runtime_root).unwrap();
+        let held_gate = Arc::clone(
+            &state
+                .workspace
+                .read()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .as_ref()
+                .expect("workspace 必须仍处于打开状态")
+                .mutation_gate,
+        );
+        let held_mutation = held_gate.lock();
+        let (mutation_attempt_tx, mutation_attempt_rx) = mpsc::channel();
+        held_gate.set_contention_hook(move || {
+            mutation_attempt_tx.send(()).unwrap();
+        });
+
+        let (first_entered_tx, first_entered_rx) = mpsc::channel();
+        let (release_first_tx, release_first_rx) = mpsc::channel();
+        let first_state = Arc::clone(&state);
+        let first = thread::spawn(move || {
+            first_state.with_workspace_mutation(workspace_id, session_id, |repository| {
+                first_entered_tx.send(()).unwrap();
+                release_first_rx.recv().unwrap();
+                repository.create_environment("first".into()).map(|_| ())
+            })
+        });
+
+        mutation_attempt_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("第一个 mutation 必须已确认观察到被占用的 gate");
+        assert!(held_gate.is_locked(), "人工占用 mutation gate 必须生效");
+        // 读取不等待仅排队中的 mutation；只有实际进入提交闭包后才会取得独占 access
+        // gate，以保证多文件读写的一致性。
+        state
+            .with_workspace(workspace_id, session_id, |repository| repository.snapshot())
+            .unwrap();
+
+        drop(held_mutation);
+        first_entered_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("第一个 mutation 必须在释放 gate 后进入提交闭包");
+        let (second_entered_tx, second_entered_rx) = mpsc::channel();
+        let second_state = Arc::clone(&state);
+        let second = thread::spawn(move || {
+            second_state.with_workspace_mutation(workspace_id, session_id, |repository| {
+                second_entered_tx.send(()).unwrap();
+                repository.create_environment("second".into()).map(|_| ())
+            })
+        });
+        mutation_attempt_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("第二个 mutation 必须已实际尝试取得 gate");
+        assert_eq!(second_entered_rx.try_recv(), Err(TryRecvError::Empty));
+
+        release_first_tx.send(()).unwrap();
+        first.join().unwrap().unwrap();
+        second_entered_rx.recv().unwrap();
+        second.join().unwrap().unwrap();
+        held_gate.clear_contention_hook();
+
+        let snapshot = state
+            .with_workspace(workspace_id, session_id, |repository| repository.snapshot())
+            .unwrap();
+        assert!(snapshot
+            .environments
+            .iter()
+            .any(|item| item.name == "first"));
+        assert!(snapshot
+            .environments
+            .iter()
+            .any(|item| item.name == "second"));
+        state.close_workspace(workspace_id, session_id).unwrap();
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn environment_delete_waits_for_in_flight_reader_and_preserves_its_snapshot() {
+        use std::sync::{
+            mpsc::{self, TryRecvError},
+            Arc,
+        };
+        use std::thread;
+
+        let root = std::env::temp_dir().join(format!(
+            "apogee-environment-reader-delete-test-{}",
+            Uuid::new_v4()
+        ));
+        let workspace_root = root.join("workspace");
+        let runtime_root = root.join("runtime");
+        let state = Arc::new(AppState::new().unwrap());
+        let repository = WorkspaceRepository::create(&workspace_root, "First".into()).unwrap();
+        let environment = repository.create_environment("reader-safe".into()).unwrap();
+        let environment_id = environment.id;
+        let (workspace_id, session_id) = state.open_workspace(repository, &runtime_root).unwrap();
+
+        let (reader_ready_tx, reader_ready_rx) = mpsc::channel();
+        let (resume_reader_tx, resume_reader_rx) = mpsc::channel();
+        let reader_state = Arc::clone(&state);
+        let reader = thread::spawn(move || {
+            reader_state.with_workspace(workspace_id, session_id, |repository| {
+                repository.read_environment_with_after_manifest(environment_id, || {
+                    // 暂停点位于 manifest 已确认引用该环境、目标文件尚未读取之间。
+                    reader_ready_tx.send(()).unwrap();
+                    resume_reader_rx.recv().unwrap();
+                    Ok(())
+                })
+            })
+        });
+        reader_ready_rx.recv().unwrap();
+
+        let delete_gate = Arc::clone(
+            &state
+                .workspace
+                .read()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .as_ref()
+                .expect("workspace 必须仍处于打开状态")
+                .access_gate,
+        );
+        let (delete_lock_attempt_tx, delete_lock_attempt_rx) = mpsc::channel();
+        delete_gate.set_write_contention_hook(move || {
+            delete_lock_attempt_tx.send(()).unwrap();
+        });
+        let (delete_entered_tx, delete_entered_rx) = mpsc::channel();
+        let delete_state = Arc::clone(&state);
+        let deleter = thread::spawn(move || {
+            delete_state.with_workspace_mutation(workspace_id, session_id, |repository| {
+                delete_entered_tx.send(()).unwrap();
+                repository.delete_environment(environment_id)
+            })
+        });
+        delete_lock_attempt_rx
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .expect("删除 mutation 必须已确认受活动 reader 的 access gate 阻塞");
+        assert_eq!(delete_entered_rx.try_recv(), Err(TryRecvError::Empty));
+
+        resume_reader_tx.send(()).unwrap();
+        let read_environment = reader.join().unwrap().unwrap();
+        assert_eq!(read_environment.name, "reader-safe");
+        delete_entered_rx.recv().unwrap();
+        let snapshot = deleter.join().unwrap().unwrap();
+        delete_gate.clear_write_contention_hook();
+        assert!(!snapshot
+            .environments
+            .iter()
+            .any(|entry| entry.id == environment_id));
+        state.close_workspace(workspace_id, session_id).unwrap();
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn same_root_reload_waits_for_active_environment_create_before_recovery() {
+        use std::sync::{
+            mpsc::{self, TryRecvError},
+            Arc,
+        };
+        use std::thread;
+        use std::time::Duration;
+
+        let root = std::env::temp_dir().join(format!(
+            "apogee-same-root-reload-transaction-test-{}",
+            Uuid::new_v4()
+        ));
+        let workspace_root = root.join("workspace");
+        let runtime_root = root.join("runtime");
+        let state = Arc::new(AppState::new().unwrap());
+        let repository = WorkspaceRepository::create(&workspace_root, "First".into()).unwrap();
+        let (workspace_id, session_id) = state.open_workspace(repository, &runtime_root).unwrap();
+        let (published_tx, published_rx) = mpsc::channel();
+        let (resume_tx, resume_rx) = mpsc::channel();
+        let worker_state = Arc::clone(&state);
+        let worker = thread::spawn(move || {
+            worker_state.with_workspace_mutation(workspace_id, session_id, move |repository| {
+                repository.create_environment_with_manifest_writer(
+                    "reload-safe".into(),
+                    move |path, manifest| {
+                        // 此时 create 已将 staging 发布到目标文件，但尚未发布 manifest。
+                        published_tx.send(()).unwrap();
+                        resume_rx.recv().unwrap();
+                        let yaml = serde_yaml_ng::to_string(manifest)?;
+                        crate::persistence::atomic_write(path, yaml.as_bytes())
+                    },
+                )
+            })
+        });
+        published_rx.recv().unwrap();
+        let reload_gate = Arc::clone(
+            &state
+                .workspace
+                .read()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .as_ref()
+                .expect("workspace 必须仍处于打开状态")
+                .mutation_gate,
+        );
+        let (reload_gate_attempt_tx, reload_gate_attempt_rx) = mpsc::channel();
+        reload_gate.set_contention_hook(move || {
+            reload_gate_attempt_tx.send(()).unwrap();
+        });
+
+        let (reload_finished_tx, reload_finished_rx) = mpsc::channel();
+        let reload_state = Arc::clone(&state);
+        let reload_root = workspace_root.clone();
+        let reload_runtime = runtime_root.clone();
+        let reloader = thread::spawn(move || {
+            let result = WorkspaceRepository::open(&reload_root)
+                .and_then(|repository| reload_state.open_workspace(repository, reload_runtime));
+            reload_finished_tx.send(result).unwrap();
+        });
+
+        // 该 hook 位于 transition 已取得、尝试取得旧 mutation gate 的边界；recovery
+        // 因而不能在活动 create 已发布目标文件但未写入 manifest 时抢先执行。
+        reload_gate_attempt_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("同根 reload 必须已实际尝试取得旧 mutation gate");
+        assert!(matches!(
+            reload_finished_rx.try_recv(),
+            Err(TryRecvError::Empty)
+        ));
+
+        resume_tx.send(()).unwrap();
+        let environment = worker.join().unwrap().unwrap();
+        let (reloaded_workspace, reloaded_session) = reload_finished_rx
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap()
+            .unwrap();
+        reloader.join().unwrap();
+        reload_gate.clear_contention_hook();
+
+        let loaded = state
+            .with_workspace(reloaded_workspace, reloaded_session, |repository| {
+                repository.read_environment(environment.id)
+            })
+            .unwrap();
+        assert_eq!(loaded.name, "reload-safe");
+        state
+            .close_workspace(reloaded_workspace, reloaded_session)
             .unwrap();
 
         std::fs::remove_dir_all(root).unwrap();
