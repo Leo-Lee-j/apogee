@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { ref, computed, defineAsyncComponent, watch } from 'vue'
-import { fetchResponseRange, responseUrl, type AppError } from '@/ipc'
+import { fetchResponseRange, ipc, responseUrl, type AppError } from '@/ipc'
 import { isKnownOfficialHeader } from '@/features/commonHeaders'
+import { getResponsePresentation } from '@/features/responsePresentation'
 import { useTabsStore } from '@/stores/tabs'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import AppTooltip from '@/components/ui/AppTooltip.vue'
 import NaiveThemeScope from '@/components/NaiveThemeScope.vue'
-import { IconCode, IconCopy, IconList, IconPreview, IconTime } from '@/components/ui/icons'
+import { IconCode, IconCopy, IconDownload, IconList, IconPreview, IconTime } from '@/components/ui/icons'
 
 /**
  * 响应区 —— 性能设计的核心战场（02 文档 §4.4）。
@@ -31,6 +32,8 @@ const section = ref<Section>('body')
 const bodyView = ref<BodyView>('pretty')
 const codeTarget = ref<CodeTarget>('windows')
 const copyState = ref('')
+const saveState = ref('')
+const saving = ref(false)
 const codeMirrorView = ref<CodeMirrorSearchApi | null>(null)
 
 function handleResponseKeydown(event: KeyboardEvent) {
@@ -84,6 +87,11 @@ const canPreview = computed(() => {
   const contentType = resp.value?.contentType?.toLowerCase() ?? ''
   return contentType.includes('html') || contentType.startsWith('image/') || contentType.includes('svg')
 })
+const presentation = computed(() => resp.value ? getResponsePresentation(resp.value) : null)
+const isFileResponse = computed(() => presentation.value?.isFile ?? false)
+const suggestedFileName = computed(() => presentation.value?.suggestedFileName ?? 'response.bin')
+const canSaveResponse = computed(() => Boolean(resp.value && !resp.value.truncated))
+const actionState = computed(() => saveState.value || copyState.value)
 const previewSrc = computed(() => resp.value ? responseUrl(resp.value.id) : '')
 const actualRequest = computed(() =>
   requestError.value
@@ -180,6 +188,7 @@ watch(() => resp.value?.id, () => {
   section.value = 'body'
   bodyView.value = isJson.value && resp.value?.syntaxHighlight ? 'pretty' : 'raw'
   copyState.value = ''
+  saveState.value = ''
 }, { immediate: true })
 
 watch([requestError, actualRequest], () => {
@@ -213,6 +222,42 @@ function fmtBytes(n: number) {
 
 function fmtMs(n: number) {
   return n < 1 ? `${n.toFixed(2)} ms` : `${n.toFixed(n < 10 ? 1 : 0)} ms`
+}
+
+function operationErrorMessage(error: unknown, fallback: string) {
+  if (typeof error === 'object' && error !== null && 'message' in error) {
+    return String(error.message)
+  }
+  return error instanceof Error ? error.message : fallback
+}
+
+function showSaveState(message: string) {
+  saveState.value = message
+  window.setTimeout(() => {
+    if (saveState.value === message) saveState.value = ''
+  }, 3200)
+}
+
+async function saveResponse() {
+  const current = resp.value
+  if (!current || current.truncated || saving.value) return
+
+  const responseId = current.id
+  const fileName = suggestedFileName.value
+  saving.value = true
+  saveState.value = ''
+  try {
+    const result = await ipc.saveResponse(responseId, fileName)
+    if (result && resp.value?.id === responseId) {
+      showSaveState(`已保存 ${fmtBytes(result.bytesWritten)}`)
+    }
+  } catch (error) {
+    if (resp.value?.id === responseId) {
+      showSaveState(operationErrorMessage(error, '保存失败'))
+    }
+  } finally {
+    saving.value = false
+  }
 }
 
 async function copyResponse() {
@@ -284,18 +329,24 @@ async function copyText(text: string, success = '已复制') {
     </div>
 
     <div v-if="(resp && !requestError) || (requestError && actualRequest && section === 'actual')" class="subbar">
-      <div v-if="resp && section === 'body'" class="body-views" role="tablist" aria-label="响应体视图">
-        <button type="button" role="tab" :aria-selected="bodyView === 'pretty'" :disabled="!isJson || !resp.syntaxHighlight" :class="{ on: bodyView === 'pretty' }" @click="bodyView = 'pretty'"><AppIcon :component="IconCode" :size="14" />Body</button>
-        <button type="button" role="tab" :aria-selected="bodyView === 'raw'" :class="{ on: bodyView === 'raw' }" @click="bodyView = 'raw'"><AppIcon :component="IconCode" :size="14" />原文</button>
-        <button type="button" role="tab" :aria-selected="bodyView === 'tree'" :disabled="!isJson || !resp.indexed" :class="{ on: bodyView === 'tree' }" @click="bodyView = 'tree'"><AppIcon :component="IconList" :size="14" />树形</button>
-        <button type="button" role="tab" :aria-selected="bodyView === 'preview'" :disabled="!canPreview" :class="{ on: bodyView === 'preview' }" @click="bodyView = 'preview'"><AppIcon :component="IconPreview" :size="14" />预览</button>
-        <span class="format-label">{{ resp.contentType ?? '未知类型' }}<template v-if="resp.charset"> · {{ resp.charset }}</template></span>
+      <div v-if="resp && section === 'body'" class="body-views" :role="isFileResponse ? undefined : 'tablist'" aria-label="响应体视图">
+        <template v-if="!isFileResponse">
+          <button type="button" role="tab" :aria-selected="bodyView === 'pretty'" :disabled="!isJson || !resp.syntaxHighlight" :class="{ on: bodyView === 'pretty' }" @click="bodyView = 'pretty'"><AppIcon :component="IconCode" :size="14" />Body</button>
+          <button type="button" role="tab" :aria-selected="bodyView === 'raw'" :class="{ on: bodyView === 'raw' }" @click="bodyView = 'raw'"><AppIcon :component="IconCode" :size="14" />原文</button>
+          <button type="button" role="tab" :aria-selected="bodyView === 'tree'" :disabled="!isJson || !resp.indexed" :class="{ on: bodyView === 'tree' }" @click="bodyView = 'tree'"><AppIcon :component="IconList" :size="14" />树形</button>
+          <button type="button" role="tab" :aria-selected="bodyView === 'preview'" :disabled="!canPreview" :class="{ on: bodyView === 'preview' }" @click="bodyView = 'preview'"><AppIcon :component="IconPreview" :size="14" />预览</button>
+        </template>
+        <span class="format-label"><template v-if="isFileResponse">文件响应 · </template>{{ resp.contentType ?? '未知类型' }}<template v-if="resp.charset"> · {{ resp.charset }}</template></span>
       </div>
       <span v-else class="section-label">{{ { body: '响应体', headers: '响应 Headers', cookies: '响应 Cookies', timing: '请求耗时明细', actual: '最终发送到网络的请求', error: '错误信息' }[section] }}</span>
       <span class="spacer" />
-      <span v-if="copyState" class="copy-state" role="status">{{ copyState }}</span>
+      <span v-if="actionState" class="copy-state" role="status">{{ actionState }}</span>
       <span v-if="resp && section !== 'actual'" class="tier" :title="`渲染分级：${resp.tier}`">{{ tierLabel[resp.tier] }}{{ resp.syntaxHighlight ? '' : ' · 无高亮' }}</span>
       <AppTooltip v-if="resp && section !== 'actual'">
+        <template #trigger><button type="button" class="icon-button" aria-label="另存响应体" :disabled="!canSaveResponse || saving" @click="saveResponse"><AppIcon :component="IconDownload" :size="15" /></button></template>
+        {{ resp.truncated ? '响应已截断，不能另存为完整文件' : saving ? '正在保存响应体…' : '另存响应体' }}
+      </AppTooltip>
+      <AppTooltip v-if="resp && section !== 'actual' && (!isFileResponse || section !== 'body')">
         <template #trigger><button type="button" class="icon-button" aria-label="复制当前响应内容" @click="copyResponse"><AppIcon :component="IconCopy" :size="15" /></button></template>
         复制当前内容
       </AppTooltip>
@@ -314,8 +365,23 @@ async function copyText(text: string, success = '已复制') {
         </ul>
       </div>
       <template v-else-if="resp || actualRequest">
+        <div v-if="resp && section === 'body' && isFileResponse" class="file-response">
+          <div class="file-response-card">
+            <div class="file-response-icon"><AppIcon :component="IconDownload" :size="24" /></div>
+            <div class="file-response-content">
+              <p class="file-response-eyebrow">文件响应</p>
+              <h3>{{ suggestedFileName }}</h3>
+              <p class="file-response-meta">{{ resp.contentType ?? '未知 MIME 类型' }} · {{ fmtBytes(resp.sizeBytes) }}</p>
+              <p class="file-response-note">将已接收的响应体字节直接保存，不经过前端文本转换或格式化。</p>
+              <p v-if="resp.truncated" class="file-response-warning" role="alert">响应超过缓存上限，内容不完整，不能安全地另存为文件。</p>
+              <div class="actions">
+                <button type="button" class="primary-action" :disabled="!canSaveResponse || saving" @click="saveResponse"><AppIcon :component="IconDownload" :size="15" />{{ saving ? '正在保存…' : '另存为' }}</button>
+              </div>
+            </div>
+          </div>
+        </div>
         <!-- >50MB：不渲染，只给摘要 + 出口（02 文档 §4.4 SummaryOnly 分级） -->
-        <div v-if="resp && section === 'body' && resp.tier === 'summaryOnly' && bodyView !== 'raw'" class="summary">
+        <div v-else-if="resp && section === 'body' && resp.tier === 'summaryOnly' && bodyView !== 'raw'" class="summary">
           <p class="big">{{ fmtBytes(resp.sizeBytes) }} 响应体</p>
           <p class="dim">超过 50 MB，不在界面内渲染。这是设计行为，不是失败。</p>
           <div class="actions">
@@ -503,7 +569,21 @@ async function copyText(text: string, success = '已复制') {
   border: 1px solid var(--a-border); border-radius: var(--a-radius-md); color: var(--a-text);
   font: var(--a-fs-sm)/var(--a-lh-sm) var(--a-font-ui); cursor: pointer;
 }
-.actions button:hover { background: var(--a-hover); }
+.actions button:hover:not(:disabled) { background: var(--a-hover); }
+.actions button:disabled, .icon-button:disabled { opacity: .42; cursor: not-allowed; }
+.primary-action { display: inline-flex; align-items: center; gap: 6px; background: var(--a-primary) !important; border-color: var(--a-primary) !important; color: var(--a-on-primary, #fff) !important; }
+.primary-action:hover:not(:disabled) { filter: brightness(1.08); }
+.file-response { flex: 1 1 auto; min-height: 0; display: grid; place-items: center; padding: 20px; overflow: auto; background: color-mix(in srgb, var(--a-bg-1) 72%, transparent); }
+.file-response-card { width: min(100%, 560px); display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 16px; padding: 20px; border: 1px solid var(--a-border); border-radius: var(--a-radius-md); background: var(--a-bg-2); box-shadow: var(--a-shadow-sm); }
+.file-response-icon { width: 42px; height: 42px; display: grid; place-items: center; border-radius: var(--a-radius-md); background: var(--a-primary-bg); color: var(--a-primary); }
+.file-response-content { min-width: 0; }
+.file-response-eyebrow, .file-response-meta, .file-response-note, .file-response-warning { margin: 0; }
+.file-response-eyebrow { color: var(--a-primary); font: var(--a-fs-xs)/var(--a-lh-xs) var(--a-font-ui); font-weight: var(--a-fw-medium); }
+.file-response-content h3 { margin: 5px 0 6px; overflow-wrap: anywhere; color: var(--a-text); font: var(--a-fs-md)/var(--a-lh-md) var(--a-font-ui); }
+.file-response-meta { color: var(--a-text-dim); font: var(--a-fs-xs)/var(--a-lh-xs) var(--a-font-mono); }
+.file-response-note { margin-top: 12px; color: var(--a-text-faint); font-size: var(--a-fs-sm); }
+.file-response-warning { margin-top: 12px; color: var(--a-warn); font-size: var(--a-fs-sm); }
+.file-response .actions { margin-top: 16px; }
 .preview { flex: 1 1 auto; width: 100%; min-height: 0; border: 0; background: #fff; }
 .data-table { flex: 1 1 auto; min-height: 0; overflow: auto; font: var(--a-fs-result)/var(--a-lh-result) var(--a-font-ui); }
 .data-row { min-height: var(--a-h-result-row); display: grid; grid-template-columns: minmax(140px, 28%) minmax(260px, 1fr); border-bottom: 1px solid var(--a-border); }

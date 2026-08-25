@@ -66,7 +66,6 @@ const loading = ref(true)
 const err = ref<string | null>(null)
 const metrics = ref<CmMetrics | null>(null)
 const loadedBytes = ref(0)
-const lastText = ref('')
 
 const transformed = computed(() => mode.value !== 'raw')
 // 大文档的主要成本来自编辑器扩展维护的索引，而不是可见行本身。
@@ -103,7 +102,6 @@ async function mountEditor() {
         : mode.value === 'escaped'
           ? JSON.stringify(chunk.text)
           : chunk.text
-    lastText.value = documentText
 
     const extensions: unknown[] = [
       lineNumbers(),
@@ -251,19 +249,6 @@ async function toggleFolds(all: boolean) {
   ;(all ? foldAll : unfoldAll)(view.value)
 }
 
-function download() {
-  if (loadedBytes.value !== (props.totalBytes || loadedBytes.value)) {
-    err.value = '大响应请使用原文视图分片查看；完整下载将在文件保存接口接入后提供。'
-    return
-  }
-  const blob = new Blob([lastText.value], { type: 'application/json;charset=utf-8' })
-  const link = document.createElement('a')
-  link.href = URL.createObjectURL(blob)
-  link.download = `response-${props.responseId}.${mode.value === 'escaped' ? 'txt' : 'json'}`
-  link.click()
-  URL.revokeObjectURL(link.href)
-}
-
 onMounted(mountEditor)
 onBeforeUnmount(destroyEditor)
 watch(() => [props.responseId, props.highlight, props.formatJson], () => {
@@ -300,7 +285,6 @@ defineExpose({ metrics, canSearch, openSearch: searchText, closeSearch })
         <button type="button" @click="toggleFolds(false)">展开</button>
         <button type="button" @click="searchText">搜索</button>
       </template>
-      <button type="button" @click="download">下载</button>
     </div>
     <div v-if="loading" class="state">加载首屏分片…</div>
     <div v-else-if="err" class="state err">

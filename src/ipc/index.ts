@@ -105,6 +105,11 @@ export interface PublicResponseSummary {
 /** Existing UI consumers use this alias; it can never be a raw internal Rust summary. */
 export type ResponseSummary = PublicResponseSummary
 
+/** Result of a native, binary-safe response-body save. `null` means the user cancelled the dialog. */
+export interface SaveResponseResult {
+  bytesWritten: number
+}
+
 export interface MemInfo {
   workingSetBytes: number
   privateBytes: number
@@ -416,6 +421,11 @@ export const ipc = {
   /** 取响应摘要。**不含 body。** */
   getResponseMeta(responseId: string): Promise<ResponseSummary> {
     return call('get_response_meta', { ...sessionArgs(), responseId })
+  },
+
+  /** 通过原生对话框将已接收响应体的字节安全地另存为文件。 */
+  saveResponse(responseId: string, suggestedName: string): Promise<SaveResponseResult | null> {
+    return call('save_response', { ...sessionArgs(), responseId, suggestedName })
   },
 
   /** 按路径取一页树节点。path 为空字符串表示根。 */

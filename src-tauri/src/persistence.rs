@@ -305,6 +305,61 @@ pub(crate) fn atomic_write_with_replace(
     Ok(())
 }
 
+/// 将 source 的原始字节流复制到 target 同目录的唯一临时文件，sync 后原子发布。
+///
+/// 这和 [`atomic_write`] 一样保证观察者只会看到旧完整文件或新完整文件；不同的是
+/// source 可以是很大的 response spool，所以绝不能先读进内存再交给 `atomic_write`。
+/// 目标目录由原生保存对话框创建或选择，缺失时直接报错，避免后台悄悄在用户机器上
+/// 创建意外路径。
+pub(crate) fn atomic_copy(source: &Path, target: &Path) -> Result<u64> {
+    atomic_copy_with_replace(source, target, atomic_replace)
+}
+
+/// 为保存响应体的确定性故障测试保留发布边界；生产代码使用 [`atomic_replace`]。
+pub(crate) fn atomic_copy_with_replace(
+    source: &Path,
+    target: &Path,
+    replace: impl FnOnce(&Path, &Path) -> Result<()>,
+) -> Result<u64> {
+    let parent = target
+        .parent()
+        .with_context(|| format!("目标文件没有父目录：{}", target.display()))?;
+    if !parent.is_dir() {
+        bail!("保存目录不存在：{}", parent.display());
+    }
+    // Do not derive the temporary leaf from the user-selected name: a legal 255-character target
+    // must not become an invalid path merely because the UUID suffix is appended.
+    let temporary = parent.join(format!(".apogee-response-{}.tmp", Uuid::new_v4()));
+
+    let copy_result = (|| -> io::Result<u64> {
+        let mut input = File::open(source)?;
+        let mut output = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)?;
+        let bytes_written = io::copy(&mut input, &mut output)?;
+        // 先关闭句柄再发布：Windows 的 ReplaceFileW/MoveFileExW 要求如此。
+        output.sync_all()?;
+        Ok(bytes_written)
+    })();
+    let bytes_written = match copy_result {
+        Ok(bytes_written) => bytes_written,
+        Err(error) => {
+            return cleanup_temporary_after_failure(
+                &temporary,
+                error.into(),
+                "复制并同步响应临时文件失败",
+            );
+        }
+    };
+
+    if let Err(error) = replace(&temporary, target) {
+        return cleanup_temporary_after_failure(&temporary, error, "发布响应文件失败");
+    }
+
+    Ok(bytes_written)
+}
+
 pub(crate) fn atomic_replace(temporary: &Path, target: &Path) -> Result<()> {
     #[cfg(windows)]
     {
@@ -388,11 +443,11 @@ fn windows_wide_path(path: &Path) -> Vec<u16> {
     wide
 }
 
-fn cleanup_temporary_after_failure(
+fn cleanup_temporary_after_failure<T>(
     temporary: &Path,
     error: anyhow::Error,
     action: &str,
-) -> Result<()> {
+) -> Result<T> {
     match fs::remove_file(temporary) {
         Ok(()) => {}
         Err(cleanup_error) if cleanup_error.kind() == io::ErrorKind::NotFound => {}

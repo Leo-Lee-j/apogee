@@ -74,6 +74,7 @@ pub fn run() {
             commands::spike_index_response,
             commands::spike_get_response_tree,
             commands::get_response_meta,
+            commands::save_response,
             commands::index_response,
             commands::get_response_tree,
             commands::process_memory,
@@ -257,6 +258,13 @@ mod commands {
         session_id: Uuid,
         snapshot: WorkspaceSnapshot,
         state: crate::workspace_state::WorkspaceState,
+    }
+
+    /// 已将原始响应体完整复制到用户通过原生对话框选择的位置。
+    #[derive(Debug, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct SaveResponseResult {
+        bytes_written: u64,
     }
 
     #[tauri::command]
@@ -559,6 +567,59 @@ mod commands {
             .response_summary(workspace_id, session_id, id)
             .map(|summary| PublicResponseSummary::from(&summary))
             .map_err(|error| error.to_string())
+    }
+
+    /// 使用原生保存对话框将指定 response spool 直接复制到用户选定的位置。
+    ///
+    /// 目标路径不会经过 IPC，因此 WebView 无法把它变成任意文件写入能力。先在
+    /// 短校验中确认 response 属于调用方的 workspace session，再由 AppState 在复制
+    /// 前重新验证并持有旧 runtime lease；关闭/切换工作区不会读到新 session 的文件。
+    #[tauri::command]
+    pub async fn save_response(
+        app: tauri::AppHandle,
+        state: State<'_, Arc<AppState>>,
+        workspace_id: String,
+        session_id: String,
+        response_id: String,
+        suggested_name: String,
+    ) -> Result<Option<SaveResponseResult>, String> {
+        let response_id = parse_id(&response_id)?;
+        let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
+        let state = state.inner().clone();
+        let file_name = safe_save_file_name(&suggested_name, response_id);
+
+        tokio::task::spawn_blocking(move || {
+            use tauri_plugin_dialog::{DialogExt, FilePath};
+
+            let summary = state
+                .response_summary(workspace_id, session_id, response_id)
+                .map_err(|error| error.to_string())?;
+            if summary.truncated {
+                return Err("响应体已达到缓存上限并被截断，不能另存为完整文件".to_string());
+            }
+
+            let Some(selection) = app
+                .dialog()
+                .file()
+                .set_title("另存响应体")
+                .set_file_name(file_name)
+                .blocking_save_file()
+            else {
+                return Ok(None);
+            };
+            let destination = match selection {
+                FilePath::Path(path) => path,
+                FilePath::Url(url) => url
+                    .to_file_path()
+                    .map_err(|_| "当前平台返回的保存位置不是本地文件路径".to_string())?,
+            };
+            let bytes_written = state
+                .copy_response_to(workspace_id, session_id, response_id, &destination)
+                .map_err(|error| error.to_string())?;
+            Ok(Some(SaveResponseResult { bytes_written }))
+        })
+        .await
+        .map_err(|error| format!("等待保存响应体任务失败：{error}"))?
     }
 
     /// 显式建 JSON 索引。
@@ -1726,6 +1787,86 @@ mod commands {
                 repository.delete_node(id)
             })
             .map_err(|error| error.to_string())
+    }
+
+    /// 原生保存对话框的初始文件名仍是外部输入（响应 header / WebView），必须在 Rust
+    /// 侧再做一次跨平台清理。它只影响默认值，用户仍可在系统对话框中自行编辑。
+    fn safe_save_file_name(value: &str, response_id: Uuid) -> String {
+        let fallback = format!("response-{}.bin", response_id.simple());
+        let leaf = value
+            .rsplit(|character| matches!(character, '/' | '\\'))
+            .next()
+            .unwrap_or_default();
+        let cleaned: String = leaf
+            .chars()
+            // Remove bidi overrides/isolates too: they can make an executable-looking extension
+            // appear as a benign one in a native save dialog.
+            .filter(|character| !disallowed_file_name_character(*character))
+            .map(|character| {
+                if matches!(character, '<' | '>' | ':' | '"' | '|' | '?' | '*') {
+                    '_'
+                } else {
+                    character
+                }
+            })
+            .collect();
+        let trimmed = cleaned
+            .trim()
+            .trim_end_matches(|character: char| matches!(character, '.' | ' '));
+        let limited: String = trimmed.chars().take(180).collect();
+        if limited.is_empty()
+            || limited == "."
+            || limited == ".."
+            || windows_reserved_file_name(&limited)
+        {
+            return fallback;
+        }
+        limited
+    }
+
+    fn disallowed_file_name_character(character: char) -> bool {
+        character.is_control()
+            || matches!(
+                character,
+                '\u{00AD}'
+                    | '\u{061C}'
+                    | '\u{180E}'
+                    | '\u{200B}'..='\u{200F}'
+                    | '\u{202A}'..='\u{202E}'
+                    | '\u{2060}'
+                    | '\u{2066}'..='\u{2069}'
+                    | '\u{FEFF}'
+            )
+    }
+
+    fn windows_reserved_file_name(name: &str) -> bool {
+        let stem = name
+            .split_once('.')
+            .map(|(stem, _)| stem)
+            .unwrap_or(name)
+            .to_ascii_lowercase();
+        matches!(stem.as_str(), "con" | "prn" | "aux" | "nul")
+            || matches!(
+                stem.as_str(),
+                "com1"
+                    | "com2"
+                    | "com3"
+                    | "com4"
+                    | "com5"
+                    | "com6"
+                    | "com7"
+                    | "com8"
+                    | "com9"
+                    | "lpt1"
+                    | "lpt2"
+                    | "lpt3"
+                    | "lpt4"
+                    | "lpt5"
+                    | "lpt6"
+                    | "lpt7"
+                    | "lpt8"
+                    | "lpt9"
+            )
     }
 
     fn parse_id(s: &str) -> Result<Uuid, String> {

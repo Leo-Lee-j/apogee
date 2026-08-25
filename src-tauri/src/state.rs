@@ -1271,6 +1271,26 @@ impl AppState {
         })
     }
 
+    /// 将一个属于当前 workspace session 的完整响应体原子复制到用户选择的位置。
+    ///
+    /// 第一段只验证 response scope 并克隆 runtime lease；随后所有文件 I/O 都在锁外。
+    /// 即使用户在复制期间关闭工作区，旧 runtime 也会保持 spool 存活到复制结束，
+    /// 同时不会碰到后来打开的新 workspace 的 response 文件。
+    pub fn copy_response_to(
+        &self,
+        workspace_id: Uuid,
+        session_id: Uuid,
+        response_id: Uuid,
+        destination: &std::path::Path,
+    ) -> Result<u64> {
+        let access = Self::response_access(workspace_id, session_id);
+        let runtime =
+            self.with_response_runtime(access, response_id, |runtime| Ok(Arc::clone(runtime)))?;
+        let source = runtime.spool().path_for(response_id);
+        crate::persistence::atomic_copy(&source, destination)
+            .with_context(|| format!("保存响应体失败：{}", destination.display()))
+    }
+
     pub fn response_size(
         &self,
         workspace_id: Uuid,
