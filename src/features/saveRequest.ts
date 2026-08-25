@@ -6,7 +6,7 @@ import { useWorkspaceStore } from '@/stores/workspace'
 // 会破坏 S5 变体 b 的「首屏零 naive-ui」约束，保持动态 import。
 
 /**
- * 保存当前标签的统一入口：UrlBar 的「保存」按钮和全局 Ctrl/Cmd+S 都走这里。
+ * 请求保存统一入口：全局 Ctrl/Cmd+S 走这里。
  *
  * 成功/失败统一在这里 toast 反馈，保证按钮与快捷键行为一致；草稿不 toast，
  * 由「保存到」选择器在确认成功后 toast。

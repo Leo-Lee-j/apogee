@@ -923,7 +923,7 @@ defineExpose({
           :aria-current="n.id === activeNodeId ? 'true' : undefined"
           :style="{
             transform: `translateY(${(startIdx + i) * rowHeight}px)`,
-            paddingLeft: `${8 + n.depth * 18}px`,
+            paddingLeft: `${n.depth * 18}px`,
           }"
           @click="toggle(n)"
           @dblclick="pinOpen(n)"
@@ -999,13 +999,15 @@ defineExpose({
 .sidebar {
   width: var(--a-w-sidebar); flex: 0 0 auto;
   display: flex; flex-direction: column; min-height: 0;
+  padding: 8px;
   /* 没有 border-right —— 与主区之间靠 --a-gutter 的间隙分隔（02 文档 §3.2）。
      背景由 .a-block 提供，这里保留一份是为了组件单独使用时也有底色。 */
-  background: var(--a-sidebar, var(--a-bg-2));
+  background: var(--a-bg-2);
 }
 /* 功能按钮单独一行，过滤框独占下一行，避免侧边栏变窄时控件互相挤压。 */
 .head {
-  padding: 8px;
+  padding: 0 0 8px;
+  border-bottom: 1px solid var(--a-border);
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
@@ -1061,7 +1063,7 @@ defineExpose({
   pointer-events: none;
 }
 
-.delete-error { margin: 0 6px 4px; }
+.delete-error { margin: 0 0 4px; }
 .delete-confirmation { margin: 0; color: var(--a-text-soft); font: var(--a-fs-sm) / 1.6 var(--a-font-ui); }
 .action-modal { display: flex; flex-direction: column; gap: 10px; }
 .action-hint { margin: 0; color: var(--a-text-dim); font-size: var(--a-fs-sm); line-height: 1.5; }
@@ -1110,7 +1112,15 @@ defineExpose({
 .action-target-empty { margin: 0; padding: 12px 8px; color: var(--a-text-faint); font-size: var(--a-fs-sm); text-align: center; }
 
 /* scrollbar-gutter: stable —— 树加载/滚动条出现时内容区不会因 12px 滚动条而左右抖动。 */
-.scroller { flex: 1 1 auto; overflow-y: auto; overflow-x: hidden; min-height: 0; scrollbar-gutter: stable; }
+.scroller {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-height: 0;
+  scrollbar-gutter: stable;
+  padding: 0;
+  border-bottom: 1px solid var(--a-border);
+}
 .spacer { position: relative; }
 .row {
   position: absolute; left: 0; right: 0; height: var(--a-h-sidebar-row);
@@ -1226,7 +1236,10 @@ defineExpose({
   text-overflow: ellipsis;
 }
 .foot {
-  flex: 0 0 auto; padding: 3px 6px; border-top: 1px solid var(--a-border);
-  font: var(--a-fs-2xs)/var(--a-lh-xs) var(--a-font-mono); color: var(--a-text-faint);
+  flex: 0 0 auto;
+  padding: 0;
+  border-top: 0;
+  font: var(--a-fs-2xs)/var(--a-lh-xs) var(--a-font-mono);
+  color: var(--a-text-faint);
 }
 </style>

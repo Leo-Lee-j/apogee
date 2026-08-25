@@ -127,6 +127,7 @@ async function finish() {
   <div class="environment-controls">
     <AppButton
       class="variables-button"
+      text
       size="small"
       :disabled="!workspace.available"
       :aria-expanded="open"

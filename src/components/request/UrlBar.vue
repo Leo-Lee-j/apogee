@@ -13,9 +13,8 @@ import { useRequest } from '@/stores/request'
 import { useWorkspaceStore } from '@/stores/workspace'
 import type { RequestSpec } from '@/ipc'
 import { AppButton, AppDropdown, AppIcon, AppSelect } from '@/components/ui'
-import { IconLink, IconSave, IconSend } from '@/components/ui/icons'
+import { IconLink, IconSend } from '@/components/ui/icons'
 import NaiveThemeScope from '@/components/NaiveThemeScope.vue'
-import { saveCurrentRequest } from '@/features/saveRequest'
 import { toast } from '@/features/feedback'
 import SaveToPicker from './SaveToPicker.vue'
 import VariableInput from './VariableInput.vue'
@@ -170,11 +169,6 @@ function onUrl(value: string) {
   if (tab.value) tabs.patch(tab.value.id, { url: value, dirty: true })
 }
 
-/** 保存由 saveCurrentRequest 统一处理反馈；草稿会打开「保存到」选择器。 */
-function save() {
-  void saveCurrentRequest()
-}
-
 function triggerSend() {
   if (!sending.value) void send()
 }
@@ -297,15 +291,11 @@ defineExpose({
       <template #icon><AppIcon :component="IconSend" :size="16" /></template>
       发送
     </AppButton>
-    <AppButton class="save" secondary size="medium" @click="save">
-      <template #icon><AppIcon :component="IconSave" :size="16" /></template>
-      保存
-    </AppButton>
     <AppButton class="cases" secondary size="medium" title="将当前请求参数保存为调试用例" @click="openDebugCases">
       保存用例
     </AppButton>
 
-    <!-- 草稿保存：位置选择器（保存按钮与 Ctrl+S 共用，状态在 ui store） -->
+    <!-- 草稿保存：由 Ctrl/Cmd+S 触发，状态在 ui store。 -->
     <SaveToPicker v-model:show="ui.saveAsOpen" />
     <DebugCasesPanel
       v-model:show="casesOpen"
@@ -502,7 +492,7 @@ defineExpose({
   font-family: var(--a-font-editor);
   font-size: var(--a-fs-editor-base);
 }
-.send, .save, .cases {
+.send, .cases {
   min-width: 54px;
   height: var(--url-control-height);
   min-height: var(--url-control-height);
