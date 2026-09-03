@@ -20,7 +20,7 @@ pub fn import(command: &str) -> Result<CurlImportResult, AppError> {
         return Err(AppError::new(ErrorKind::Parse, "请粘贴一条 cURL 命令")
             .hint(Hint::new("命令应以 curl 开头")));
     }
-    let (normalized, follow_redirects, warnings) = normalize_for_parser(source);
+    let (normalized, follow_redirects, use_get, warnings) = normalize_for_parser(source);
     let parsed = std::panic::catch_unwind(|| ParsedRequest::from_str(&normalized))
         .map_err(|_| {
             AppError::new(ErrorKind::Parse, "无法解析 cURL 命令")
@@ -36,10 +36,19 @@ pub fn import(command: &str) -> Result<CurlImportResult, AppError> {
     let parsed_url = Url::parse(&parsed.url.to_string()).map_err(|error| {
         AppError::new(ErrorKind::Parse, "cURL 中的 URL 无效").detail(error.to_string())
     })?;
-    let params = parsed_url
+    let mut params: Vec<KeyValue> = parsed_url
         .query_pairs()
         .map(|(key, value)| row(key.into_owned(), value.into_owned()))
         .collect();
+
+    // When --get/-G is used, body data becomes query parameters
+    if use_get && !parsed.body.is_empty() {
+        for data_segment in &parsed.body {
+            for (key, value) in url::form_urlencoded::parse(data_segment.as_bytes()) {
+                params.push(row(key.into_owned(), value.into_owned()));
+            }
+        }
+    }
     let mut base_url = parsed_url;
     base_url.set_query(None);
 
@@ -85,7 +94,8 @@ pub fn import(command: &str) -> Result<CurlImportResult, AppError> {
         headers.push(row(key, value));
     }
 
-    let body = if parsed.body.is_empty() {
+    // When --get/-G is used, body becomes query params and body itself is empty
+    let body = if use_get || parsed.body.is_empty() {
         Body::None
     } else if content_type
         .to_ascii_lowercase()
@@ -117,7 +127,11 @@ pub fn import(command: &str) -> Result<CurlImportResult, AppError> {
 
     Ok(CurlImportResult {
         spec: RequestSpec {
-            method: parsed.method.as_str().to_string(),
+            method: if use_get {
+                "GET".to_string()
+            } else {
+                parsed.method.as_str().to_string()
+            },
             url: base_url.to_string(),
             params,
             path_params: Vec::new(),
@@ -134,7 +148,7 @@ pub fn import(command: &str) -> Result<CurlImportResult, AppError> {
     })
 }
 
-fn normalize_for_parser(command: &str) -> (String, bool, Vec<String>) {
+fn normalize_for_parser(command: &str) -> (String, bool, bool, Vec<String>) {
     let (command, ignored_comments) = normalize_lines(command);
     let command = normalize_executable(&command);
     let command = normalize_parser_aliases(&command);
@@ -145,6 +159,7 @@ fn normalize_for_parser(command: &str) -> (String, bool, Vec<String>) {
     let mut escaped = false;
     let mut at_token_start = true;
     let mut follow_redirects = false;
+    let mut use_get = false;
 
     while index < command.len() {
         let rest = &command[index..];
@@ -200,6 +215,23 @@ fn normalize_for_parser(command: &str) -> (String, bool, Vec<String>) {
             }
         }
 
+        let get_flag = if at_token_start && rest.starts_with("--get") {
+            Some("--get")
+        } else if at_token_start && rest.starts_with("-G") {
+            Some("-G")
+        } else {
+            None
+        };
+        if let Some(flag) = get_flag {
+            let suffix = &rest[flag.len()..];
+            if suffix.is_empty() || suffix.chars().next().is_some_and(char::is_whitespace) {
+                use_get = true;
+                // Strip the flag entirely - parser doesn't understand it
+                index += flag.len();
+                continue;
+            }
+        }
+
         normalized.push(character);
         at_token_start = character.is_whitespace();
         index += character.len_utf8();
@@ -210,7 +242,7 @@ fn normalize_for_parser(command: &str) -> (String, bool, Vec<String>) {
     } else {
         vec![format!("已忽略 {ignored_comments} 行注释")]
     };
-    (normalized, follow_redirects, warnings)
+    (normalized, follow_redirects, use_get, warnings)
 }
 
 /// `curl-parser` intentionally supports a small portable cURL grammar. Chromium's
@@ -253,6 +285,8 @@ fn normalize_parser_aliases(command: &str) -> String {
         if at_token_start {
             let alias = if rest.starts_with("--data-raw") {
                 Some(("--data-raw", "--data", false))
+            } else if rest.starts_with("--data-urlencode") {
+                Some(("--data-urlencode", "--data", false))
             } else if rest.starts_with("--cookie") {
                 Some(("--cookie", "--header ", true))
             } else if rest.starts_with("-b") {
@@ -516,5 +550,35 @@ mod tests {
         assert!(
             matches!(result.spec.body, Body::Json { ref content } if content.contains("Bytedance"))
         );
+    }
+
+    #[test]
+    fn imports_get_request_with_data_urlencode() {
+        let command = r#"curl --get -H "Access-Token:xxx" \
+--data-urlencode "bc_id=BC_ID" \
+--data-urlencode "filtering={\"keyword\": \"KEYWORD\", \"status\": [\"STATUS\"]}" \
+--data-urlencode "page=PAGE" \
+--data-urlencode "page_size=PAGE_SIZE" \
+https://business-api.tiktok.com/open_api/v1.3/advertiser/balance/get/"#;
+        let result = import(command).unwrap();
+        assert_eq!(result.spec.method, "GET");
+        assert_eq!(
+            result.spec.url,
+            "https://business-api.tiktok.com/open_api/v1.3/advertiser/balance/get/"
+        );
+        assert_eq!(result.spec.params.len(), 4);
+        assert_eq!(result.spec.params[0].key, "bc_id");
+        assert_eq!(result.spec.params[0].value, "BC_ID");
+        assert_eq!(result.spec.params[1].key, "filtering");
+        // URL decoding happens when the parser processes --data-urlencode values
+        assert!(result.spec.params[1].value.contains("keyword"));
+        assert!(result.spec.params[1].value.contains("KEYWORD"));
+        assert_eq!(result.spec.params[2].key, "page");
+        assert_eq!(result.spec.params[2].value, "PAGE");
+        assert_eq!(result.spec.params[3].key, "page_size");
+        assert_eq!(result.spec.params[3].value, "PAGE_SIZE");
+        assert_eq!(result.spec.headers[0].key, "access-token");
+        assert_eq!(result.spec.headers[0].value, "xxx");
+        assert!(matches!(result.spec.body, Body::None));
     }
 }
