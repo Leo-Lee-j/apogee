@@ -16,13 +16,19 @@ function quote(value: string): string {
 export function exportCurl(spec: RequestSpec): string {
   const parts = ['curl', '--request', quote(spec.method || 'GET')]
   const auth = spec.auth
-  if (auth?.type === 'basic') parts.push('--user', quote(`${auth.username}:${auth.password}`))
-  else if (auth?.type === 'bearer') parts.push('--header', quote(`Authorization: Bearer ${auth.token}`))
+  const explicitAuthorization = (spec.headers ?? []).some(h => h.enabled && h.key.trim().toLowerCase() === 'authorization')
+  if (!explicitAuthorization && (auth?.type === 'oauth1' || auth?.type === 'jwt')) {
+    throw new Error('OAuth 1.0 / JWT 需要发送时签名；请导出 Postman 集合以保留鉴权配置。')
+  }
+  if (!explicitAuthorization && auth?.type === 'basic') parts.push('--user', quote(`${auth.username}:${auth.password}`))
+  else if (!explicitAuthorization && auth?.type === 'bearer') parts.push('--header', quote(`Authorization: Bearer ${auth.token}`))
+  else if (!explicitAuthorization && auth?.type === 'oauth2') parts.push('--header', quote(`Authorization: ${auth.headerPrefix ? `${auth.headerPrefix} ` : ''}${auth.accessToken}`))
   else if (auth?.type === 'apiKey' && auth.location === 'header') parts.push('--header', quote(`${auth.key}: ${auth.value}`))
 
   for (const header of spec.headers ?? []) {
     if (header.enabled && header.key.trim()) parts.push('--header', quote(`${header.key}: ${header.value}`))
   }
+  if (auth?.type === 'apiKey' && auth.location === 'cookie' && !(spec.headers ?? []).some(h => h.enabled && h.key.trim().toLowerCase() === 'cookie')) parts.push('--header', quote(`Cookie: ${auth.key}=${auth.value}`))
   appendBody(parts, spec.body ?? { type: 'none' })
   if (spec.settings?.verifyTls === false) parts.push('--insecure')
   if (spec.settings?.followRedirects) parts.push('--location')

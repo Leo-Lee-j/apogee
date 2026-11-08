@@ -13,6 +13,9 @@
 //!    卡在 connect / TTFB 阶段，那时一个 chunk 都还没到。所以用 `tokio::select!`
 //!    把取消信号和网络 future 一起等。
 
+mod preparation;
+pub use preparation::{execute_prepared, PreparedRequest};
+
 use crate::error::{AppError, ErrorKind, Hint};
 use crate::model::{ActualRequest, KeyValue, ResponseMeta, Timing, ValueKind};
 use crate::public::{is_sensitive_name, is_sensitive_value};
@@ -54,15 +57,51 @@ pub fn build_url(spec: &RequestSpec) -> Result<String, AppError> {
         url = format!("https://{url}");
     }
 
-    // path 参数：`/users/:id` → `/users/42`
-    for param in spec.path_params.iter().filter(|item| item.enabled) {
-        if param.key.is_empty() {
-            continue;
+    // fragment 不属于 HTTP 请求目标，Query 必须追加在它之前。
+    let fragment = url.find('#').map(|index| url.split_off(index));
+
+    // 只替换路径中的完整占位符，一次扫描避免 :id 误替换 :identifier。
+    // authority/userinfo/query 中的同名文本不是路径参数。
+    let authority_start = url.find("://").map_or(0, |index| index + 3);
+    if let Some(relative_start) = url[authority_start..].find('/') {
+        let start = authority_start + relative_start;
+        let end = url.find('?').unwrap_or(url.len());
+        if start < end
+            && spec
+                .path_params
+                .iter()
+                .any(|item| item.enabled && !item.key.is_empty())
+        {
+            static PATTERN: OnceLock<regex::Regex> = OnceLock::new();
+            let pattern = PATTERN.get_or_init(|| {
+                regex::Regex::new(r"\{\{([A-Za-z_][A-Za-z0-9_-]*)\}\}|:([A-Za-z_][A-Za-z0-9_-]*)|\{([A-Za-z_][A-Za-z0-9_-]*)\}")
+                    .expect("valid path parameter pattern")
+            });
+            let mut values = HashMap::new();
+            for param in spec
+                .path_params
+                .iter()
+                .filter(|item| item.enabled && !item.key.is_empty())
+            {
+                values
+                    .entry(param.key.as_str())
+                    .or_insert_with(|| urlencoding_path(&param.value));
+            }
+            let path = pattern.replace_all(&url[start..end], |captures: &regex::Captures<'_>| {
+                let name = captures
+                    .get(1)
+                    .or_else(|| captures.get(2))
+                    .or_else(|| captures.get(3))
+                    .unwrap()
+                    .as_str();
+                values
+                    .get(name)
+                    .cloned()
+                    .unwrap_or_else(|| captures[0].to_string())
+            });
+            let rebuilt = format!("{}{}{}", &url[..start], path, &url[end..]);
+            url = rebuilt;
         }
-        let encoded = urlencoding_path(&param.value);
-        url = url.replace(&format!("{{{{{}}}}}", param.key), &encoded);
-        url = url.replace(&format!(":{}", param.key), &encoded);
-        url = url.replace(&format!("{{{}}}", param.key), &encoded);
     }
 
     // query 参数
@@ -88,13 +127,14 @@ pub fn build_url(spec: &RequestSpec) -> Result<String, AppError> {
         location: ApiKeyIn::Query,
     } = &spec.auth
     {
-        if !key.trim().is_empty() {
-            pairs.push(format!(
-                "{}={}",
-                urlencoding_query(key),
-                urlencoding_query(value)
-            ));
+        if key.trim().is_empty() {
+            return Err(AppError::new(ErrorKind::Parse, "API Key 参数名不能为空"));
         }
+        pairs.push(format!(
+            "{}={}",
+            urlencoding_query(key),
+            urlencoding_query(value)
+        ));
     }
 
     if !pairs.is_empty() {
@@ -105,6 +145,9 @@ pub fn build_url(spec: &RequestSpec) -> Result<String, AppError> {
         url.push_str(&pairs.join("&"));
     }
 
+    if let Some(fragment) = fragment {
+        url.push_str(&fragment);
+    }
     Ok(url)
 }
 
@@ -344,6 +387,77 @@ mod tests {
     }
 
     #[test]
+    fn query_params_are_appended_before_fragments() {
+        for (input, expected) in [
+            (
+                "https://a.test/x#section",
+                "https://a.test/x?added=2#section",
+            ),
+            (
+                "https://a.test/x?already=1#section",
+                "https://a.test/x?already=1&added=2#section",
+            ),
+            (
+                "https://a.test/x#section?not_query",
+                "https://a.test/x?added=2#section?not_query",
+            ),
+        ] {
+            let mut s = spec(input);
+            s.params = vec![kv("added", "2", true)];
+            assert_eq!(build_url(&s).unwrap(), expected);
+            let wire = reqwest::Client::new()
+                .get(build_url(&s).unwrap())
+                .build()
+                .unwrap();
+            assert!(wire.url().query().unwrap().contains("added=2"));
+        }
+    }
+
+    #[test]
+    fn path_parameter_prefixes_never_corrupt_longer_names() {
+        let mut s = spec("https://a.test/:id/:identifier/{id}/{{identifier}}/:missing");
+        s.path_params = vec![kv("id", "42", true), kv("identifier", "long", true)];
+        assert_eq!(
+            build_url(&s).unwrap(),
+            "https://a.test/42/long/42/long/:missing"
+        );
+    }
+
+    #[test]
+    fn path_parameter_replacement_never_modifies_authority_query_or_fragment() {
+        let mut s = spec("https://user:id@a.test/:id?literal=:id#/:id");
+        s.path_params = vec![kv("id", "42", true)];
+        assert_eq!(
+            build_url(&s).unwrap(),
+            "https://user:id@a.test/42?literal=:id#/:id"
+        );
+    }
+
+    #[test]
+    fn path_params_preserve_disabled_tokens_and_encode_values() {
+        let mut s = spec("https://a.test/:id/{name}");
+        s.path_params = vec![kv("id", "42", false), kv("name", "a b?x=1#z", true)];
+        assert_eq!(
+            build_url(&s).unwrap(),
+            "https://a.test/:id/a%20b%3Fx%3D1%23z"
+        );
+    }
+
+    #[test]
+    fn query_api_key_is_inserted_before_the_fragment() {
+        let mut s = spec("https://a.test/x#fragment");
+        s.auth = AuthConfig::ApiKey {
+            key: "token".into(),
+            value: "a&b".into(),
+            location: ApiKeyIn::Query,
+        };
+        assert_eq!(
+            build_url(&s).unwrap(),
+            "https://a.test/x?token=a%26b#fragment"
+        );
+    }
+
+    #[test]
     fn json_body_sets_content_type_and_passes_raw() {
         // 刻意不校验 JSON：调试时经常要故意发不合法的 JSON 看服务端反应。
         let got = encode_body(&Body::Json {
@@ -453,13 +567,143 @@ mod tests {
     // 这几条测的是「密钥/头最终去了哪里」。这类错误联网测不出来：请求发得出去、
     // 服务端返回 401 或 400，看起来像对方的问题。
 
+    #[test]
+    fn signed_auth_uses_final_url_and_content_type_and_is_redacted() {
+        let mut s = spec("http://photos.example.net/:resource?file=vacation.jpg");
+        s.path_params = vec![kv("resource", "photos", true)];
+        s.params = vec![kv("size", "original", true)];
+        s.auth = crate::auth::tests::oauth1();
+        let req = built(&s);
+        assert!(header_values(&req, "authorization")[0]
+            .contains("tR3%2BTy81lMeYAr%2FFid0kMTYa%2FWM%3D"));
+        let actual = snapshot_request(&req, &s);
+        assert!(actual
+            .sensitive_header_names
+            .iter()
+            .any(|n| n.eq_ignore_ascii_case("authorization")));
+        let preview = crate::public::PublicRequestPreview::from(&s);
+        let public =
+            preview.redact_actual_request(crate::public::PublicActualRequest::from(&actual));
+        let public = serde_json::to_string(&public).unwrap();
+        for secret in [
+            "dpf43f3p2l4k3l03",
+            "kd94hf93k423kf44",
+            "nnch734d00sl2jdk",
+            "tR3",
+        ] {
+            assert!(!public.contains(secret));
+        }
+        s.body = Body::UrlEncoded {
+            rows: vec![kv("extra", "b", true)],
+        };
+        let form = built(&s);
+        s.headers = vec![kv("Content-Type", "application/json", true)];
+        let raw = built(&s);
+        assert_ne!(
+            header_values(&form, "authorization"),
+            header_values(&req, "authorization")
+        );
+        assert_eq!(
+            header_values(&raw, "authorization"),
+            header_values(&req, "authorization")
+        );
+    }
+    #[tokio::test]
+    async fn oauth1_execution_returns_redirect_without_forwarding_stale_signature() {
+        use std::io::{Read, Write};
+        let server = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = server.local_addr().unwrap();
+        let worker = std::thread::spawn(move || {
+            let (mut stream, _) = server.accept().unwrap();
+            stream
+                .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+                .unwrap();
+            let mut buffer = [0; 8192];
+            let mut received = Vec::new();
+            while !received.windows(4).any(|w| w == b"\r\n\r\n") {
+                let n = stream.read(&mut buffer).unwrap();
+                assert!(n > 0);
+                received.extend_from_slice(&buffer[..n]);
+            }
+            stream.write_all(format!("HTTP/1.1 302 Found\r\nLocation: http://{address}/redirected\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").as_bytes()).unwrap();
+            String::from_utf8(received).unwrap()
+        });
+        let root = std::env::temp_dir().join(format!("apogee-auth-http-{}", Uuid::new_v4()));
+        let spool = Spool::new(&root).unwrap();
+        let mut s = spec(&format!("http://{address}/original"));
+        s.auth = crate::auth::tests::oauth1();
+        s.settings.timeout_ms = Some(5000);
+        s.settings.follow_redirects = Some(true);
+        let (_cancel, receiver) = tokio::sync::oneshot::channel();
+        let outcome = execute(Uuid::new_v4(), &s, None, &spool, receiver, |_| {}).await;
+        let Outcome::Done(meta) = outcome else {
+            panic!("OAuth1 must expose a 302 rather than follow it")
+        };
+        assert_eq!(meta.status, 302);
+        let wire = worker.join().unwrap();
+        assert!(wire.starts_with("GET /original "));
+        assert!(wire.to_ascii_lowercase().contains("authorization: oauth "));
+        let public = serde_json::to_string(&crate::public::PublicActualRequest::from(
+            &meta.actual_request,
+        ))
+        .unwrap();
+        assert!(!public.contains("dpf43f3p2l4k3l03"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn auth_panel_and_manual_authorization_override_url_userinfo() {
+        let mut s = spec("https://user:private-password@example.test/");
+        s.auth = crate::auth::tests::oauth1();
+        assert!(header_values(&built(&s), "authorization")[0].starts_with("OAuth "));
+        s.headers = vec![kv("Authorization", "Manual override", true)];
+        assert_eq!(
+            header_values(&built(&s), "authorization"),
+            vec!["Manual override"]
+        );
+    }
+
+    #[test]
+    fn new_auth_respects_manual_authorization_and_snapshot_provenance() {
+        for auth in [
+            crate::auth::tests::oauth1(),
+            AuthConfig::OAuth2 {
+                access_token: "secret".into(),
+                header_prefix: "Token".into(),
+                token_request: None,
+                obtained_at: None,
+                expires_at: None,
+                auto_refresh: false,
+                token_context: None,
+            },
+            AuthConfig::Jwt {
+                secret: "secret".into(),
+                payload: "{}".into(),
+                header: "{}".into(),
+                algorithm: crate::request::JwtAlgorithm::HS256,
+                header_prefix: "Bearer".into(),
+            },
+        ] {
+            let mut s = spec("https://example.test/");
+            s.auth = auth;
+            s.headers = vec![kv("aUThorization", "manual-secret", true)];
+            let req = built(&s);
+            assert_eq!(header_values(&req, "authorization"), vec!["manual-secret"]);
+            assert!(snapshot_request(&req, &s)
+                .sensitive_header_names
+                .iter()
+                .any(|n| n.eq_ignore_ascii_case("authorization")));
+            s.headers[0].enabled = false;
+            assert_ne!(
+                header_values(&built(&s), "authorization"),
+                vec!["manual-secret"]
+            );
+        }
+    }
+
     fn built(spec: &RequestSpec) -> reqwest::Request {
         let client = client_for(&spec.settings.resolve()).expect("建 client");
-        build_request(&client, spec)
-            .expect("组装请求")
-            .0
-            .build()
-            .expect("落成 Request")
+        build_request(&client, spec).expect("组装请求").0
     }
 
     fn header_values(request: &reqwest::Request, name: &str) -> Vec<String> {
@@ -575,6 +819,26 @@ mod tests {
             built(&s).url().as_str(),
             "https://a.test/x?already=1&p=2&k=v"
         );
+    }
+
+    #[test]
+    fn api_key_rejects_blank_names_and_cookie_injection_without_leaking_values() {
+        let client = client_for(&ResolvedSettings::default()).unwrap();
+        for (key, value, location) in [
+            ("", "private", ApiKeyIn::Header),
+            (" ", "private", ApiKeyIn::Query),
+            ("sid", "private; admin=true", ApiKeyIn::Cookie),
+            ("sid", "private\r\nX-Evil: y", ApiKeyIn::Cookie),
+        ] {
+            let mut s = spec("https://example.test/");
+            s.auth = AuthConfig::ApiKey {
+                key: key.into(),
+                value: value.into(),
+                location,
+            };
+            let error = build_request(&client, &s).unwrap_err();
+            assert!(!serde_json::to_string(&error).unwrap().contains("private"));
+        }
     }
 
     #[test]
@@ -726,7 +990,7 @@ fn ensure_crypto_provider() {
 ///
 /// §4.5 要求连接池复用与 DNS 缓存。每次请求新建 `Client` 会把两者都丢掉，
 /// 「请求发送开销 < 5ms」直接打穿。
-fn client_for(settings: &ResolvedSettings) -> Result<reqwest::Client, AppError> {
+pub(crate) fn client_for(settings: &ResolvedSettings) -> Result<reqwest::Client, AppError> {
     ensure_crypto_provider();
 
     let key = PoolKey {
@@ -877,14 +1141,14 @@ async fn execute_inner(
     // 解析在执行层入口完成，保证 URL、参数、Header、Body 和鉴权共享同一份
     // 环境快照。原始 spec 仍保留模板，不会被解析结果覆盖。
     let resolved = resolve_request(spec, environment)?;
-    let settings = resolved.settings.resolve();
+    let mut settings = resolved.settings.resolve();
+    // A signature binds method + URI. A redirected request requires a fresh signature;
+    // expose 3xx rather than forwarding a stale credential to another URI.
+    if matches!(resolved.auth, AuthConfig::OAuth1 { .. }) {
+        settings.follow_redirects = false;
+    }
     let client = client_for(&settings)?;
-    let (builder, url) = build_request(&client, &resolved)?;
-    let request = builder.build().map_err(|error| {
-        AppError::new(ErrorKind::Parse, "无法组装 HTTP 请求")
-            .detail(error.to_string())
-            .hint(Hint::new("检查请求方法、Header 和 Body 配置"))
-    })?;
+    let (request, url) = build_request(&client, &resolved)?;
     let actual_request = snapshot_request(&request, &resolved);
     let prepare_ms = prepare_start.elapsed().as_secs_f64() * 1000.0;
 
@@ -1153,9 +1417,11 @@ fn snapshot_request(request: &reqwest::Request, resolved: &RequestSpec) -> Actua
     let mut sensitive_header_names = snapshot_sensitive_names(&resolved.headers, true);
 
     match &resolved.auth {
-        AuthConfig::Basic { .. } | AuthConfig::Bearer { .. }
-            if !has_configured_header(&resolved.headers, "authorization") =>
-        {
+        AuthConfig::Basic { .. }
+        | AuthConfig::Bearer { .. }
+        | AuthConfig::OAuth1 { .. }
+        | AuthConfig::OAuth2 { .. }
+        | AuthConfig::Jwt { .. } => {
             push_sensitive_name(&mut sensitive_header_names, "authorization");
         }
         AuthConfig::ApiKey { key, location, .. } => match location {
@@ -1199,7 +1465,7 @@ fn snapshot_request(request: &reqwest::Request, resolved: &RequestSpec) -> Actua
 fn build_request(
     client: &reqwest::Client,
     spec: &RequestSpec,
-) -> Result<(reqwest::RequestBuilder, String), AppError> {
+) -> Result<(reqwest::Request, String), AppError> {
     let url = build_url(spec)?;
     let method = reqwest::Method::from_bytes(spec.method.trim().as_bytes()).map_err(|_| {
         AppError::new(
@@ -1209,8 +1475,6 @@ fn build_request(
         .hint(Hint::new("方法名只能含 token 字符，如 GET / POST / PATCH"))
     })?;
 
-    let mut builder = client.request(method, &url);
-
     // Header 面板里的显式配置拥有最高优先级：它会覆盖客户端默认 Header，
     // 以及鉴权和 body 自动生成的同名 Header。
     let user_headers: HashSet<String> = spec
@@ -1219,6 +1483,26 @@ fn build_request(
         .filter(|h| h.enabled && !h.key.trim().is_empty())
         .map(|h| h.key.trim().to_ascii_lowercase())
         .collect();
+
+    let mut request_url = reqwest::Url::parse(&url)
+        .map_err(|_| AppError::new(ErrorKind::Parse, "无法解析请求 URL"))?;
+    if user_headers.contains("authorization")
+        || matches!(
+            spec.auth,
+            AuthConfig::Basic { .. }
+                | AuthConfig::Bearer { .. }
+                | AuthConfig::OAuth1 { .. }
+                | AuthConfig::OAuth2 { .. }
+                | AuthConfig::Jwt { .. }
+        )
+    {
+        // reqwest extracts URL userinfo into a Basic Authorization header at construction.
+        // Remove it before that happens, otherwise it bypasses signed auth or appends a
+        // second Authorization alongside the explicit header / Basic / Bearer configuration.
+        let _ = request_url.set_username("");
+        let _ = request_url.set_password(None);
+    }
+    let mut builder = client.request(method, request_url);
 
     if !user_headers.contains("accept") {
         builder = builder.header(reqwest::header::ACCEPT, "*/*");
@@ -1230,7 +1514,7 @@ fn build_request(
         );
     }
 
-    builder = apply_auth(builder, &spec.auth, &user_headers);
+    builder = apply_auth(builder, &spec.auth, &user_headers)?;
 
     builder = apply_body(builder, &spec.body, &user_headers)?;
     for header in spec
@@ -1240,7 +1524,14 @@ fn build_request(
     {
         builder = builder.header(header.key.trim(), &header.value);
     }
-    Ok((builder, url))
+    let mut request = builder.build().map_err(|_| {
+        AppError::new(
+            ErrorKind::Parse,
+            "无法组装 HTTP 请求；请检查 URL、Header 和 Body 配置",
+        )
+    })?;
+    crate::auth::apply_signed_auth(&mut request, &spec.auth)?;
+    Ok((request, url))
 }
 
 fn open_stream(path: &Path) -> Result<(reqwest::Body, u64), AppError> {
@@ -1400,7 +1691,7 @@ fn apply_auth(
     mut builder: reqwest::RequestBuilder,
     auth: &AuthConfig,
     user_headers: &HashSet<String>,
-) -> reqwest::RequestBuilder {
+) -> Result<reqwest::RequestBuilder, AppError> {
     let taken = |name: &str| user_headers.contains(name);
 
     match auth {
@@ -1418,9 +1709,23 @@ fn apply_auth(
         } => {
             builder = match location {
                 ApiKeyIn::Header if !taken(&key.trim().to_ascii_lowercase()) => {
+                    if key.trim().is_empty() {
+                        return Err(AppError::new(ErrorKind::Parse, "API Key Header 名不能为空"));
+                    }
                     builder.header(key.trim(), value.as_str())
                 }
                 ApiKeyIn::Cookie if !taken("cookie") => {
+                    let valid_name = !key.is_empty()
+                        && key
+                            .bytes()
+                            .all(|b| b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b));
+                    let valid_value = value.bytes().all(|b| matches!(b, 0x21 | 0x23..=0x2b | 0x2d..=0x3a | 0x3c..=0x5b | 0x5d..=0x7e));
+                    if !valid_name || !valid_value {
+                        return Err(AppError::new(
+                            ErrorKind::Parse,
+                            "API Key Cookie 名或值不合法；请移除空白、分号、引号或控制字符",
+                        ));
+                    }
                     builder.header(reqwest::header::COOKIE, format!("{key}={value}"))
                 }
                 // `location: query` 在 `build_url` 里就拼进 URL 了 —— 那里是 query
@@ -1432,7 +1737,7 @@ fn apply_auth(
         // 用户已手写同名头，鉴权面板让位。
         _ => {}
     }
-    builder
+    Ok(builder)
 }
 
 /// 收集响应头。

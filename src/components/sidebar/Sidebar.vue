@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { postmanAuth } from '@/features/requestAuth'
 import { h, ref, computed, shallowRef, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useTabsStore } from '@/stores/tabs'
 import { useUiStore } from '@/stores/ui'
@@ -512,23 +513,6 @@ function postmanBody(body: RequestSpec['body']): Record<string, unknown> | undef
       variables: body.variables,
       ...(body.operationName ? { operationName: body.operationName } : {}),
     },
-  }
-}
-
-function postmanAuth(auth: RequestSpec['auth']): Record<string, unknown> | undefined {
-  if (!auth || auth.type === 'inherit') return undefined
-  if (auth.type === 'none') return { type: 'noauth' }
-  if (auth.type === 'basic') {
-    return { type: 'basic', basic: [{ key: 'username', value: auth.username, type: 'string' }, { key: 'password', value: auth.password, type: 'string' }] }
-  }
-  if (auth.type === 'bearer') return { type: 'bearer', bearer: [{ key: 'token', value: auth.token, type: 'string' }] }
-  return {
-    type: 'apikey',
-    apikey: [
-      { key: 'key', value: auth.key, type: 'string' },
-      { key: 'value', value: auth.value, type: 'string' },
-      { key: 'in', value: auth.location, type: 'string' },
-    ],
   }
 }
 

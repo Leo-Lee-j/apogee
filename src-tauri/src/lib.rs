@@ -13,8 +13,10 @@
 
 mod app_settings;
 mod mem;
+mod oauth2;
 mod persistence;
 mod protocol;
+mod request_preparation;
 mod state;
 mod workspace;
 mod workspace_registry;
@@ -83,6 +85,9 @@ pub fn run() {
             commands::spike_autorun,
             commands::send_request,
             commands::cancel_request,
+            commands::oauth2_fetch_token,
+            commands::oauth2_auth_operation,
+            commands::oauth2_cancel_token,
             commands::workspace_list,
             commands::workspace_create,
             commands::workspace_open,
@@ -739,7 +744,7 @@ mod commands {
     pub async fn send_request(
         app: tauri::AppHandle,
         state: State<'_, Arc<AppState>>,
-        mut spec: apogee_core::request::RequestSpec,
+        spec: apogee_core::request::RequestSpec,
         ctx: Option<apogee_core::request::ExecContext>,
         workspace_id: String,
         session_id: String,
@@ -748,51 +753,13 @@ mod commands {
         state
             .with_workspace(workspace_id, session_id, |_| Ok(()))
             .map_err(|error| error.to_string())?;
-        if let Some(raw_id) = ctx
-            .as_ref()
-            .and_then(|item| item.request_node_id.as_deref())
-        {
-            let request_id =
-                Uuid::parse_str(raw_id).map_err(|_| format!("非法的请求节点 id：{raw_id}"))?;
-            spec = state
-                .with_workspace(workspace_id, session_id, |repository| {
-                    repository.resolve_request_inheritance(request_id, spec)
-                })
-                .map_err(|error| error.to_string())?;
-        }
+        crate::request_preparation::validate_context(ctx.as_ref())
+            .map_err(|_| "请求执行上下文无效".to_string())?;
         // 应用级网络设置只作为默认值，显式配置在请求/集合层的字段优先。
         let data_dir = super::app_data_dir(&app)?;
         let settings = crate::app_settings::AppSettingsRepository::new(&data_dir)
             .load()
             .map_err(|error| error.to_string())?;
-        if spec.settings.timeout_ms.is_none() {
-            spec.settings.timeout_ms = Some(settings.timeout_ms);
-        }
-        if spec.settings.verify_tls.is_none() {
-            spec.settings.verify_tls = Some(settings.verify_tls);
-        }
-        if spec.settings.proxy_url.is_none() {
-            spec.settings.proxy_url = match settings.proxy_mode.as_str() {
-                "manual" => settings.proxy_url.filter(|v| !v.trim().is_empty()),
-                "none" => Some("direct://".to_string()),
-                _ => None,
-            };
-        }
-        let environment = match ctx.as_ref().and_then(|item| item.environment_id.as_deref()) {
-            Some(raw_id) => {
-                let environment_id =
-                    Uuid::parse_str(raw_id).map_err(|_| format!("非法的环境 id：{raw_id}"))?;
-                Some(
-                    state
-                        .with_workspace(workspace_id, session_id, |repository| {
-                            repository.read_environment(environment_id)
-                        })
-                        .map_err(|error| error.to_string())?,
-                )
-            }
-            None => None,
-        };
-
         let id = Uuid::new_v4();
         let tab_id = ctx.as_ref().and_then(|item| item.tab_id.clone());
         let lease = state
@@ -883,13 +850,11 @@ mod commands {
 
             let body = AssertUnwindSafe(async {
                 let outcome =
-                    apogee_core::http::execute(
+                    apogee_core::http::execute_prepared(
                         id,
-                        &spec,
-                        environment.as_ref(),
-                        runtime.spool(),
-                        cancel_rx,
-                        on_progress,
+                        crate::request_preparation::prepare(state2.clone(), workspace_id,
+                            session_id, spec, ctx, &settings),
+                        runtime.spool(), cancel_rx, on_progress,
                     )
                     .await;
 
@@ -1052,6 +1017,101 @@ mod commands {
     ) -> Result<bool, String> {
         let id = parse_id(&handle_id)?;
         Ok(state.cancel_inflight(id))
+    }
+
+    /// Token cancellation may arrive before the asynchronous fetch command registers its id.
+    #[tauri::command]
+    pub fn oauth2_cancel_token(
+        state: State<'_, Arc<AppState>>,
+        operation_id: String,
+    ) -> Result<bool, String> {
+        Ok(state.cancel_token_operation(parse_id(&operation_id)?))
+    }
+
+    /// Sensitive source preparation / credential result. Never normal response events or history.
+    #[tauri::command]
+    pub async fn oauth2_auth_operation(
+        app: tauri::AppHandle,
+        state: State<'_, Arc<AppState>>,
+        workspace_id: String,
+        session_id: String,
+        input: crate::oauth2::managed::Input,
+    ) -> Result<Option<crate::oauth2::managed::Output>, PublicError> {
+        let failure = || {
+            PublicError::from(&AppError::new(
+                apogee_core::ErrorKind::Io,
+                "OAuth2 operation could not complete",
+            ))
+        };
+        let (workspace, session) =
+            parse_session(&workspace_id, &session_id).map_err(|_| failure())?;
+        let data = super::app_data_dir(&app).map_err(|_| failure())?;
+        let settings = crate::app_settings::AppSettingsRepository::new(&data)
+            .load()
+            .map_err(|_| failure())?;
+        crate::oauth2::managed::run(state.inner().clone(), workspace, session, input, &settings)
+            .await
+    }
+
+    /// Explicit credential response only: no request events, response registration or history.
+    #[tauri::command]
+    pub async fn oauth2_fetch_token(
+        app: tauri::AppHandle,
+        state: State<'_, Arc<AppState>>,
+        workspace_id: String,
+        session_id: String,
+        input: crate::oauth2::TokenOperationInput,
+    ) -> Result<Option<apogee_core::oauth2::OAuth2TokenResponse>, PublicError> {
+        let fail = || {
+            PublicError::from(
+                &AppError::new(apogee_core::ErrorKind::Io, "无法启动 OAuth2 Token 操作")
+                    .hint(apogee_core::Hint::new("确认已打开工作区后重试")),
+            )
+        };
+        let (workspace_id, session_id) =
+            parse_session(&workspace_id, &session_id).map_err(|_| fail())?;
+        let data_dir = super::app_data_dir(&app).map_err(|_| fail())?;
+        let settings = crate::app_settings::AppSettingsRepository::new(&data_dir)
+            .load()
+            .map_err(|_| fail())?;
+        let mut auth = state
+            .with_workspace(workspace_id, session_id, |repo| {
+                input.node_id.map(|id| repo.read_auth(id)).transpose()
+            })
+            .map_err(|_| fail())?
+            .unwrap_or(apogee_core::request::AuthConfig::None);
+        if let apogee_core::request::AuthConfig::OAuth2 { token_request, .. } = &mut auth {
+            *token_request = Some(Box::new(input.request));
+        } else {
+            auth = apogee_core::request::AuthConfig::OAuth2 {
+                access_token: String::new(),
+                header_prefix: "Bearer".into(),
+                token_request: Some(Box::new(input.request)),
+                obtained_at: None,
+                expires_at: None,
+                auto_refresh: false,
+                token_context: None,
+            };
+        }
+        crate::oauth2::managed::run(
+            state.inner().clone(),
+            workspace_id,
+            session_id,
+            crate::oauth2::managed::Input {
+                operation_id: input.operation_id,
+                owner_id: input.node_id.unwrap_or(input.operation_id).to_string(),
+                node_id: input.node_id,
+                environment_id: input.environment_id,
+                auth,
+                expected_auth: None,
+                grant: Some(input.grant),
+                settings: input.settings,
+                ephemeral: input.node_id.is_none(),
+            },
+            &settings,
+        )
+        .await
+        .map(|value| value.and_then(|out| out.token))
     }
 
     /// 成功请求历史命令的 IPC 输入；前端仅需在 `input` 下传入当前扁平字段。
@@ -1535,11 +1595,15 @@ mod commands {
         request_id: String,
         name: String,
         spec: RequestSpec,
+        expected_auth: Option<apogee_core::request::AuthConfig>,
     ) -> Result<(), String> {
         let id = parse_id(&request_id)?;
         let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
         state
             .with_workspace_mutation(workspace_id, session_id, |repository| {
+                if let Some(auth) = &expected_auth {
+                    repository.ensure_auth_unchanged(id, auth)?;
+                }
                 repository.save_request(id, name, spec)
             })
             .map_err(|error| error.to_string())
@@ -1620,10 +1684,14 @@ mod commands {
         workspace_id: String,
         session_id: String,
         container: apogee_core::workspace::WorkspaceContainer,
+        expected_auth: Option<apogee_core::request::AuthConfig>,
     ) -> Result<apogee_core::workspace::WorkspaceContainer, String> {
         let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
         state
             .with_workspace_mutation(workspace_id, session_id, |repository| {
+                if let Some(auth) = &expected_auth {
+                    repository.ensure_auth_unchanged(container.id, auth)?;
+                }
                 repository.save_container(container)
             })
             .map_err(|error| error.to_string())
@@ -1793,10 +1861,7 @@ mod commands {
     /// 侧再做一次跨平台清理。它只影响默认值，用户仍可在系统对话框中自行编辑。
     fn safe_save_file_name(value: &str, response_id: Uuid) -> String {
         let fallback = format!("response-{}.bin", response_id.simple());
-        let leaf = value
-            .rsplit(|character| matches!(character, '/' | '\\'))
-            .next()
-            .unwrap_or_default();
+        let leaf = value.rsplit(['/', '\\']).next().unwrap_or_default();
         let cleaned: String = leaf
             .chars()
             // Remove bidi overrides/isolates too: they can make an executable-looking extension
@@ -1810,9 +1875,7 @@ mod commands {
                 }
             })
             .collect();
-        let trimmed = cleaned
-            .trim()
-            .trim_end_matches(|character: char| matches!(character, '.' | ' '));
+        let trimmed = cleaned.trim().trim_end_matches(['.', ' ']);
         let limited: String = trimmed.chars().take(180).collect();
         if limited.is_empty()
             || limited == "."

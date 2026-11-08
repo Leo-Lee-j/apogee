@@ -1406,7 +1406,7 @@ pub fn synth_json_payload(target_bytes: usize) -> Vec<u8> {
         let item = format!(
             r#"{{"id":{i},"name":"用户-{i}","email":"user{i}@example.com","active":{active},"score":{score}.5,"tags":["alpha","beta","gamma"],"profile":{{"city":"杭州","zip":"3100{z}","nested":{{"level":3,"note":"这是一段用于填充体积的中文描述文本，包含多字节字符以贴近真实场景"}}}}}}"#,
             i = i,
-            active = i % 2 == 0,
+            active = i.is_multiple_of(2),
             score = i % 100,
             z = i % 10
         );

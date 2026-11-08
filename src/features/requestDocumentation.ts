@@ -326,6 +326,12 @@ function authSection(auth: AuthConfig): RequestDocSection {
       return tableSection('auth', '鉴权 · Bearer Token', [
         row('token', 'string', 'Bearer Token，不展示凭据'),
       ])
+    case 'oauth1':
+      return summarySection('auth', '鉴权 · OAuth 1.0', auth.signatureMethod, '发送时签名；不展示凭据。')
+    case 'oauth2':
+      return summarySection('auth', '鉴权 · OAuth 2.0', auth.tokenRequest ? 'Client Credentials / 手动刷新' : '已有 Access Token', '通过 Authorization Header 发送；不展示凭据或 Token 端点配置。')
+    case 'jwt':
+      return summarySection('auth', '鉴权 · JWT', auth.algorithm, '发送时生成 JWT；不展示密钥和声明。')
     case 'apiKey': {
       const location = auth.location === 'header' ? 'Header' : auth.location === 'query' ? 'Query' : 'Cookie'
       return tableSection('auth', '鉴权 · API Key', [

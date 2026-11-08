@@ -187,3 +187,19 @@ pub fn clean_windows_path(value: &str) -> String {
         value.to_string()
     }
 }
+
+/// A single source of application network defaults for ordinary and credential requests.
+pub(crate) fn apply_network_defaults(
+    request: &mut apogee_core::request::RequestSettings,
+    settings: &AppSettings,
+) {
+    request.timeout_ms.get_or_insert(settings.timeout_ms);
+    request.verify_tls.get_or_insert(settings.verify_tls);
+    if request.proxy_url.is_none() {
+        request.proxy_url = match settings.proxy_mode.as_str() {
+            "manual" => settings.proxy_url.clone().filter(|v| !v.trim().is_empty()),
+            "none" => Some("direct://".into()),
+            _ => None,
+        };
+    }
+}

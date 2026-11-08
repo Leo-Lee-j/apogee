@@ -11,10 +11,10 @@ use apogee_core::response::{
     PREVIEW_READ_BYTES,
 };
 use memmap2::MmapOptions;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::fs::File;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex, RwLock, Weak};
 use std::time::Instant;
 use tokio::sync::oneshot;
 use uuid::Uuid;
@@ -74,6 +74,8 @@ impl Drop for ResponseRuntime {
 /// `apogee_core::http::execute` 的签名就是 `oneshot::Receiver<()>`，
 /// 直接用 sender 当注册表条目，取消时 `send(())` 一发即达，不需要桥接层。
 struct InFlight {
+    generation: Uuid,
+    token_operation: bool,
     cancel: oneshot::Sender<()>,
     #[allow(dead_code)]
     tab_id: Option<String>,
@@ -124,12 +126,16 @@ struct SyntheticRuntime {
 /// 创建时已在 session 读锁内固定 response spool、响应访问凭据并注册取消 receiver；
 /// 网络任务一旦取走它，就不会在工作区切换后意外改用新 session 的 spool 或 metadata。
 pub struct RequestLease {
+    generation: Uuid,
     runtime: Arc<ResponseRuntime>,
     cancel: oneshot::Receiver<()>,
     response_access: ResponseAccess,
 }
 
 impl RequestLease {
+    pub(crate) fn generation(&self) -> Uuid {
+        self.generation
+    }
     /// 交给 HTTP 执行器的资源只能消费一次，避免重复使用同一个取消 receiver。
     /// runtime lease 会持续到后台任务完全结束，之后才能回收已关闭 session 的 spool。
     pub(crate) fn into_execution_parts(
@@ -141,6 +147,14 @@ impl RequestLease {
 
 /// 响应摘要索引：响应 ID、传输体积、耗时和 Content-Type。体不进入此缓存。
 type ResponseMetaEntry = (Uuid, u64, Timing, Option<String>);
+
+/// No credentials or settled result cache; revision only invalidates queued draft snapshots.
+#[derive(Default)]
+pub(crate) struct OAuth2SourceLock {
+    pub(crate) gate: tokio::sync::Mutex<()>,
+    pub(crate) revision: std::sync::atomic::AtomicU64,
+}
+type OAuth2SourceLocks = HashMap<(Uuid, Uuid, String), Weak<OAuth2SourceLock>>;
 
 pub struct AppState {
     /// 当前活跃 response runtime。替换时只释放 AppState 的一份 Arc；仍在收尾的
@@ -161,6 +175,9 @@ pub struct AppState {
     pub yapi_plans: RwLock<HashMap<Uuid, apogee_core::yapi::YapiImportPlan>>,
     /// 请求中注册表。key 是 ExecHandle.id（= 响应 id）。
     in_flight: RwLock<HashMap<Uuid, InFlight>>,
+    /// Bounded early-cancellation markers; always lock in_flight before this mutex.
+    token_cancellations: Mutex<VecDeque<(Uuid, Instant)>>,
+    pub(crate) oauth2_source_locks: Mutex<OAuth2SourceLocks>,
 }
 
 impl AppState {
@@ -183,6 +200,8 @@ impl AppState {
             workspace_transition: Mutex::new(()),
             yapi_plans: RwLock::new(HashMap::new()),
             in_flight: RwLock::new(HashMap::new()),
+            token_cancellations: Mutex::new(VecDeque::new()),
+            oauth2_source_locks: Mutex::new(HashMap::new()),
         })
     }
 
@@ -601,6 +620,26 @@ impl AppState {
         request_id: Uuid,
         tab_id: Option<String>,
     ) -> Result<RequestLease> {
+        self.begin_request_kind(workspace_id, session_id, request_id, tab_id, false)
+    }
+
+    pub(crate) fn begin_token_request(
+        &self,
+        workspace_id: Uuid,
+        session_id: Uuid,
+        operation_id: Uuid,
+    ) -> Result<RequestLease> {
+        self.begin_request_kind(workspace_id, session_id, operation_id, None, true)
+    }
+
+    fn begin_request_kind(
+        &self,
+        workspace_id: Uuid,
+        session_id: Uuid,
+        request_id: Uuid,
+        tab_id: Option<String>,
+        token_operation: bool,
+    ) -> Result<RequestLease> {
         let guard = self
             .workspace
             .read()
@@ -621,8 +660,13 @@ impl AppState {
             .read()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .clone();
-        let cancel = self.register_inflight(request_id, tab_id);
+        let (cancel, generation) = if token_operation {
+            self.register_operation(request_id, tab_id, true)?
+        } else {
+            self.register_inflight(request_id, tab_id)?
+        };
         let lease = RequestLease {
+            generation,
             runtime,
             cancel,
             response_access,
@@ -632,14 +676,49 @@ impl AppState {
     }
 
     /// 注册一个正在执行的请求，返回 receiver 给 execute() 当取消信号。
-    fn register_inflight(&self, id: Uuid, tab_id: Option<String>) -> oneshot::Receiver<()> {
+    fn register_inflight(
+        &self,
+        id: Uuid,
+        tab_id: Option<String>,
+    ) -> Result<(oneshot::Receiver<()>, Uuid)> {
+        self.register_operation(id, tab_id, false)
+    }
+
+    fn register_operation(
+        &self,
+        id: Uuid,
+        tab_id: Option<String>,
+        token_operation: bool,
+    ) -> Result<(oneshot::Receiver<()>, Uuid)> {
         let (tx, rx) = oneshot::channel();
         let mut guard = self
             .in_flight
             .write()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        guard.insert(id, InFlight { cancel: tx, tab_id });
-        rx
+        if token_operation {
+            let mut markers = self
+                .token_cancellations
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            Self::prune_token_cancellations(&mut markers);
+            if markers.iter().any(|(cancelled, _)| *cancelled == id) {
+                bail!("TOKEN_OPERATION_CANCELLED");
+            }
+        }
+        if guard.contains_key(&id) {
+            bail!("REQUEST_ID_ALREADY_IN_FLIGHT");
+        }
+        let generation = Uuid::new_v4();
+        guard.insert(
+            id,
+            InFlight {
+                generation,
+                token_operation,
+                cancel: tx,
+                tab_id,
+            },
+        );
+        Ok((rx, generation))
     }
 
     /// 取消一个请求。`true` = 找到了并发了取消信号。
@@ -649,6 +728,60 @@ impl AppState {
             .in_flight
             .write()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(inflight) = guard.remove(&id) {
+            let _ = inflight.cancel.send(());
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Linearize source commit against cancellation. Hold no network or await inside this guard.
+    pub(crate) fn with_active_token<T>(
+        &self,
+        id: Uuid,
+        generation: Uuid,
+        commit: impl FnOnce() -> Result<T>,
+    ) -> Result<T> {
+        let guard = self.in_flight.read().unwrap_or_else(|p| p.into_inner());
+        if !guard
+            .get(&id)
+            .is_some_and(|entry| entry.generation == generation && entry.token_operation)
+        {
+            bail!("TOKEN_OPERATION_CANCELLED");
+        }
+        commit()
+    }
+
+    fn prune_token_cancellations(markers: &mut VecDeque<(Uuid, Instant)>) {
+        while markers
+            .front()
+            .is_some_and(|(_, at)| at.elapsed().as_secs() >= 120)
+        {
+            markers.pop_front();
+        }
+    }
+
+    /// Registration and cancellation share the in-flight lock, including early markers.
+    /// Ordinary HTTP ids/semantics are unaffected by token-only cancellation.
+    pub(crate) fn cancel_token_operation(&self, id: Uuid) -> bool {
+        let mut guard = self
+            .in_flight
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if guard.get(&id).is_some_and(|entry| !entry.token_operation) {
+            return false;
+        }
+        let mut markers = self
+            .token_cancellations
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        Self::prune_token_cancellations(&mut markers);
+        markers.retain(|(cancelled, _)| *cancelled != id);
+        if markers.len() >= 128 {
+            markers.pop_front();
+        }
+        markers.push_back((id, Instant::now()));
         if let Some(inflight) = guard.remove(&id) {
             let _ = inflight.cancel.send(());
             true
@@ -854,6 +987,21 @@ impl AppState {
             .write()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         guard.remove(&id);
+    }
+
+    /// Credential IPC allows caller-supplied operation ids. An old cancelled operation
+    /// must not clean up a newer registration that happens to reuse the same id.
+    pub(crate) fn finish_inflight_generation(&self, id: Uuid, generation: Uuid) {
+        let mut guard = self
+            .in_flight
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if guard
+            .get(&id)
+            .is_some_and(|entry| entry.generation == generation)
+        {
+            guard.remove(&id);
+        }
     }
 
     /// 生成合成响应并流式落盘（Spike S2）。
@@ -1366,6 +1514,50 @@ mod tests {
     use super::*;
 
     #[test]
+    fn token_cancellation_before_registration_prevents_transport_but_not_ordinary_requests() {
+        let state = AppState::new().unwrap();
+        let id = Uuid::new_v4();
+        assert!(!state.cancel_token_operation(id));
+        assert_eq!(
+            state
+                .register_operation(id, None, true)
+                .unwrap_err()
+                .to_string(),
+            "TOKEN_OPERATION_CANCELLED"
+        );
+        let (mut ordinary, _) = state.register_inflight(id, None).unwrap();
+        assert!(!state.cancel_token_operation(id));
+        assert!(ordinary.try_recv().is_err());
+        assert!(state.cancel_inflight(id));
+        assert!(ordinary.try_recv().is_ok());
+    }
+
+    #[test]
+    fn token_cancellation_markers_are_bounded_expire_and_signal_active_operations() {
+        let state = AppState::new().unwrap();
+        let id = Uuid::new_v4();
+        let (mut receiver, _) = state.register_operation(id, None, true).unwrap();
+        assert!(state.cancel_token_operation(id));
+        assert!(receiver.try_recv().is_ok());
+        for _ in 0..200 {
+            state.cancel_token_operation(Uuid::new_v4());
+        }
+        assert_eq!(state.token_cancellations.lock().unwrap().len(), 128);
+        let expired = Uuid::new_v4();
+        {
+            let mut markers = state.token_cancellations.lock().unwrap();
+            markers.clear();
+            markers.push_back((
+                expired,
+                Instant::now() - std::time::Duration::from_secs(121),
+            ));
+        }
+        assert!(state.register_operation(expired, None, true).is_ok());
+        assert!(state.token_cancellations.lock().unwrap().is_empty());
+        assert!(state.cancel_token_operation(expired));
+    }
+
+    #[test]
     fn opening_a_workspace_replaces_an_orphaned_session() {
         let root = std::env::temp_dir().join(format!("apogee-session-test-{}", Uuid::new_v4()));
         let first_root = root.join("first");
@@ -1387,7 +1579,7 @@ mod tests {
                     .join("responses")
                     .join(first_session.to_string())
             ));
-        let mut cancellation = state.register_inflight(Uuid::new_v4(), None);
+        let mut cancellation = state.register_inflight(Uuid::new_v4(), None).unwrap().0;
         state
             .with_workspace(first_workspace, first_session, |repository| {
                 repository.snapshot()
@@ -1736,7 +1928,7 @@ mod tests {
                         // 此时 create 已将 staging 发布到目标文件，但尚未发布 manifest。
                         published_tx.send(()).unwrap();
                         resume_rx.recv().unwrap();
-                        let yaml = serde_yaml_ng::to_string(manifest)?;
+                        let yaml = apogee_core::yaml::to_string(manifest)?;
                         crate::persistence::atomic_write(path, yaml.as_bytes())
                     },
                 )

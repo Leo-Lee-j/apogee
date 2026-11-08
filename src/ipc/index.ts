@@ -557,8 +557,8 @@ export const ipc = {
   },
 
   /** 保存请求的持久化字段；请求体和大响应体都不通过额外的前端缓存传递。 */
-  workspaceSaveRequest(requestId: string, name: string, spec: RequestSpec): Promise<void> {
-    return call('workspace_save_request', { ...sessionArgs(), requestId, name, spec })
+  workspaceSaveRequest(requestId: string, name: string, spec: RequestSpec, expectedAuth?: AuthConfig): Promise<void> {
+    return call('workspace_save_request', { ...sessionArgs(), requestId, name, spec, expectedAuth })
   },
 
   /** 读取绑定一个请求的命名调试用例定义。 */
@@ -614,6 +614,23 @@ export const ipc = {
   /** 取消一个正在执行的请求。返回 false 表示请求已结束或不存在。 */
   cancelRequest(handleId: string): Promise<boolean> {
     return call('cancel_request', { handleId })
+  },
+
+  /** Also remembers cancellation arriving before a Token operation is registered. */
+  cancelOAuth2Token(operationId: string): Promise<boolean> {
+    return call('oauth2_cancel_token', { operationId })
+  },
+
+  /** Sensitive source-aware operation. None grant prepares inherited/direct Auth before Send. */
+  oauth2AuthOperation(input: { operationId: string; nodeId?: string; ownerId: string; environmentId?: string;
+    auth: AuthConfig; expectedAuth?: AuthConfig; grant?: OAuth2Grant; settings: RequestSettings; ephemeral?: boolean }, session: WorkspaceSession = sessionArgs()): Promise<{ auth: AuthConfig; sourceId?: string; token?: OAuth2TokenResponse; error?: AppError } | null> {
+    return call('oauth2_auth_operation', { ...session, input })
+  },
+
+  /** Explicit credential operation; its result belongs only to the initiating Auth editor. */
+  oauth2FetchToken(input: { operationId: string; nodeId?: string; environmentId?: string; request: OAuth2TokenRequest; grant: OAuth2Grant; settings: RequestSettings },
+    session: WorkspaceSession = sessionArgs()): Promise<OAuth2TokenResponse | null> {
+    return call('oauth2_fetch_token', { ...session, input })
   },
 
   historyRecord(
@@ -681,8 +698,8 @@ export const ipc = {
     return call('workspace_read_container', { ...sessionArgs(), nodeId })
   },
 
-  workspaceSaveContainer(container: WorkspaceContainer): Promise<WorkspaceContainer> {
-    return call('workspace_save_container', { ...sessionArgs(), container })
+  workspaceSaveContainer(container: WorkspaceContainer, expectedAuth?: AuthConfig): Promise<WorkspaceContainer> {
+    return call('workspace_save_container', { ...sessionArgs(), container, expectedAuth })
   },
 
   postmanImport(json: string): Promise<{ name: string; requests: Array<{ name: string; folder: string[]; spec: RequestSpec }>; warnings: string[] }> {
@@ -831,12 +848,39 @@ export type Body =
   | { type: 'binary'; path: string }
   | { type: 'graphQl'; query: string; variables: string; operationName?: string }
 
+export interface OAuth2TokenRequest {
+  grantType?: 'clientCredentials' | 'authorizationCode'
+  authorizationUrl?: string
+  redirectUri?: string
+  tokenUrl: string
+  clientId: string
+  clientSecret: string
+  scope: string
+  refreshToken: string
+  clientAuth: 'basic' | 'body'
+}
+export type OAuth2Grant = 'clientCredentials' | 'refreshToken' | 'authorizationCode'
+/** Sensitive Auth-operation result: never use in public response/history DTOs or logs. */
+export interface OAuth2TokenResponse {
+  accessToken: string
+  refreshToken?: string
+  expiresIn?: number
+  /** Host clock at Token HTTP exchange start (excludes PKCE browser wait). */
+  obtainedAt?: number
+  tokenContext?: string
+}
+export type OAuth2TokenFetcher = (request: OAuth2TokenRequest, grant: OAuth2Grant, operationId: string, signal?: AbortSignal, auth?: AuthConfig) => Promise<OAuth2TokenResponse | null>
+
 export type AuthConfig =
   | { type: 'inherit' }
   | { type: 'none' }
   | { type: 'basic'; username: string; password: string }
   | { type: 'bearer'; token: string }
   | { type: 'apiKey'; key: string; value: string; location: 'header' | 'query' | 'cookie' }
+  | { type: 'oauth1'; consumerKey: string; consumerSecret: string; token: string; tokenSecret: string;
+      signatureMethod: 'HMAC-SHA1' | 'HMAC-SHA256'; realm: string; callback: string; verifier: string; nonce: string; timestamp: string }
+  | { type: 'oauth2'; accessToken: string; headerPrefix: string; tokenRequest?: OAuth2TokenRequest; obtainedAt?: number; expiresAt?: number; autoRefresh?: boolean; tokenContext?: string }
+  | { type: 'jwt'; secret: string; payload: string; header: string; algorithm: 'HS256' | 'HS384' | 'HS512'; headerPrefix: string }
 
 /** 可公开显示的请求设置；连接代理地址不属于该 DTO。 */
 export interface PublicRequestSettings {
@@ -858,6 +902,8 @@ export interface ExecContext {
   tabId?: string
   environmentId?: string
   requestNodeId?: string
+  /** Explicit draft/case Auth must never be written to its source request. */
+  ephemeral?: boolean
 }
 
 export interface WorkspaceContainer {
@@ -1083,7 +1129,7 @@ function sensitiveAuthQueryNames(auth: AuthConfig | undefined): string[] {
 }
 
 function sensitiveAuthHeaderNames(auth: AuthConfig | undefined): string[] {
-  if (auth?.type === 'basic' || auth?.type === 'bearer') return ['Authorization']
+  if (auth && ['basic', 'bearer', 'oauth1', 'oauth2', 'jwt'].includes(auth.type)) return ['Authorization']
   if (auth?.type !== 'apiKey') return []
   if (auth.location === 'cookie') return ['Cookie']
   const name = auth.location === 'header' ? auth.key.trim() : ''

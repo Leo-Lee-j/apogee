@@ -1,5 +1,6 @@
 //! v0.3/v0.4 automation primitives shared by the desktop client and CLI.
-use crate::request::RequestSpec;
+pub mod prepared;
+use crate::request::{ExecContext, RequestSpec};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -180,6 +181,9 @@ pub fn substitute_variables(input: &str, vars: &BTreeMap<String, String>) -> Str
 pub struct RunnerRequest {
     pub name: String,
     pub request: RequestSpec,
+    /// Source/environment provenance for host-specific asynchronous preparation.
+    #[serde(default)]
+    pub context: ExecContext,
     #[serde(default)]
     pub assertions: Vec<Assertion>,
     #[serde(default)]
@@ -245,7 +249,7 @@ pub struct ImportedApi {
 /// Imports OpenAPI 3.x (JSON or YAML), creating one request per operation.
 pub fn import_openapi(input: &str) -> Result<ImportedApi, String> {
     let root: Value = serde_json::from_str(input)
-        .or_else(|_| serde_yaml_ng::from_str(input))
+        .or_else(|_| crate::yaml::from_str(input))
         .map_err(|e| format!("invalid OpenAPI: {}", e))?;
     let name = root
         .pointer("/info/title")
@@ -360,5 +364,22 @@ mod tests {
         let mut v = BTreeMap::new();
         v.insert("id".into(), "42".into());
         assert_eq!(substitute_variables("/x/{{id}}", &v), "/x/42");
+    }
+    #[test]
+    fn openapi_yaml_import_preserves_anchors_paths_parameters_and_scalar_strings() {
+        let input = "openapi: 3.0.0\ninfo: {title: Fixture}\nservers: [{url: 'https://fixture.test'}]\npaths:\n  /users/{id}:\n    get: &operation {summary: yes}\n  /copies/{id}:\n    get: *operation\n";
+        let imported = import_openapi(input).unwrap();
+        assert_eq!(imported.name, "Fixture");
+        assert_eq!(imported.requests.len(), 2);
+        assert!(imported.requests.iter().all(|(name, spec)| name == "yes"
+            && spec.method == "GET"
+            && spec.path_params[0].key == "id"));
+    }
+
+    #[test]
+    fn malformed_yaml_import_does_not_echo_credential_sources() {
+        let failure = import_openapi("info: { title: [fixture-private-secret\n").unwrap_err();
+        assert!(!failure.contains("fixture-private-secret"));
+        assert!(failure.contains("invalid OpenAPI"));
     }
 }

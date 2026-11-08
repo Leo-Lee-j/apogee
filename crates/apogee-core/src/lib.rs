@@ -7,18 +7,21 @@
 //!
 //! 本 crate **不依赖 Tauri**，以便 v0.5 的 CLI 直接复用。
 
+mod auth;
 pub mod automation;
 pub mod cookies;
 pub mod curl;
 pub mod error;
 pub mod http;
 pub mod model;
+pub mod oauth2;
 pub mod postman;
 pub mod public;
 pub mod request;
 pub mod response;
 pub mod vars;
 pub mod workspace;
+pub mod yaml;
 pub mod yapi;
 
 pub use error::{AppError, ErrorKind, Hint};

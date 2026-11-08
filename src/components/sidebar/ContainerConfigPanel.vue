@@ -1,9 +1,12 @@
 <script setup lang="ts">
+import { useOAuth2TokenActions } from '@/features/oauth2TokenOperation'
 import { computed, ref, watch } from 'vue'
-import { AppAlert, AppButton, AppIcon, AppInput, AppInputNumber, AppSelect } from '@/components/ui'
-import { ipc, type AuthConfig, type RequestSettings, type WorkspaceContainer } from '@/ipc'
+import { AppAlert, AppButton, AppIcon, AppInputNumber, AppSelect } from '@/components/ui'
+import { ipc, normalizeError, type AuthConfig, type RequestSettings, type WorkspaceContainer } from '@/ipc'
 import { useTabsStore } from '@/stores/tabs'
 import { useWorkspaceStore } from '@/stores/workspace'
+import AuthEditor from '@/components/request/AuthEditor.vue'
+import { authSummary } from '@/features/requestAuth'
 import WorkspaceContent from '@/components/layout/WorkspaceContent.vue'
 import WorkspaceToolbar from '@/components/layout/WorkspaceToolbar.vue'
 import WorkspaceForm from '@/components/layout/WorkspaceForm.vue'
@@ -12,13 +15,16 @@ import { NBreadcrumb, NBreadcrumbItem, NTimeline, NTimelineItem } from 'naive-ui
 import { IconSave } from '@/components/ui/icons'
 
 const props = defineProps<{ nodeId: string | null }>()
+const tokenFetcher = useOAuth2TokenActions()
 const tabs = useTabsStore()
 const workspace = useWorkspaceStore()
 const selectedNodeId = ref(props.nodeId)
+const reloadSequence = ref(0)
 const loading = ref(false)
 const saving = ref(false)
 const error = ref('')
 const container = ref<WorkspaceContainer | null>(null)
+const persistedAuth = ref<AuthConfig | undefined>()
 const chainConfigs = ref(new Map<string, WorkspaceContainer>())
 
 const currentNode = computed(() => workspace.nodes?.find((node) => node.id === selectedNodeId.value) ?? null)
@@ -36,19 +42,26 @@ const chain = computed(() => {
 })
 
 watch(() => props.nodeId, (id) => { selectedNodeId.value = id }, { immediate: true })
-watch([() => selectedNodeId.value, () => workspace.nodes], async ([id]) => {
+watch([() => selectedNodeId.value, () => workspace.nodes, () => reloadSequence.value,
+  () => workspace.workspaceId, () => workspace.sessionId] as const, async ([id], _previous, onCleanup) => {
+  let current = true
+  onCleanup(() => { current = false })
   container.value = null
+  persistedAuth.value = undefined
   chainConfigs.value = new Map()
   error.value = ''
+  loading.value = false
   if (!id) return
   loading.value = true
   try {
     const loaded = await Promise.all(chain.value.map(async (node) => [node.id, await ipc.workspaceReadContainer(node.id)] as const))
+    if (!current) return
     chainConfigs.value = new Map(loaded)
     container.value = chainConfigs.value.get(id) ?? null
+    persistedAuth.value = container.value?.auth
   }
-  catch (cause) { error.value = cause instanceof Error ? cause.message : '读取配置失败。' }
-  finally { loading.value = false }
+  catch { if (current) error.value = '读取配置失败，请检查工作区后重新加载。' }
+  finally { if (current) loading.value = false }
 }, { immediate: true })
 
 function selectLayer(id: string) {
@@ -96,13 +109,6 @@ function numberSettingPlaceholder(value: number | undefined, defaultValue: numbe
 }
 const timeoutPlaceholder = computed(() => numberSettingPlaceholder(inheritedTimeoutMs.value, 30_000, 'ms'))
 const maxRedirectsPlaceholder = computed(() => numberSettingPlaceholder(inheritedMaxRedirects.value, 10, '次'))
-const authOptions = computed(() => [
-  ...(hasParentLayer.value ? [{ label: `继承上级（${authSummary(inheritedAuth.value)}）`, value: 'inherit' }] : []),
-  { label: '无鉴权', value: 'none' },
-  { label: 'Basic Auth', value: 'basic' },
-  { label: 'Bearer Token', value: 'bearer' },
-  { label: 'API Key', value: 'apiKey' },
-])
 const followRedirectOptions = computed(() => [
   ...(hasParentLayer.value ? [{ label: `继承上级（${inheritedFollowRedirects.value ? '开启' : '关闭'}）`, value: 'inherit' }] : []),
   { label: '开启', value: 'true' },
@@ -113,30 +119,15 @@ const verifyTlsOptions = computed(() => [
   { label: '校验', value: 'true' },
   { label: '忽略', value: 'false' },
 ])
-const authSelectValue = computed(() => !hasParentLayer.value && auth.value.type === 'inherit' ? 'none' : auth.value.type)
 function booleanSelectValue(value: boolean | null | undefined, fallback: boolean) {
   if (typeof value === 'boolean') return String(value)
   return hasParentLayer.value ? 'inherit' : String(fallback)
 }
 function patchAuth(next: AuthConfig) { if (container.value) container.value = { ...container.value, auth: next } }
-function setAuthType(type: AuthConfig['type']) {
-  const current = auth.value
-  if (type === 'inherit' || type === 'none') patchAuth({ type })
-  else if (type === 'basic') patchAuth(current.type === 'basic' ? current : { type, username: '', password: '' })
-  else if (type === 'bearer') patchAuth(current.type === 'bearer' ? current : { type, token: '' })
-  else patchAuth(current.type === 'apiKey' ? current : { type, key: '', value: '', location: 'header' })
-}
-function patchAuthField(delta: Record<string, string>) { patchAuth({ ...auth.value, ...delta } as AuthConfig) }
+function authGuard(id: string) { return () => !saving.value && selectedNodeId.value === id && container.value?.id === id }
 function patchSettings(delta: Partial<RequestSettings>) { if (container.value) container.value = { ...container.value, settings: { ...settings.value, ...delta } } }
 function patchBooleanSetting(field: 'followRedirects' | 'verifyTls', value: string | number | null) {
   patchSettings({ [field]: value === 'inherit' ? undefined : value === 'true' } as Partial<RequestSettings>)
-}
-function authSummary(value: AuthConfig) {
-  if (value.type === 'inherit') return '继承上级'
-  if (value.type === 'none') return '无鉴权'
-  if (value.type === 'basic') return 'Basic Auth'
-  if (value.type === 'bearer') return 'Bearer Token'
-  return `API Key · ${value.location}`
 }
 function layerConfig(id: string) { return chainConfigs.value.get(id) }
 function settingsSummary(value: RequestSettings | undefined) {
@@ -149,11 +140,20 @@ function settingsSummary(value: RequestSettings | undefined) {
 }
 async function save() {
   if (!container.value) return
+  const target = container.value
+  const workspaceId = workspace.workspaceId, sessionId = workspace.sessionId
+  const current = () => selectedNodeId.value === target.id && container.value?.id === target.id
+    && workspace.workspaceId === workspaceId && workspace.sessionId === sessionId
   saving.value = true; error.value = ''
   try {
-    container.value = await ipc.workspaceSaveContainer(container.value)
+    const saved = await ipc.workspaceSaveContainer(target, persistedAuth.value)
+    if (!current()) return
+    container.value = saved
+    persistedAuth.value = saved.auth
     await workspace.load()
-  } catch (cause) { error.value = cause instanceof Error ? cause.message : '保存配置失败。' }
+  } catch (cause) {
+    if (current()) error.value = normalizeError(cause).message === 'AUTH_CONFIG_STALE' ? '认证来源已更新，请重新加载配置后再保存；未覆盖新凭据。' : '保存配置失败，请检查工作区或重新加载配置。'
+  }
   finally { saving.value = false }
 }
 </script>
@@ -162,6 +162,7 @@ async function save() {
   <main class="container-config">
     <WorkspaceToolbar class="config-toolbar">
       <div class="toolbar-title"><strong>{{ currentNode?.name ?? '容器配置' }}</strong><span>继承链配置</span></div>
+      <AppButton quaternary :disabled="loading || saving" title="放弃本页未保存修改并重新读取磁盘配置" @click="reloadSequence++">重新加载</AppButton>
       <AppButton quaternary type="primary" :loading="saving" :disabled="loading || !container" @click="save"><template #icon><AppIcon :component="IconSave" :size="15" /></template>保存</AppButton>
     </WorkspaceToolbar>
     <div class="config-body">
@@ -174,12 +175,8 @@ async function save() {
       <template #secondary><div class="config-editor">
       <section class="config-block editor">
         <header class="section-head"><strong>鉴权</strong><span>当前层配置</span></header>
-        <WorkspaceForm :columns="2" class="editor-form">
-        <WorkspaceField label="鉴权类型"><AppSelect :value="authSelectValue" :options="authOptions" @update:value="setAuthType($event as AuthConfig['type'])" /></WorkspaceField>
-        <template v-if="auth.type === 'basic'"><WorkspaceField label="用户名"><AppInput :value="auth.username" @update:value="patchAuthField({ username: $event })" /></WorkspaceField><WorkspaceField label="密码"><AppInput :value="auth.password" type="password" show-password-on="click" @update:value="patchAuthField({ password: $event })" /></WorkspaceField></template>
-        <WorkspaceField v-else-if="auth.type === 'bearer'" label="Token"><AppInput :value="auth.token" type="password" show-password-on="click" @update:value="patchAuthField({ token: $event })" /></WorkspaceField>
-        <template v-else-if="auth.type === 'apiKey'"><WorkspaceField label="Key"><AppInput :value="auth.key" @update:value="patchAuthField({ key: $event })" /></WorkspaceField><WorkspaceField label="Value"><AppInput :value="auth.value" type="password" show-password-on="click" @update:value="patchAuthField({ value: $event })" /></WorkspaceField><WorkspaceField label="添加到"><AppSelect :value="auth.location" :options="[{ label: 'Header', value: 'header' }, { label: 'Query', value: 'query' }, { label: 'Cookie', value: 'cookie' }]" @update:value="patchAuthField({ location: String($event) })" /></WorkspaceField></template>
-        </WorkspaceForm>
+        <AuthEditor allow-auto-refresh :key="container.id" :value="auth" :allow-inherit="hasParentLayer"
+          :inherit-label="`继承上级（${authSummary(inheritedAuth)}）`" :can-edit="authGuard(container.id)" :fetch-token="tokenFetcher(container.id, settings, authGuard(container.id), container.id, false, undefined, () => persistedAuth)" @update:value="patchAuth" @token-updated="persistedAuth = $event" />
       </section>
       <section class="config-block editor"><header class="section-head"><strong>请求设置</strong></header><WorkspaceForm class="settings-grid" :columns="2"><WorkspaceField label="超时（ms）"><AppInputNumber :value="settings.timeoutMs ?? null" :min="1" clearable :placeholder="timeoutPlaceholder" @update:value="patchSettings({ timeoutMs: $event ?? undefined })" /></WorkspaceField><WorkspaceField label="最大重定向"><AppInputNumber :value="settings.maxRedirects ?? null" :min="0" :max="100" clearable :placeholder="maxRedirectsPlaceholder" @update:value="patchSettings({ maxRedirects: $event ?? undefined })" /></WorkspaceField><WorkspaceField label="跟随重定向"><AppSelect :value="booleanSelectValue(settings.followRedirects, inheritedFollowRedirects)" :options="followRedirectOptions" @update:value="patchBooleanSetting('followRedirects', $event)" /></WorkspaceField><WorkspaceField label="校验 TLS"><AppSelect :value="booleanSelectValue(settings.verifyTls, inheritedVerifyTls)" :options="verifyTlsOptions" @update:value="patchBooleanSetting('verifyTls', $event)" /></WorkspaceField></WorkspaceForm></section>
       </div></template>

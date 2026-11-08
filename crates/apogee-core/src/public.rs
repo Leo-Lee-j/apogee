@@ -161,7 +161,10 @@ impl LegacyAuthRedactionSource {
                 kind: "basic".to_string(),
                 ..Self::default()
             },
-            crate::request::AuthConfig::Bearer { .. } => Self {
+            crate::request::AuthConfig::OAuth1 { .. }
+            | crate::request::AuthConfig::OAuth2 { .. }
+            | crate::request::AuthConfig::Jwt { .. }
+            | crate::request::AuthConfig::Bearer { .. } => Self {
                 kind: "bearer".to_string(),
                 ..Self::default()
             },
@@ -508,13 +511,8 @@ impl PublicHint {
     pub fn redacted(mut self) -> Self {
         let label_is_sensitive = contains_sensitive_marker(&self.label);
         self.label = safe_hint_text(&self.label);
-        self.action = self.action.and_then(|action| {
-            if label_is_sensitive || contains_sensitive_marker(&action) || !is_safe_action(&action)
-            {
-                None
-            } else {
-                Some(action)
-            }
+        self.action = self.action.filter(|action| {
+            !(label_is_sensitive || contains_sensitive_marker(action) || !is_safe_action(action))
         });
         self
     }
@@ -585,7 +583,10 @@ impl SensitiveRequestSources {
     }
 
     fn add_legacy_auth(&mut self, auth: &LegacyAuthRedactionSource) {
-        if auth.kind.eq_ignore_ascii_case("basic") || auth.kind.eq_ignore_ascii_case("bearer") {
+        if ["basic", "bearer", "oauth1", "oauth2", "jwt"]
+            .iter()
+            .any(|kind| auth.kind.eq_ignore_ascii_case(kind))
+        {
             Self::push_name(&mut self.header_names, "authorization");
             return;
         }
@@ -1044,6 +1045,22 @@ mod tests {
             assert!(
                 !value.contains(secret),
                 "public DTO unexpectedly contained {secret:?}: {value}"
+            );
+        }
+    }
+
+    #[test]
+    fn new_auth_and_legacy_auth_never_enter_public_history() {
+        for kind in ["oauth1", "oauth2", "jwt"] {
+            let value = serde_json::json!({"method":"GET","url":"https://example.test/", "auth":{"type":kind,
+                "consumerSecret":"private-secret","accessToken":"private-secret","secret":"private-secret","payload":"private-claims"},
+                "headers":[{"key":"Authorization","value":"manual-private","enabled":true,"kind":"text"}]});
+            let preview: PublicRequestPreview = serde_json::from_value(value).unwrap();
+            let preview = preview.redacted();
+            assert_eq!(preview.headers[0].value, REDACTED);
+            assert_absent(
+                &serde_json::to_string(&preview).unwrap(),
+                &["private-secret", "private-claims", "manual-private"],
             );
         }
     }

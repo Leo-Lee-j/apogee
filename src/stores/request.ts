@@ -14,7 +14,9 @@ import {
 } from '@/ipc'
 import { useTabsStore } from '@/stores/tabs'
 import { useWorkspaceStore } from '@/stores/workspace'
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, watch, onMounted, onUnmounted } from 'vue'
+import { needsTokenRefresh, lifecycleError } from '@/features/oauth2Lifecycle'
+import { oauth2OperationError } from '@/features/requestAuth'
 
 /**
  * 请求发送逻辑 ——「点发送 → 出结果」这条热路径的 MVC 粘合层。
@@ -82,6 +84,12 @@ export function useRequest() {
   /** 还没找到主人的终结事件，按句柄 id 存。见文件头注释的竞态 2。 */
   const orphans = new Map<string, Settlement>()
 
+  let pendingSend: { controller: AbortController; current: () => boolean } | null = null
+  // Preflight is cancellable before a normal HTTP handle exists. A cancelled old invocation
+  // must never reset a newer Send, nor overwrite its credentials/errors after an await.
+  watch(() => [workspace.workspaceId, workspace.sessionId, workspace.activeEnvironmentId, workspace.activeEnvironment, tabs.tabs],
+    () => { if (pendingSend && !pendingSend.current()) cancel() }, { flush: 'sync' })
+
   function currentSession(): WorkspaceSession | null {
     const workspaceId = workspace.workspaceId
     const sessionId = workspace.sessionId
@@ -111,8 +119,7 @@ export function useRequest() {
     pendingTimeout = setTimeout(() => {
       if (sending.value) {
         console.warn('[request] 后端 90s 内未发出任何终结事件,主动复位发送状态')
-        sending.value = false
-        active.value = null
+        cancel()
       }
     }, 90_000)
   }
@@ -150,12 +157,13 @@ export function useRequest() {
       const errorEvent = settlement.event
       tabs.patch(tabId, {
         response: null,
-        error: errorEvent.error,
+        error: oauth2OperationError(errorEvent.error),
         actualRequest: errorEvent.actualRequest ?? null,
       })
       // 错误运行同样是调试用例的结果。它没有响应体，因此写入专门的失败历史记录，
       // 保留错误、实际请求和耗时，而不是伪造一个空 ResponseSummary。
-      if (inTauri && spec) {
+      if (inTauri && spec && !errorEvent.error.code?.startsWith('OAUTH2_')
+        && !errorEvent.error.code?.startsWith('REQUEST_PREPARATION_')) {
         const completedAt = Date.now()
         const createdAtMs = startedAt ?? completedAt
         void ipc.historyRecordError(
@@ -217,6 +225,7 @@ export function useRequest() {
   })
 
   onUnmounted(() => {
+    cancel()
     unlisten?.()
     clearPendingTimeout()
     orphans.clear()
@@ -254,6 +263,22 @@ export function useRequest() {
       auth: tab.auth,
       settings: tab.settings,
     }
+    const requestSession = currentSession()
+    if (!requestSession) return
+    const controller = new AbortController()
+    let expectedTabAuth = tab.auth
+    let environment: unknown
+    let environmentCaptured = false
+    const current = () => !controller.signal.aborted && isCurrentSession(requestSession)
+      && (workspace.activeEnvironmentId ?? undefined) === environmentId
+      && (!environmentCaptured || workspace.activeEnvironment === environment)
+      && tabs.tabs.some(item => item.id === tab.id && !item.historyPreview
+        && item.method === spec.method && item.url === spec.url && item.auth === expectedTabAuth
+        && item.params === spec.params && item.pathParams === spec.pathParams
+        && item.headers === spec.headers && item.body === spec.body && item.settings === spec.settings)
+    const pending = { controller, current }
+    pendingSend = pending
+    const isPending = () => pendingSend === pending && current()
     const startedAt = Date.now()
     // 将运行关联和环境在发送前固定下来。发送期间切换环境不能改写本次用例结果归属。
     const debugCaseId = tab.debugCaseId
@@ -268,6 +293,7 @@ export function useRequest() {
       // 环境编辑器采用显式保存按钮，但发送不能读到旧磁盘快照；把所有
       // 尚未保存的环境先 flush，再只传环境 id 给 Rust。
       if (!(await workspace.saveDirtyEnvironments())) {
+        if (!isPending()) return
         const error: AppError = workspace.lastError ?? {
           kind: 'io',
           message: '环境保存失败，未发送请求',
@@ -280,24 +306,59 @@ export function useRequest() {
         return
       }
 
-      const requestSession = currentSession()
-      if (!requestSession) {
-        // 工作区在保存环境期间已关闭或切换；不能再让默认 sessionArgs() 误把这次
-        // 发送绑定到新 workspace。
-        sending.value = false
-        active.value = null
-        clearPendingTimeout()
-        return
+      if (!isPending()) return
+      environment = workspace.activeEnvironment
+      environmentCaptured = true
+      if ((spec.auth?.type === 'inherit' || (spec.auth?.type === 'oauth2' && spec.auth.autoRefresh === true))
+        && !spec.headers?.some(header => header.enabled && header.key.trim().toLowerCase() === 'authorization')) {
+        if (tab.nodeId) {
+          const saved = await tabs.save(tab.id)
+          if (!isPending()) return
+          if (!saved.ok) throw saved.error ?? lifecycleError('认证配置保存失败，请保存后重试')
+        }
+        const operationId = crypto.randomUUID()
+        const abort = () => { void ipc.cancelOAuth2Token(operationId).catch(() => {}) }
+        controller.signal.addEventListener('abort', abort, { once: true })
+        let prepared
+        try {
+          prepared = await ipc.oauth2AuthOperation({ operationId, nodeId: tab.nodeId ?? tab.sourceRequestId,
+            ownerId: tab.id, environmentId, auth: spec.auth, settings: spec.settings ?? {}, ephemeral: !tab.nodeId }, requestSession)
+        } finally { controller.signal.removeEventListener('abort', abort) }
+        if (!isPending()) return
+        if (!prepared) throw lifecycleError('Token 操作已取消，请在 Auth 中重试')
+        // Preserve Auth provenance through IPC: the Rust send boundary resolves Inherit again.
+        // Copying the parent's effective OAuth2 here would turn it into a child override.
+        if (expectedTabAuth?.type !== 'inherit') spec.auth = prepared.auth
+        // Inherited credentials are a per-send snapshot, never copied into the request's Auth.
+        if (expectedTabAuth?.type !== 'inherit' && prepared.token) {
+          expectedTabAuth = prepared.auth
+          tabs.patch(tab.id, { auth: prepared.auth, dirty: true, ...(prepared.sourceId ? { persistedAuth: prepared.auth } : {}) })
+          if (tab.nodeId) {
+            const saved = await tabs.save(tab.id)
+            if (!isPending()) return
+            if (!saved.ok) throw saved.error ?? lifecycleError('Token 已更新但保存失败，请保存后重试')
+          }
+        }
+        if (prepared.error) throw prepared.error
+        if (needsTokenRefresh(prepared.auth)) throw lifecycleError('服务返回的 Token 已过期或有效期不足 30 秒，请检查认证服务')
       }
+      if (!isPending()) return
 
       const ctx: ExecContext = {
         tabId: tab.id,
         environmentId,
         // 用例标签不具备可写 nodeId，仍需其来源请求来解析集合/文件夹继承。
         requestNodeId: tab.nodeId ?? tab.sourceRequestId,
+        ephemeral: !tab.nodeId,
       }
       const handle = await ipc.sendRequest(spec, ctx, requestSession)
       const early = orphans.get(handle.id)
+      if (!isPending()) {
+        void ipc.cancelRequest(handle.id).catch(() => {})
+        orphans.delete(handle.id)
+        return
+      }
+      pendingSend = null
       if (!isCurrentSession(requestSession)) {
         // RPC 句柄可能在工作区切换后才回到前端；它及其早到事件不属于新 UI。
         orphans.delete(handle.id)
@@ -323,12 +384,19 @@ export function useRequest() {
       }
     } catch (error) {
       // invoke 本身失败（命令注册问题等）也进入同一套错误展示。
-      const appError = normalizeError(error)
+      if (!isPending()) return
+      const appError = oauth2OperationError(normalizeError(error))
       tabs.patch(tab.id, { response: null, error: appError, actualRequest: null })
-      console.error('[request] invoke sendRequest 失败', appError)
+      // Auth failures are normalized, never log token-provider diagnostics.
       sending.value = false
       active.value = null
       clearPendingTimeout()
+    } finally {
+      if (pendingSend === pending) {
+        pendingSend = null
+        sending.value = false
+        clearPendingTimeout()
+      }
     }
   }
 
@@ -340,6 +408,8 @@ export function useRequest() {
    * `orphans`，不会干扰下一个请求。
    */
   function cancel() {
+    pendingSend?.controller.abort()
+    pendingSend = null
     if (active.value) void ipc.cancelRequest(active.value.handle)
     sending.value = false
     active.value = null

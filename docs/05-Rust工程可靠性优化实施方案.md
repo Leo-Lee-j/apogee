@@ -2,13 +2,121 @@
 
 > 状态：实施中（已落地 session-bound response runtime、P0 默认脱敏子切片与 P0 阶段 2 最小持久化切片；完整 P0 尚未完成）
 >
-> 初稿：2026-08-20；最近更新：2026-08-21
+> 初稿：2026-08-20；最近更新：2026-11-08
 >
 > 范围：`crates/apogee-core`、`src-tauri` 与 Rust 侧的 IPC、工作区、响应缓存、导入和自动化链路。
 >
 > 关联文档：[01-产品设计文档](./01-产品设计文档.md) · [03-技术架构与数据模型](./03-技术架构与数据模型.md) · [04-工作区完善规划](./04-工作区完善规划.md)
 >
 > 已接受决策：[ADR-0001：P0 运行态可靠性与数据安全基线](./adr/0001-p0-runtime-safety-baseline.md)
+
+## 认证链路复核与下一步（2026-11-08）
+
+- OAuth2 Client Credentials 获取与手动 Refresh Token 已复用 session lease、连接池和网络设置继承；凭据结果不进入普通响应、历史或 spool，登记前取消和旧任务清理有专门保护。
+- 定点升级 rustls 0.23.46、rustls-webpki 0.103.16 与 Tokio 1.53.3 后，对应 RustSec 安全公告已清除；依赖 bans、licenses、sources 检查通过。
+- **依赖门禁已恢复**：已用 `serde-saphyr 2.1.1` 替换 `serde_yaml_ng → unsafe-libyaml`，根锁文件及应用/测试依赖图不再包含旧 YAML 库。完整 `cargo deny` 的 advisories、bans、licenses、sources 均通过，未新增 ignore；前端生产依赖漏洞与许可证检查亦通过。这不代表签名、性能预算或整个 Release 流程已验证。
+- YAML 迁移收尾后已实装 OAuth2 授权码 + PKCE S256、桌面发送前刷新、继承真实来源回写和统一手动 / 自动协调；已补异步 Runner 准备 / 执行基础及桌面 Rust 发送兜底；下一步完成宿主适配和安全 RunReport，再接 UI / CLI，之后评估 Digest/NTLM。
+
+## 异步执行准备边界与 Runner 基础（2026-11-08）
+
+- `http::execute_prepared` 使用同一个取消 receiver 覆盖准备与 HTTP；失败 / 取消不构造业务请求，准备失败没有 actualRequest。`PreparedRequest` 是不实现 Serialize / Debug 的 Rust-private 快照。
+- 桌面 `send_request` 仍立即返回句柄，后台调用 Rust `request_preparation` 与 managed；当前 UI 的敏感预检用于保留凭据回填，不再是认证检查的唯一位置。前端发送 Inherit 原值，防止有效父 Auth 被误识别为子请求覆盖。
+- `ExecContext.ephemeral` 缺省 / 无节点采用安全临时语义；持久化显式认证需完整匹配已保存 Auth。继承源可由后台更新；草稿 / 用例显式凭据必须先通过专用敏感预检更新，后台发送发现仍需旋转时停止而非丢掉新 Refresh Token。手写 Authorization 继续优先，不静默浏览器授权、不做 401 重放。
+- managed 的 environment/settings 快照仅在 Rust 宿主内传递，serde skip，Token / Secret / provider 原文不进入普通事件 / spool。认证准备错误不创建业务请求历史；正常网络失败仍记录安全业务历史。
+- core 新增必经 `prepare → execute` 的顺序异步 Runner 抽象；每轮隔离变量、逐项流式交付 Rust-private 结果。请求 / 迭代 / 变量 / 断言 / 提取器 / 响应快照均有界；准备、执行、提取或 sink 失败即停止，不自动重放。
+- 真实本机适配集成验证了同一父来源的两个业务请求只刷新一次、HTTP 使用新 Token、正常取消 / 短期限 / 拒绝响应不进入业务 HTTP、草稿不能写基础请求、旧持久化配置拒绝覆盖。
+- **范围边界**：本轮没有新增用户可触发的 Collection Runner、跑批 UI 或 CLI，也未绕过尚未完成的 P0 门禁去扩展自动化产品面。当前新 Runner 只提供 Rust primitive 与测试适配；生产宿主适配需处理提取变量分层、瞬时 Auth 轮换保留、安全 PublicRunReport 和 run 生命周期，再开放入口。未验收并发 / CSV / 脚本框架 / 外部 IdP / macOS / Release 体积。
+
+### 本切片验证
+
+- stable 与 Rust 1.89.0：core 149 项 + desktop 98 项（共 247 项）通过，严格 Clippy / rustfmt 通过；新增准备失败、阶段取消、有界结果流、变量迭代隔离和真实 OAuth2 → 业务 HTTP 集成覆盖。
+- 前端 104 项通过，TypeScript / 生产构建、90 项对比度检查通过；继承来源贯穿 IPC、认证准备失败不写业务历史、普通网络失败仍保留安全历史均有回归测试。
+- Rust advisories / bans / licenses / sources、前端生产依赖许可证 / 漏洞检查通过；保留既有依赖 warning，未新增 ignore、依赖或放宽门禁。
+- Windows debug 构建及原生工作区生命周期 E2E 通过（启动器 → A → 创建 B → 切回 A），不等于外部 IdP / Runner UI 验收。生产构建仍有约 174.68 / 199.74 kB 的既有分包警告，未调整 150 kB 告警阈值。
+- 初次在并发编译期间，既有 Token 20 ms 超时单测的本机 socket 读出现一次超时；之后完整测试通过，未调整产品或测试超时阈值、未禁用用例。
+
+## OAuth2 真实来源协调与继承刷新（2026-11-08）
+
+> 下述为前一来源协调切片的历史实现与验证；最新执行边界现状见上节。
+
+- 桌面 send 和编辑器手动获取 / 刷新统一调用 Rust managed 协调；真实 source 由工作区树解析，不由前端猜测。继承请求只使用本次有效 Auth 快照，保持自身 Inherit。
+- 来源锁 registry 只存 Weak，最多 8 个活跃源、每源约 32 个等待者、排队上限 180 秒；等待和 HTTP 均不持有 workspace 文件锁。队列取消不影响其他传输，取消与 CAS 提交使用 generation 原子排序。
+- 取锁后重读已保存来源：自动等待者复用已刷新且有效的 Token；手动排队期间来源变化返回 OAUTH2_SOURCE_STALE，禁止重放旧 Refresh Token。草稿无磁盘来源可重读时，以来源锁原子 revision 拒绝前序交换后的排队旧输入，避免重放旋转前凭据；不缓存 Token 或凭据 hash。
+- 宿主新增私有 tokenContext：获取配置、环境及 ID、已解析网络设置的 SHA256，不包含字面 Access / Refresh Token；凭据轮换不改变上下文，切换签发环境不能盲目复用有效 Token。provider 不能控制该字段，公开 DTO / history / 日志不携带它。
+- 返回后比较真实来源、目标自身 Auth / settings、环境和网络快照，仅 CAS 更新来源 Auth，保留当前无关元数据；期间切换子请求为显式覆盖、编辑环境 / 网络配置或关闭会话均拒绝旧回写。短有效期 Token 仍保存 / 回填轮换凭据，再报告错误停止业务 HTTP。
+- 显式编辑器操作与普通 request / container 保存均可传 expectedAuth 完整基线保护，非 Token Auth 配置变更也不能被旧页面覆盖；runtime-only persistedAuth 不进入 RequestSpec。迟到 save 回调不替换新基线，Token 操作前 flush pending saved request，配置页可重新加载以恢复过期编辑视图。
+- 边界：仅桌面 UI 发送和显式 Token 操作接入；自动化 / CLI 仍待接入。不后台刷新，不在 401 后重放，不在发送时静默打开浏览器。未验收真实外部 IdP、macOS、完整 Release / NSIS 体积；未新增依赖或放宽门禁。
+
+### 本切片验证
+
+- stable 与 Rust 1.89.0：core 139 项 + desktop 86 项（共 225 项）通过，严格 Clippy / rustfmt 通过。
+- 前端 102 项通过；TypeScript / 生产构建通过，对比度 90 项通过。新增继承来源、手动 / 自动队列、独立取消、stale CAS、短期限旋转、HTTP 中环境修改、草稿队列版本、非 Token 配置 stale 编辑器与迟到 save 基线测试。
+- Rust advisories / bans / licenses / sources 和前端生产依赖许可证 / 漏洞检查通过；保留已有重复依赖及未使用许可证许可项 warning，不新增 ignore。
+- 当前 Windows debug 构建及原生 Tauri / WebView2 工作区 E2E 通过；它仅验证启动器 / 创建 / 切换，不代替 OAuth2 外部服务验收。生产构建仍有两个超过 150 kB 的既有分包警告（约 174.54 / 199.74 kB），未调高告警阈值或改分包策略。
+
+## OAuth2 有效期与发送前刷新（2026-11-08）
+
+> 下述是上一切片的历史实现和验证记录；继承源与统一协调现状见上节。
+
+- 私有 Auth 新增可选 `obtainedAt` / `expiresAt` 与默认关闭的 `autoRefresh`；旧 YAML 不增字段、不改变默认行为。新增字段不进入公开请求 / 响应 / 历史 DTO。
+- core 在 Token HTTP 交换开始记录本机时间，前端由有界 `expires_in` 推导过期时间；PKCE 浏览器等待不计入有效期。不推测粘贴 Token / JWT 的有效期；新响应未给有效期时清除旧值，手动改 Access Token 清除原时间。
+- 请求自身 OAuth2 可选发送前刷新，已知期限提前 30 秒刷新；Client Credentials 无 Refresh Token 可重新获取。授权码无 Refresh Token 提示手动授权，禁止发送时静默打开浏览器。不后台刷新，不自动处理 401 或重放业务请求。
+- 最多 8 个自动刷新 in-flight；按请求源、会话、环境修订和配置共享，没有已完成 Token 缓存。等待者独立取消，全部离开才中止共享操作；响应到达后再次比较请求快照，旧配置 / 环境 / 会话不能回填。
+- 旋转后的 Refresh Token 先回填并保存再发送；保存失败、刷新失败或返回已过期 / 不足 30 秒的 Token 均停止发送。即使新 Token 有效期过短，也保留旋转后的 Refresh Token。无可写节点的草稿 / 用例标签仍需显式保存。
+- 边界：集合 / 文件夹继承认证、自动化与 CLI 尚未接入自动刷新；当前去重针对发送前自动刷新，手动获取 / 刷新仍是独立编辑器操作。下一步需统一手动 / 自动操作，并在 Rust 侧按真实继承源串行协调和比较更新，避免轮换竞争；不以按标签缓存冒充完整继承能力。
+
+### 本切片验证
+
+- stable 与 Rust 1.89.0：core 139 项 + desktop 72 项（共 211 项）通过，严格 Clippy / rustfmt 通过。
+- 前端 94 项通过，覆盖过期边界、轮换、独立取消、会话 / 环境 / 编辑隔离、环境预检、落盘失败、取消后立即重发与早到 / 迟到 HTTP 事件；TypeScript 与生产构建通过。
+- 对比度 90 项、依赖许可证 / RustSec 与生产依赖漏洞检查通过。没有新增依赖或修改 release 优化配置；本轮不量测完整 Release / NSIS 体积，也未验收外部 IdP 或 macOS 平台。
+- 当前 Windows debug 构建及原生 Tauri / WebView2 工作区生命周期 E2E 通过；该 E2E 只验证启动器 / 创建 / 切换，不替代自动刷新 HTTP 链路的前端 IPC 单测与 Rust 本机 Token 集成测试。
+
+## OAuth2 授权码 + PKCE（2026-11-08）
+
+- 共享 Auth 编辑器新增授权码方式、Authorization URL 和 Redirect URI；客户端凭据及手动刷新继续可用，公共客户端可不配置 Secret。
+- 采用系统浏览器、PKCE S256 和随机 state；只支持带固定端口及路径的 `http://127.0.0.1` Query GET 回调，需在认证服务注册相同 URI。浏览器使用自身网络设置，Token 交换复用应用连接池及继承的设置。
+- 授权码、state、verifier 仅在 Rust 操作内存中；检查方法、Host、路径、唯一 state 与 code/error。回调头 16 KiB、读取 2 秒、最多 32 次回调，授权等待 180 秒；退出时不留下监听服务。
+- 取消和会话保护复用现有 Token lease，新增等待浏览器时手动取消及工作区关闭重开测试；不产生响应 metadata、历史或 spool。错误保持公开 DTO 脱敏，以固定错误 code 在 UI 映射可操作提示，不回显服务端描述。
+- Postman 导入/显式导出保存 PKCE 配置，不导入 code/verifier。新字段带默认值并默认省略序列化，41 个旧 YAML 样本继续通过，新配置单独检查 YAML 往返。
+- 未引入新第三方库、通用浏览器 IPC 或额外 Tauri capability，release 优化配置保持不变。尚未支持 localhost / IPv6、自定义 scheme、form_post、PAR/JARM；发送前刷新见上一节，非本 PKCE 切片能力。
+- 本机集成测试通过可注入的浏览器适配器测试完整 code → Token 交换，不等于真实外部 IdP 登录或 macOS 系统浏览器验证；本轮未重新量测完整 Release/NSIS 包体积。
+
+### PKCE 切片验证
+
+- stable 和 Rust 1.89.0 的 `cargo test --workspace --locked` 均通过：core 137 项、desktop 72 项（共 209 项）；严格 Clippy 与 rustfmt 均通过。
+- 前端 70 项测试、TypeScript 检查和生产构建通过；对比度 90 项无失败。生产构建仍提示两个 chunk 超过 150 kB，本轮未放宽阈值或改变分包。
+- 完整 `pnpm licenses:check` 与生产依赖漏洞审计通过；新增实现只复用现有 ring、Tokio、Windows API 依赖。当前 Windows debug 桌面应用构建通过。
+- 原生 Tauri/WebView2 工作区生命周期 E2E 已通过；该检查覆盖启动器、创建与切换工作区，不替代上述 PKCE 本机集成测试或外部 IdP 登录验收。
+
+## YAML 兼容与安全迁移（2026-11-08）
+
+- YAML API 统一在 `apogee_core::yaml`，desktop 不直接依赖解析库；工作区/历史读取和 OpenAPI YAML 导入均使用同一安全边界，原子写入及集合事务恢复逻辑不变。
+- 禁用源片段诊断与隐式 include/properties/comments 扩展。公开错误只含静态阶段和可选数值行列，不保留底层错误或输入；`!include` 仍可作为字面量解析，但不会触发文件读取。
+- 读取先施加 **64 MiB** 上限，限制单文档、**32 层**嵌套及节点/事件/别名预算；超限序列化在创建发布临时文件前失败。32 层是实际 Windows 默认测试线程栈验证后的限制，不能通过扩大线程栈掩盖无限递归风险。
+- 41 个固定合成兼容样本覆盖 manifest、environment、Auth、Body 与嵌套 DebugCase，以及标量、锚点、字面合并键和重复键；分别检查 LF/CRLF/BOM、完整模型等价及新编解码往返。外部旧/新编解码探针通过双向读取，新测试不会重新引入已弃用库。历史只读兼容及失败后旧文件保留亦由 workspace 测试覆盖。
+- MSRV 从声明的 1.85 提升至 **1.89**；现有锁文件部分依赖此前已要求 1.88，新维护中 YAML 库要求 1.89。CI/release 与开发文档同步，实际使用 1.89.0 和 stable 跑完整锁文件测试及严格 Clippy，而非仅修改版本声明。
+- **体积取舍**：使用与应用相同的 release 体积配置（`opt-level=z`、fat LTO、单 codegen unit、abort、strip）量测独立 YAML 编解码探针，旧版 271,872 bytes，新版 602,112 bytes，增加 **330,240 bytes（约 322.5 KiB）**。这是隔离编解码器对比，**不是完整桌面应用或安装包增量**；本轮没有重新量测完整 Release/NSIS 包体积。
+
+### 本次迁移验证
+
+| 检查 | 结果 |
+| --- | --- |
+| `cargo +stable test --workspace --locked` | 通过：122 core + 71 desktop 测试 |
+| `cargo +1.89.0 test --workspace --locked` | 通过：同一锁文件的 193 项 Rust 测试 |
+| stable / 1.89.0 `clippy --workspace --all-targets --locked -- -D warnings` | 均通过；未放宽 lint |
+| `cargo +1.89.0 fmt --all -- --check` | 通过 |
+| `pnpm test` | 65 项前端测试通过 |
+| `pnpm build`（包含 TypeScript 检查） | 通过 |
+| `pnpm check:contrast` | 90 项检查，0 失败，无 theme/token 漂移 |
+| `pnpm licenses:check` | Rust 四类门禁及 npm 72 个生产依赖包/7 种许可证表达式通过 |
+| `pnpm audit --prod --audit-level=low` | 无已知漏洞 |
+| `cargo +stable build -p apogee-desktop --locked` | 当前 debug 桌面二进制构建通过 |
+| 真实 Tauri/WebView2 工作区生命周期 E2E | 通过：启动器 → 示例工作区 A → 创建 B → 顶栏切回 A；使用当前 C: 临时 target 构建，未使用旧仓库 target 二进制 |
+
+本机没有 `pwsh`，原生 E2E 用 Windows PowerShell 执行仓库脚本的临时副本，仅定向当前二进制路径；原仓库脚本未修改，应用数据/WebView2 目录隔离且已清理。该 E2E 只覆盖工作区生命周期，不等于认证浏览器流程、完整发布签名或断电耐久性验证。
+
+下方 2026-08-21 快照是此前阶段记录；其中“未运行 MSRV”及当时测试数量不代表本次迁移的验证状态。
 
 ## 实施状态快照（2026-08-21）
 
@@ -26,10 +134,18 @@
 - `MutationGate` 已覆盖工作区持久化命令、history 与 import apply 的短提交窗口；`WorkspaceAccessGate` 让读取共享、提交与 recovery 独占，避免读取跨 manifest 与环境文件时看到中间态。open/close transition 在同根 reload 时先等待旧 mutation，再执行 recovery、snapshot、registry/runtime 工作和 session 替换，防止活动事务被错误恢复。
 - 共享 `atomic_write` 使用同目录唯一临时文件、`write_all`、`sync_all` 和平台 replace；app settings、workspace state、registry 与 YAML 写入均复用该边界。它只承诺进程级旧完整文件或新完整文件可见性，不承诺任意断电时机的完整耐久性。
 - 环境 create/delete 已成为可恢复代表路径：create 使用 `journal → staging → publish → manifest`；delete 以 manifest 移除引用为提交点，再执行 target/tombstone cleanup。`.apogee-tx` journal 只保存 UUID，打开工作区时会按 manifest 清理未提交 create 或完成已提交 delete；失败注入、同根 reload、读删交错和提交后恢复均有确定性测试。
+- **集合 delete/rename 可恢复事务已补齐（2026-11-08）。** 删除改为 `journal → manifest → tombstone → cleanup`，manifest 发布失败保留完整目录；提交后中断由恢复完成清理。重命名改为 `journal → collection document → manifest → cleanup`，恢复按 manifest 名称协调文档，只修改名称、不覆盖鉴权或设置。节点删除/重命名前先完成遗留事务恢复；冲突或文档损坏保留 journal 并报错，不猜测或静默删除。journal 仍只记录 UUID，因此集合事务要求 `collections/<UUID>` 标准目录；非标准目录、符号链接/junction 与其他集合的路径别名被拒绝。
 - **P0 默认脱敏子切片已落地，并已按安全复审补强。** `apogee-core::public` 定义了 `PublicRequestPreview`、`PublicActualRequest`、`PublicResponseSummary`、`PublicError`/`PublicHint` 与安全的键值、设置投影；完整 body、auth、代理 URL、文件路径、错误 detail 和不安全提示不会进入这些 DTO。URL 会移除 userinfo/fragment，并依据敏感来源遮蔽中性名称的 query、header、Cookie、Bearer/Basic/API key、`ValueKind::Secret` 与 `ValueKind::File`；路径值同时遮蔽原文及 URL 编码形式（百分号十六进制大小写无关）。
 - `ActualRequest` 仅在执行内存中保留且不会 serde 化的敏感来源元数据；`snapshot_request` 从解析后的 request、鉴权和 API key 采集它们，公开投影可遮蔽中性字段名（例如 `id`、`q`、`X-My-Key`）以及 URL 编码后的路径值（例如 `a b` → `a%20b`）。配置的自定义 API-key Header 即使被同名手写 Header 覆盖，仍被视为敏感来源；实际请求和 history preview 的同名行都会遮蔽覆盖值。
 - history YAML、新旧 history 读取、`request:done` / `request:error`、`get_response_meta`、`index_response` 和相关 Spike 响应均只使用公开 DTO。旧 history 继续只读兼容，读取时会在原始 `Secret`/`File` 标记尚可用时补偿净化实际请求；旧 `auth` 则仅解析无值的 `type`/`key`/`location` 脱敏来源，因此自定义 API-key Header/Query 也会在 legacy preview 行、失败记录和嵌入 response 的 actual request 中被遮蔽，且旧 YAML 不会自动重写或删除。
 - 前端 history IPC 先构造公开 preview，并根据中性 `Secret` query 名、大小写不同的编码 path 值和自定义 query/header API-key 名净化 URL 与 preview 行；历史记录以无 body/auth 的安全 preview 重开。`historyPreview` 在请求执行入口被显式拒绝，快捷键或未来调用方也不能发送该标签；响应面板不显示 actual request body/body 参数或 error detail。普通请求终结日志和 panic hook 只记录安全摘要，不格式化原始执行快照或错误 detail。用户工作区请求 YAML 仍是原始 source of truth，未被本切片改写。
+
+### 集合事务补齐验证（2026-11-08）
+
+- `cargo test --workspace --locked`：通过，core 73 项、desktop 64 项；包含新增 15 项 Windows 集合事务回归测试。另有 Unix 符号链接保护测试，本机未运行。
+- `cargo clippy --workspace --all-targets --locked -- -D warnings` 与 `cargo fmt --all -- --check`：通过。为适配本机 Rust 1.97 Clippy，等价简化了公开 hint action 过滤及响应保存文件名字符匹配。
+- `pnpm typecheck`、`pnpm test` 与 `pnpm build`：通过，前端 16 项测试；生产构建仍提示部分 chunk 超过 150 kB，此轮未调整分包。
+- 未运行真实桌面 E2E、MSRV 工具链和断电/跨文件系统耐久性测试；故障测试证明进程级回滚/恢复边界，不承诺任意断电场景下零数据丢失。
 
 ### 已验证
 
@@ -50,7 +166,7 @@
 ### 下一轮优先级与已知边界
 
 1. **完成 response runtime 的整体收敛。** 目前是 `ResponseRuntime`，而非目标中的完整 `WorkspaceRuntime`；repository、response registry、in-flight、mutation gate 和计划缓存仍未统一为同一 owning runtime。普通协议 URL 仍是 session 归属校验，尚不是随机、短期 response capability。
-2. **完成阶段 2 的剩余迁移。** 当前已具备跨进程单写者锁、`MutationGate`、共享原子写、环境 create/delete journal/staging/tombstone/recovery 及读写一致性边界；尚未将 collection/request/debug case/save environment、history、Postman/YApi 全量 apply 和 legacy history 跨卷迁移全部升级为同一可恢复事务。下一轮应按 collection delete/rename、单文件多写一致性、history/import apply 的顺序扩展，并为每个新增提交点补故障恢复测试。
+2. **完成阶段 2 的剩余迁移。** 当前已具备跨进程单写者锁、`MutationGate`、共享原子写、环境 create/delete journal/staging/tombstone/recovery 及读写一致性边界；collection delete/rename 已迁移；尚未将 collection create/request/debug case/save environment、history、Postman/YApi 全量 apply 和 legacy history 跨卷迁移全部升级为同一可恢复事务。下一轮应按 collection create、单文件多写一致性、history/import apply 的顺序扩展，并为每个新增提交点补故障恢复测试。
 3. **完成阶段 3 的资源与协议边界。** 尚无 500 MiB runtime 记账、构建前 JSON 预算/single-flight、统一 `ResponseRegistry`、完整 Range/MIME/受限协议 I/O 改造。
 4. **增强 body 完整性校验。** 本轮已验证已有 body 的长度并拒绝错误发布；同长度损坏尚不可区分。若威胁模型或恢复诊断需要，应引入可选 hash/长度元数据并权衡额外 I/O，而不是重新放开 `exists()` 裸短路。
 5. **设计受控 reveal。** 本切片不提供 reveal；若未来确有排障需求，必须先定义显式同意、短时 capability、工作区绑定、审计和过期语义，不能把公开 DTO 重新变成默认明文通道。

@@ -20,7 +20,7 @@ Apogee 是一个本地优先、启动即用的桌面 API 客户端。它以 Taur
 在没有可用发布物时，可按以下步骤从源码构建。开发环境需要：
 
 - Windows 10/11、WebView2 Runtime，以及 Visual Studio C++ Build Tools / Windows SDK；
-- Rust `1.85` 或更高版本，并安装 `x86_64-pc-windows-msvc` 目标；
+- Rust `1.89` 或更高版本，并安装 `x86_64-pc-windows-msvc` 目标；
 - 与锁文件兼容的 Node.js，以及 pnpm `11.17.0`（仓库在 `packageManager` 字段中固定）。
 
 ```powershell

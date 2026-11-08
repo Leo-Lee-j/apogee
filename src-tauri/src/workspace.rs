@@ -58,6 +58,8 @@ struct WorkspaceTransactionJournal {
 enum WorkspaceTransactionOperation {
     EnvironmentCreate { environment_id: Uuid },
     EnvironmentDelete { environment_id: Uuid },
+    CollectionDelete { collection_id: Uuid },
+    CollectionRename { collection_id: Uuid },
 }
 
 impl WorkspaceTransactionOperation {
@@ -68,6 +70,12 @@ impl WorkspaceTransactionOperation {
             }
             Self::EnvironmentDelete { environment_id } => {
                 format!("environment-delete-{environment_id}.json")
+            }
+            Self::CollectionDelete { collection_id } => {
+                format!("collection-delete-{collection_id}.json")
+            }
+            Self::CollectionRename { collection_id } => {
+                format!("collection-rename-{collection_id}.json")
             }
         }
     }
@@ -321,7 +329,7 @@ impl WorkspaceRepository {
         &self.root
     }
 
-    /// 在取得 workspace OS 写锁后恢复或回滚未完成的环境事务。
+    /// 在取得 workspace OS 写锁后恢复或回滚未完成的工作区事务。
     ///
     /// 调用方必须在任何 snapshot、registry 更新或 runtime migration 前调用它。恢复不
     /// 修改已提交 manifest 的业务含义：create 的 manifest 尚未引用对象时删除孤儿；
@@ -360,6 +368,12 @@ impl WorkspaceRepository {
                 }
                 WorkspaceTransactionOperation::EnvironmentDelete { environment_id } => {
                     self.recover_environment_delete(&manifest, environment_id, &path)?;
+                }
+                WorkspaceTransactionOperation::CollectionDelete { collection_id } => {
+                    self.recover_collection_delete(&manifest, collection_id, &path)?;
+                }
+                WorkspaceTransactionOperation::CollectionRename { collection_id } => {
+                    self.recover_collection_rename(&manifest, collection_id, &path)?;
                 }
             }
         }
@@ -460,6 +474,209 @@ impl WorkspaceRepository {
         self.finish_transaction(journal)
     }
 
+    /// 事务只记录 UUID；清理路径必须能由标准布局推导，并且不能穿过符号链接。
+    /// 非标准目录仍可读取，但不能猜测它的删除恢复路径。
+    fn collection_transaction_paths(&self, id: Uuid) -> Result<(PathBuf, PathBuf)> {
+        let root = self.root.canonicalize()?;
+        let directory = self.root.join("collections");
+        if directory.canonicalize()? != root.join("collections") {
+            bail!("集合事务目录不能使用符号链接或 junction");
+        }
+        let target = directory.join(id.to_string());
+        let tombstone = directory.join(format!(".collection-delete-{id}.tombstone"));
+        for path in [&target, &tombstone] {
+            match fs::symlink_metadata(path) {
+                Ok(metadata) => {
+                    let expected = root.join("collections").join(path.file_name().unwrap());
+                    if metadata.file_type().is_symlink() || path.canonicalize()? != expected {
+                        bail!(
+                            "集合事务路径不能使用符号链接或 junction：{}",
+                            path.display()
+                        );
+                    }
+                    if !metadata.is_dir() {
+                        bail!("集合事务目标不是目录：{}", path.display());
+                    }
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
+        Ok((target, tombstone))
+    }
+
+    fn validate_collection_transaction_entry(&self, entry: &CollectionEntry) -> Result<()> {
+        if Path::new(&entry.directory) != Path::new(&format!("collections/{}", entry.id)) {
+            bail!("集合事务要求标准 UUID 目录：{}", entry.directory);
+        }
+        Ok(())
+    }
+
+    fn recover_collection_delete(
+        &self,
+        manifest: &WorkspaceManifest,
+        id: Uuid,
+        journal: &Path,
+    ) -> Result<()> {
+        let (target, tombstone) = self.collection_transaction_paths(id)?;
+        if let Some(entry) = manifest.collections.iter().find(|entry| entry.id == id) {
+            self.validate_collection_transaction_entry(entry)?;
+            if target.exists() {
+                if tombstone.exists() {
+                    bail!("集合删除恢复发现目标与 tombstone 同时存在");
+                }
+            } else if tombstone.exists() {
+                fs::rename(&tombstone, &target).context("恢复未提交的集合删除失败")?;
+            } else {
+                bail!("集合删除事务未提交但目标和 tombstone 均缺失");
+            }
+        } else {
+            self.ensure_collection_delete_paths_unreferenced(manifest, id, &target, &tombstone)?;
+            remove_directory_if_exists(&tombstone)?;
+            remove_directory_if_exists(&target)?;
+        }
+        self.finish_transaction(journal)
+    }
+
+    fn ensure_collection_delete_paths_unreferenced(
+        &self,
+        manifest: &WorkspaceManifest,
+        id: Uuid,
+        target: &Path,
+        tombstone: &Path,
+    ) -> Result<()> {
+        let root = self.root.canonicalize()?;
+        let canonical_target = root.join("collections").join(id.to_string());
+        let canonical_tombstone = root
+            .join("collections")
+            .join(format!(".collection-delete-{id}.tombstone"));
+        // 提交前和恢复时都检查：不能删除由另一个 ID 或路径别名引用的目录。
+        for entry in manifest.collections.iter().filter(|entry| entry.id != id) {
+            let path = self.collection_path(entry)?;
+            let canonical = match path.canonicalize() {
+                Ok(path) => Some(path),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+                Err(error) => return Err(error.into()),
+            };
+            if path == target
+                || path == tombstone
+                || canonical
+                    .as_ref()
+                    .is_some_and(|path| path == &canonical_target || path == &canonical_tombstone)
+            {
+                bail!("待删除集合目录仍被工作区清单引用");
+            }
+        }
+        Ok(())
+    }
+
+    fn recover_collection_rename(
+        &self,
+        manifest: &WorkspaceManifest,
+        id: Uuid,
+        journal: &Path,
+    ) -> Result<()> {
+        let entry = manifest
+            .collections
+            .iter()
+            .find(|entry| entry.id == id)
+            .with_context(|| format!("集合重命名恢复找不到集合：{id}"))?;
+        self.validate_collection_transaction_entry(entry)?;
+        let (target, _) = self.collection_transaction_paths(id)?;
+        let marker = target.join(COLLECTION_MARKER);
+        let mut document: ContainerDocument = read_yaml(&marker)?;
+        if document.id != id {
+            bail!("集合重命名恢复发现文档 ID 与清单不一致");
+        }
+        // manifest 是唯一提交点；只恢复名称，保留鉴权和设置等其他字段。
+        if document.name != entry.name {
+            document.name = entry.name.clone();
+            write_yaml(&marker, &document)?;
+        }
+        self.finish_transaction(journal)
+    }
+
+    fn rename_collection_with_manifest_writer(
+        &self,
+        id: Uuid,
+        name: String,
+        write_manifest: impl FnOnce(&Path, &WorkspaceManifest) -> Result<()>,
+    ) -> Result<WorkspaceSnapshot> {
+        let name = required_name(&name)?;
+        let mut manifest = self.read_manifest()?;
+        let entry = manifest
+            .collections
+            .iter_mut()
+            .find(|entry| entry.id == id)
+            .with_context(|| format!("工作区清单中没有集合：{id}"))?;
+        self.validate_collection_transaction_entry(entry)?;
+        let (target, tombstone) = self.collection_transaction_paths(id)?;
+        if tombstone.exists() {
+            bail!("集合重命名前存在待恢复的删除 tombstone");
+        }
+        let marker = target.join(COLLECTION_MARKER);
+        let mut document: ContainerDocument = read_yaml(&marker)?;
+        if document.id != id {
+            bail!("集合文档 ID 与清单不一致");
+        }
+        let journal = self.begin_transaction(WorkspaceTransactionOperation::CollectionRename {
+            collection_id: id,
+        })?;
+        entry.name = name.clone();
+        document.name = name;
+        let publish = write_yaml(&marker, &document)
+            .and_then(|()| write_manifest(&self.manifest_path(), &manifest));
+        if let Err(error) = publish {
+            // 根据磁盘上的 manifest 恢复，而不猜测提交点是否经过。
+            // 恢复失败保留 journal，供下次打开继续处理。
+            return match self.recover_collection_rename(&self.read_manifest()?, id, &journal) {
+                Ok(()) => Err(error),
+                Err(cleanup) => {
+                    Err(error.context(format!("集合重命名失败，且恢复失败：{cleanup:#}")))
+                }
+            };
+        }
+        self.finish_transaction(&journal)
+            .context("集合重命名已提交，但无法清理恢复 journal")?;
+        self.snapshot()
+    }
+
+    fn delete_collection_with_manifest_writer(
+        &self,
+        id: Uuid,
+        write_manifest: impl FnOnce(&Path, &WorkspaceManifest) -> Result<()>,
+    ) -> Result<WorkspaceSnapshot> {
+        let mut manifest = self.read_manifest()?;
+        let entry = manifest
+            .collections
+            .iter()
+            .find(|entry| entry.id == id)
+            .with_context(|| format!("工作区清单中没有集合：{id}"))?;
+        self.validate_collection_transaction_entry(entry)?;
+        let (target, tombstone) = self.collection_transaction_paths(id)?;
+        if !target.is_dir() || tombstone.exists() {
+            bail!("集合删除目标缺失或存在待恢复的 tombstone");
+        }
+        self.ensure_collection_delete_paths_unreferenced(&manifest, id, &target, &tombstone)?;
+        let journal = self.begin_transaction(WorkspaceTransactionOperation::CollectionDelete {
+            collection_id: id,
+        })?;
+        manifest.collections.retain(|entry| entry.id != id);
+        if let Err(error) = write_manifest(&self.manifest_path(), &manifest) {
+            return match self.recover_collection_delete(&self.read_manifest()?, id, &journal) {
+                Ok(()) => Err(error),
+                Err(cleanup) => {
+                    Err(error.context(format!("集合删除失败，且恢复失败：{cleanup:#}")))
+                }
+            };
+        }
+        // 先提交 manifest，再隐藏/清理目录；后续失败保留 journal，不回滚提交。
+        fs::rename(&target, &tombstone).context("集合删除已提交，但无法暂存待清理目录")?;
+        self.recover_collection_delete(&manifest, id, &journal)
+            .context("集合删除已提交，但无法清理目录或恢复 journal")?;
+        self.snapshot()
+    }
+
     fn rollback_environment_create(
         &self,
         journal: &Path,
@@ -543,7 +760,7 @@ impl WorkspaceRepository {
                 },
                 path: path.clone(),
             });
-            self.scan_children(&path, Some(entry.id), 1, &mut located)?;
+            Self::scan_children(&path, Some(entry.id), 1, &mut located)?;
         }
 
         Ok(WorkspaceSnapshot {
@@ -784,14 +1001,69 @@ impl WorkspaceRepository {
     pub fn resolve_request_inheritance(
         &self,
         request_id: Uuid,
-        mut spec: RequestSpec,
+        spec: RequestSpec,
     ) -> Result<RequestSpec> {
+        self.resolve_inheritance(request_id, spec, false)
+    }
+
+    /// Token operations inherit only network settings; auth is explicitly supplied by the editor.
+    /// For a container, its edited current settings override ancestors just like a request.
+    pub fn resolve_token_request_inheritance(
+        &self,
+        node_id: Uuid,
+        spec: RequestSpec,
+    ) -> Result<RequestSpec> {
+        self.resolve_inheritance(node_id, spec, true)
+    }
+
+    /// Sensitive Auth provenance; never put this projection in history/response events.
+    pub(crate) fn resolve_auth_source(
+        &self,
+        node_id: Uuid,
+        auth: AuthConfig,
+    ) -> Result<(AuthConfig, Option<Uuid>)> {
+        let spec = RequestSpec {
+            method: "POST".into(),
+            url: String::new(),
+            params: vec![],
+            path_params: vec![],
+            headers: vec![],
+            body: Body::None,
+            auth,
+            settings: RequestSettings::default(),
+        };
+        let (spec, source) = self.resolve_inheritance_with_source(node_id, spec, true)?;
+        Ok((spec.auth, source))
+    }
+
+    fn resolve_inheritance(
+        &self,
+        request_id: Uuid,
+        spec: RequestSpec,
+        allow_container: bool,
+    ) -> Result<RequestSpec> {
+        self.resolve_inheritance_with_source(request_id, spec, allow_container)
+            .map(|(spec, _)| spec)
+    }
+
+    fn resolve_inheritance_with_source(
+        &self,
+        request_id: Uuid,
+        mut spec: RequestSpec,
+        allow_container: bool,
+    ) -> Result<(RequestSpec, Option<Uuid>)> {
         let locations = self.scan()?;
         let mut current = locations
             .iter()
             .find(|item| item.node.id == request_id)
             .with_context(|| format!("未知的工作区节点：{request_id}"))?;
-        if !matches!(current.node.kind, WorkspaceNodeKind::Request) {
+        if !(matches!(current.node.kind, WorkspaceNodeKind::Request)
+            || allow_container
+                && matches!(
+                    current.node.kind,
+                    WorkspaceNodeKind::Collection | WorkspaceNodeKind::Folder
+                ))
+        {
             bail!("节点不是请求：{request_id}");
         }
         let mut ancestors = Vec::new();
@@ -805,21 +1077,75 @@ impl WorkspaceRepository {
         ancestors.reverse();
 
         let mut auth = AuthConfig::Inherit;
+        let mut source = None;
         let mut settings = RequestSettings::default();
         for ancestor in ancestors {
             let marker = container_marker(&ancestor.node.kind)?;
             let container: ContainerDocument = read_yaml(&ancestor.path.join(marker))?;
             if !matches!(container.auth, AuthConfig::Inherit) {
                 auth = container.auth;
+                source = Some(ancestor.node.id);
             }
             merge_settings(&mut settings, &container.settings);
         }
         if matches!(spec.auth, AuthConfig::Inherit) {
             spec.auth = auth;
+        } else {
+            source = Some(request_id);
         }
         merge_settings(&mut settings, &spec.settings);
         spec.settings = settings;
-        Ok(spec)
+        Ok((spec, source))
+    }
+
+    pub(crate) fn read_auth(&self, id: Uuid) -> Result<AuthConfig> {
+        let location = self.locate(id)?;
+        if matches!(location.node.kind, WorkspaceNodeKind::Request) {
+            return Ok(self.read_request(id)?.spec.auth);
+        }
+        let marker = container_marker(&location.node.kind)?;
+        let document: ContainerDocument = read_yaml(&location.path.join(marker))?;
+        if document.id != id {
+            bail!("OAUTH2_SOURCE_STALE");
+        }
+        Ok(document.auth)
+    }
+
+    pub(crate) fn ensure_auth_unchanged(&self, id: Uuid, expected: &AuthConfig) -> Result<()> {
+        if serde_json::to_value(self.read_auth(id)?)? != serde_json::to_value(expected)? {
+            bail!("AUTH_CONFIG_STALE");
+        }
+        Ok(())
+    }
+
+    /// Only Auth changes. Preserve current names/settings/body/cases and never rewrite a manifest.
+    pub(crate) fn compare_and_set_auth(
+        &self,
+        id: Uuid,
+        expected: &AuthConfig,
+        updated: AuthConfig,
+    ) -> Result<()> {
+        let location = self.locate(id)?;
+        if matches!(location.node.kind, WorkspaceNodeKind::Request) {
+            let mut document: PersistedRequest = read_yaml(&location.path)?;
+            if document.id != id
+                || serde_json::to_value(&document.spec.auth)? != serde_json::to_value(expected)?
+            {
+                bail!("OAUTH2_SOURCE_STALE");
+            }
+            document.spec.auth = updated;
+            write_yaml(&location.path, &document)
+        } else {
+            let path = location.path.join(container_marker(&location.node.kind)?);
+            let mut document: ContainerDocument = read_yaml(&path)?;
+            if document.id != id
+                || serde_json::to_value(&document.auth)? != serde_json::to_value(expected)?
+            {
+                bail!("OAUTH2_SOURCE_STALE");
+            }
+            document.auth = updated;
+            write_yaml(&path, &document)
+        }
     }
 
     pub fn read_environment(&self, id: Uuid) -> Result<Environment> {
@@ -1419,22 +1745,14 @@ impl WorkspaceRepository {
     }
 
     pub fn rename_node(&self, id: Uuid, name: String) -> Result<WorkspaceSnapshot> {
+        self.recover_pending_transactions()?;
         let name = required_name(&name)?;
         let location = self.locate(id)?;
         match location.node.kind {
             WorkspaceNodeKind::Collection => {
-                let mut manifest = self.read_manifest()?;
-                let entry = manifest
-                    .collections
-                    .iter_mut()
-                    .find(|entry| entry.id == id)
-                    .with_context(|| format!("工作区清单中没有集合：{id}"))?;
-                entry.name = name.clone();
-                let mut document: ContainerDocument =
-                    read_yaml(&location.path.join(COLLECTION_MARKER))?;
-                document.name = name;
-                write_yaml(&location.path.join(COLLECTION_MARKER), &document)?;
-                write_yaml(&self.manifest_path(), &manifest)?;
+                return self.rename_collection_with_manifest_writer(id, name, |path, manifest| {
+                    write_yaml(path, manifest)
+                });
             }
             WorkspaceNodeKind::Folder => {
                 let mut document: ContainerDocument =
@@ -1452,14 +1770,13 @@ impl WorkspaceRepository {
     }
 
     pub fn delete_node(&self, id: Uuid) -> Result<WorkspaceSnapshot> {
+        self.recover_pending_transactions()?;
         let location = self.locate(id)?;
         match location.node.kind {
             WorkspaceNodeKind::Collection => {
-                fs::remove_dir_all(&location.path)
-                    .with_context(|| format!("删除集合目录失败：{}", location.path.display()))?;
-                let mut manifest = self.read_manifest()?;
-                manifest.collections.retain(|entry| entry.id != id);
-                write_yaml(&self.manifest_path(), &manifest)?;
+                return self.delete_collection_with_manifest_writer(id, |path, manifest| {
+                    write_yaml(path, manifest)
+                });
             }
             WorkspaceNodeKind::Folder => {
                 fs::remove_dir_all(&location.path)
@@ -1539,13 +1856,12 @@ impl WorkspaceRepository {
                 },
                 path: path.clone(),
             });
-            self.scan_children(&path, Some(entry.id), 1, &mut nodes)?;
+            Self::scan_children(&path, Some(entry.id), 1, &mut nodes)?;
         }
         Ok(nodes)
     }
 
     fn scan_children(
-        &self,
         directory: &Path,
         parent_id: Option<Uuid>,
         depth: usize,
@@ -1579,7 +1895,7 @@ impl WorkspaceRepository {
                     },
                     path: path.clone(),
                 });
-                self.scan_children(&path, Some(document.id), depth + 1, nodes)?;
+                Self::scan_children(&path, Some(document.id), depth + 1, nodes)?;
             } else if file_type.is_file()
                 && path
                     .extension()
@@ -1796,13 +2112,21 @@ fn remove_file_if_exists(path: &Path) -> Result<()> {
     }
 }
 
+fn remove_directory_if_exists(path: &Path) -> Result<()> {
+    match fs::remove_dir_all(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.into()),
+    }
+}
+
 fn read_yaml<T: DeserializeOwned>(path: &Path) -> Result<T> {
-    let contents = fs::read_to_string(path)?;
-    Ok(serde_yaml_ng::from_str(&contents)?)
+    let reader = fs::File::open(path)?;
+    Ok(apogee_core::yaml::from_reader(reader)?)
 }
 
 fn write_yaml<T: Serialize>(path: &Path, value: &T) -> Result<()> {
-    let contents = serde_yaml_ng::to_string(value)?;
+    let contents = apogee_core::yaml::to_string(value)?;
     atomic_write(path, contents.as_bytes())
 }
 
@@ -1839,6 +2163,29 @@ mod tests {
         fs::create_dir_all(&root).unwrap();
         assert!(WorkspaceRepository::open(&root).is_err());
         assert!(!root.join("apogee.yaml").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn yaml_codec_failure_preserves_file_and_creates_no_publish_temporary_file() {
+        struct Failure;
+        impl Serialize for Failure {
+            fn serialize<S: serde::Serializer>(
+                &self,
+                _: S,
+            ) -> std::result::Result<S::Ok, S::Error> {
+                Err(serde::ser::Error::custom("fixture-private-secret"))
+            }
+        }
+        let root =
+            std::env::temp_dir().join(format!("apogee-yaml-codec-failure-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let target = root.join("fixture.yaml");
+        fs::write(&target, b"previous: intact\n").unwrap();
+        let error = write_yaml(&target, &Failure).unwrap_err();
+        assert!(!format!("{error:#}").contains("fixture-private-secret"));
+        assert_eq!(fs::read(&target).unwrap(), b"previous: intact\n");
+        assert_eq!(fs::read_dir(&root).unwrap().count(), 1);
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -1926,6 +2273,423 @@ mod tests {
             "失败创建不得遗留 staging 或 journal"
         );
         fs::remove_dir_all(root).unwrap();
+    }
+
+    struct CollectionTransactionFixture {
+        root: PathBuf,
+        repository: WorkspaceRepository,
+        id: Uuid,
+        request_id: Uuid,
+    }
+
+    impl CollectionTransactionFixture {
+        fn new() -> Self {
+            let root =
+                std::env::temp_dir().join(format!("apogee-collection-tx-test-{}", Uuid::new_v4()));
+            let repository = WorkspaceRepository::create(&root, "我的集合".into()).unwrap();
+            let id = repository
+                .snapshot()
+                .unwrap()
+                .nodes
+                .iter()
+                .find(|node| matches!(node.kind, WorkspaceNodeKind::Collection))
+                .unwrap()
+                .id;
+            let folder = repository
+                .create_folder(id, "保留的请求".into())
+                .unwrap()
+                .nodes
+                .into_iter()
+                .find(|node| matches!(node.kind, WorkspaceNodeKind::Folder))
+                .unwrap()
+                .id;
+            let request_id = repository
+                .create_request(folder, "保留的请求".into())
+                .unwrap()
+                .id;
+            Self {
+                root,
+                repository,
+                id,
+                request_id,
+            }
+        }
+
+        fn journal(&self, rename: bool) -> PathBuf {
+            self.repository
+                .begin_transaction(if rename {
+                    WorkspaceTransactionOperation::CollectionRename {
+                        collection_id: self.id,
+                    }
+                } else {
+                    WorkspaceTransactionOperation::CollectionDelete {
+                        collection_id: self.id,
+                    }
+                })
+                .unwrap()
+        }
+
+        fn commit_delete(&self) {
+            let mut manifest = self.repository.read_manifest().unwrap();
+            manifest.collections.retain(|entry| entry.id != self.id);
+            write_yaml(&self.repository.manifest_path(), &manifest).unwrap();
+        }
+
+        fn assert_name(&self, expected: &str) {
+            let manifest = self.repository.read_manifest().unwrap();
+            assert_eq!(
+                manifest
+                    .collections
+                    .iter()
+                    .find(|entry| entry.id == self.id)
+                    .unwrap()
+                    .name,
+                expected
+            );
+            let document: ContainerDocument = read_yaml(
+                &self
+                    .root
+                    .join(format!("collections/{}/{}", self.id, COLLECTION_MARKER)),
+            )
+            .unwrap();
+            assert_eq!(document.name, expected);
+            assert_eq!(
+                self.repository.read_request(self.request_id).unwrap().name,
+                "保留的请求"
+            );
+        }
+
+        fn assert_no_journal(&self) {
+            let directory = self.repository.transaction_directory();
+            assert!(!directory.exists() || fs::read_dir(directory).unwrap().next().is_none());
+        }
+    }
+
+    impl Drop for CollectionTransactionFixture {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.root);
+        }
+    }
+
+    #[test]
+    fn collection_delete_removes_subtree_only_after_manifest_commit() {
+        let fixture = CollectionTransactionFixture::new();
+        let environments = fixture.repository.snapshot().unwrap().environments.len();
+        let snapshot = fixture.repository.delete_node(fixture.id).unwrap();
+        assert!(snapshot.nodes.is_empty());
+        assert_eq!(snapshot.environments.len(), environments);
+        let (target, tombstone) = fixture
+            .repository
+            .collection_transaction_paths(fixture.id)
+            .unwrap();
+        assert!(!target.exists());
+        assert!(!tombstone.exists());
+        fixture.assert_no_journal();
+    }
+
+    #[test]
+    fn failed_collection_delete_manifest_publish_preserves_nested_requests() {
+        let fixture = CollectionTransactionFixture::new();
+        let manifest_before = fs::read(fixture.repository.manifest_path()).unwrap();
+        let error = fixture
+            .repository
+            .delete_collection_with_manifest_writer(fixture.id, |_, _| {
+                let (target, tombstone) = fixture
+                    .repository
+                    .collection_transaction_paths(fixture.id)?;
+                assert!(target.is_dir());
+                assert!(!tombstone.exists());
+                assert!(fixture.repository.read_request(fixture.request_id).is_ok());
+                bail!("injected collection manifest publish failure")
+            })
+            .unwrap_err();
+        assert!(format!("{error:#}").contains("injected collection manifest publish failure"));
+        assert_eq!(
+            fs::read(fixture.repository.manifest_path()).unwrap(),
+            manifest_before
+        );
+        fixture.assert_name("我的集合");
+        fixture.assert_no_journal();
+    }
+
+    #[test]
+    fn collection_delete_recovery_preserves_uncommitted_subtree() {
+        for moved in [false, true] {
+            let fixture = CollectionTransactionFixture::new();
+            let journal = fixture.journal(false);
+            let (target, tombstone) = fixture
+                .repository
+                .collection_transaction_paths(fixture.id)
+                .unwrap();
+            if moved {
+                fs::rename(&target, &tombstone).unwrap();
+            }
+            fixture.repository.recover_pending_transactions().unwrap();
+            fixture.repository.recover_pending_transactions().unwrap();
+            fixture.assert_name("我的集合");
+            assert!(target.is_dir());
+            assert!(!tombstone.exists());
+            assert!(!journal.exists());
+        }
+    }
+
+    #[test]
+    fn collection_delete_recovery_completes_each_post_commit_cleanup_stage() {
+        for stage in 0..3 {
+            let fixture = CollectionTransactionFixture::new();
+            let journal = fixture.journal(false);
+            let (target, tombstone) = fixture
+                .repository
+                .collection_transaction_paths(fixture.id)
+                .unwrap();
+            fixture.commit_delete();
+            if stage >= 1 {
+                fs::rename(&target, &tombstone).unwrap();
+            }
+            if stage == 2 {
+                fs::remove_dir_all(&tombstone).unwrap();
+            }
+            fixture.repository.recover_pending_transactions().unwrap();
+            fixture.repository.recover_pending_transactions().unwrap();
+            assert!(fixture.repository.snapshot().unwrap().nodes.is_empty());
+            assert!(!target.exists());
+            assert!(!tombstone.exists());
+            assert!(!journal.exists());
+        }
+    }
+
+    #[test]
+    fn collection_delete_recovery_rejects_conflicting_uncommitted_directories() {
+        let fixture = CollectionTransactionFixture::new();
+        let journal = fixture.journal(false);
+        let (target, tombstone) = fixture
+            .repository
+            .collection_transaction_paths(fixture.id)
+            .unwrap();
+        fs::create_dir(&tombstone).unwrap();
+        assert!(fixture.repository.recover_pending_transactions().is_err());
+        assert!(target.is_dir());
+        assert!(tombstone.is_dir());
+        assert!(journal.exists());
+        fixture.assert_name("我的集合");
+    }
+
+    #[test]
+    fn collection_delete_recovery_refuses_directory_referenced_under_another_id() {
+        let fixture = CollectionTransactionFixture::new();
+        let journal = fixture.journal(false);
+        let mut manifest = fixture.repository.read_manifest().unwrap();
+        manifest.collections[0].id = Uuid::new_v4();
+        write_yaml(&fixture.repository.manifest_path(), &manifest).unwrap();
+        assert!(fixture.repository.recover_pending_transactions().is_err());
+        assert!(fixture.repository.read_request(fixture.request_id).is_ok());
+        assert!(journal.exists());
+    }
+
+    #[test]
+    fn collection_delete_rejects_alias_before_manifest_commit() {
+        let fixture = CollectionTransactionFixture::new();
+        let mut manifest = fixture.repository.read_manifest().unwrap();
+        let mut alias = manifest.collections[0].clone();
+        alias.id = Uuid::new_v4();
+        alias.directory = format!("./collections/{}", fixture.id);
+        manifest.collections.push(alias);
+        write_yaml(&fixture.repository.manifest_path(), &manifest).unwrap();
+        let before = fs::read(fixture.repository.manifest_path()).unwrap();
+        assert!(fixture
+            .repository
+            .delete_collection_with_manifest_writer(fixture.id, |_, _| {
+                panic!("aliased directories must not reach the commit point")
+            })
+            .is_err());
+        assert_eq!(
+            fs::read(fixture.repository.manifest_path()).unwrap(),
+            before
+        );
+        assert!(fixture.repository.read_request(fixture.request_id).is_ok());
+        fixture.assert_no_journal();
+    }
+
+    #[test]
+    fn collection_rename_recovery_preserves_journal_on_identity_mismatch() {
+        let fixture = CollectionTransactionFixture::new();
+        let journal = fixture.journal(true);
+        let marker = fixture
+            .root
+            .join(format!("collections/{}/{}", fixture.id, COLLECTION_MARKER));
+        let mut document: ContainerDocument = read_yaml(&marker).unwrap();
+        document.id = Uuid::new_v4();
+        write_yaml(&marker, &document).unwrap();
+        let before = fs::read(&marker).unwrap();
+        assert!(fixture.repository.recover_pending_transactions().is_err());
+        assert_eq!(fs::read(marker).unwrap(), before);
+        assert!(journal.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn collection_delete_recovery_refuses_symlink_to_another_directory() {
+        let fixture = CollectionTransactionFixture::new();
+        let journal = fixture.journal(false);
+        let (target, _) = fixture
+            .repository
+            .collection_transaction_paths(fixture.id)
+            .unwrap();
+        let retained = fixture.root.join("retained-collection");
+        fs::rename(&target, &retained).unwrap();
+        std::os::unix::fs::symlink(&retained, &target).unwrap();
+        fixture.commit_delete();
+        assert!(fixture.repository.recover_pending_transactions().is_err());
+        assert!(retained.join(COLLECTION_MARKER).is_file());
+        assert!(journal.exists());
+    }
+
+    #[test]
+    fn collection_transactions_reject_nonstandard_paths_without_mutation() {
+        let fixture = CollectionTransactionFixture::new();
+        let mut manifest = fixture.repository.read_manifest().unwrap();
+        manifest.collections[0].directory = "collections".into();
+        write_yaml(&fixture.repository.manifest_path(), &manifest).unwrap();
+        let before = fs::read(fixture.repository.manifest_path()).unwrap();
+        assert!(fixture
+            .repository
+            .delete_collection_with_manifest_writer(fixture.id, |_, _| {
+                panic!("invalid directory must be rejected before publishing")
+            })
+            .is_err());
+        assert_eq!(
+            fs::read(fixture.repository.manifest_path()).unwrap(),
+            before
+        );
+        assert!(fixture
+            .root
+            .join(format!("collections/{}", fixture.id))
+            .is_dir());
+        fixture.assert_no_journal();
+    }
+
+    #[test]
+    fn collection_delete_error_after_commit_never_restores_manifest_reference() {
+        let fixture = CollectionTransactionFixture::new();
+        assert!(fixture
+            .repository
+            .delete_collection_with_manifest_writer(fixture.id, |path, manifest| {
+                write_yaml(path, manifest)?;
+                bail!("injected error after commit")
+            })
+            .is_err());
+        assert!(fixture.repository.snapshot().unwrap().nodes.is_empty());
+        assert!(!fixture
+            .root
+            .join(format!("collections/{}", fixture.id))
+            .exists());
+        fixture.assert_no_journal();
+    }
+
+    #[test]
+    fn collection_rename_commits_both_names_and_preserves_container_configuration() {
+        let fixture = CollectionTransactionFixture::new();
+        let mut container = fixture.repository.read_container(fixture.id).unwrap();
+        container.auth = AuthConfig::Bearer {
+            token: "{{token}}".into(),
+        };
+        container.settings.timeout_ms = Some(1234);
+        fixture
+            .repository
+            .save_container(container.clone())
+            .unwrap();
+        fixture
+            .repository
+            .rename_node(fixture.id, " 新名称 ".into())
+            .unwrap();
+        fixture.assert_name("新名称");
+        let saved = fixture.repository.read_container(fixture.id).unwrap();
+        assert_eq!(
+            serde_json::to_value(saved.auth).unwrap(),
+            serde_json::to_value(container.auth).unwrap()
+        );
+        assert_eq!(saved.settings.timeout_ms, Some(1234));
+        fixture.assert_no_journal();
+    }
+
+    #[test]
+    fn failed_collection_rename_manifest_publish_restores_old_name() {
+        let fixture = CollectionTransactionFixture::new();
+        let marker = fixture
+            .root
+            .join(format!("collections/{}/{}", fixture.id, COLLECTION_MARKER));
+        let before = fs::read(&marker).unwrap();
+        let error = fixture
+            .repository
+            .rename_collection_with_manifest_writer(fixture.id, "保留的请求".into(), |_, _| {
+                let document: ContainerDocument = read_yaml(&marker)?;
+                assert_eq!(document.name, "保留的请求");
+                bail!("injected collection rename publish failure")
+            })
+            .unwrap_err();
+        assert!(format!("{error:#}").contains("injected collection rename publish failure"));
+        assert_eq!(fs::read(marker).unwrap(), before);
+        fixture.assert_name("我的集合");
+        fixture.assert_no_journal();
+    }
+
+    #[test]
+    fn collection_rename_recovery_uses_manifest_as_commit_point() {
+        for committed in [false, true] {
+            let fixture = CollectionTransactionFixture::new();
+            let journal = fixture.journal(true);
+            let marker = fixture
+                .root
+                .join(format!("collections/{}/{}", fixture.id, COLLECTION_MARKER));
+            let mut document: ContainerDocument = read_yaml(&marker).unwrap();
+            document.name = "新名称".into();
+            write_yaml(&marker, &document).unwrap();
+            if committed {
+                let mut manifest = fixture.repository.read_manifest().unwrap();
+                manifest.collections[0].name = "新名称".into();
+                write_yaml(&fixture.repository.manifest_path(), &manifest).unwrap();
+            }
+            fixture.repository.recover_pending_transactions().unwrap();
+            fixture.repository.recover_pending_transactions().unwrap();
+            fixture.assert_name(if committed {
+                "新名称"
+            } else {
+                "我的集合"
+            });
+            assert!(!journal.exists());
+        }
+    }
+
+    #[test]
+    fn collection_rename_error_after_commit_preserves_new_name() {
+        let fixture = CollectionTransactionFixture::new();
+        assert!(fixture
+            .repository
+            .rename_collection_with_manifest_writer(
+                fixture.id,
+                "保留的请求".into(),
+                |path, manifest| {
+                    write_yaml(path, manifest)?;
+                    bail!("injected error after rename commit")
+                }
+            )
+            .is_err());
+        fixture.assert_name("保留的请求");
+        fixture.assert_no_journal();
+    }
+
+    #[test]
+    fn collection_rename_recovery_keeps_journal_when_document_is_missing() {
+        let fixture = CollectionTransactionFixture::new();
+        let journal = fixture.journal(true);
+        fs::remove_file(
+            fixture
+                .root
+                .join(format!("collections/{}/{}", fixture.id, COLLECTION_MARKER)),
+        )
+        .unwrap();
+        assert!(fixture.repository.recover_pending_transactions().is_err());
+        assert!(journal.exists());
     }
 
     #[test]
@@ -2607,6 +3371,76 @@ durationMs: 2
     }
 
     #[test]
+    fn persists_new_auth_and_resolves_collection_folder_request_overrides() {
+        let root = std::env::temp_dir().join(format!("apogee-auth-inherit-{}", Uuid::new_v4()));
+        let repository = WorkspaceRepository::create(&root, "auth".into()).unwrap();
+        let collection = repository
+            .create_collection("API".into())
+            .unwrap()
+            .nodes
+            .into_iter()
+            .find(|n| matches!(n.kind, WorkspaceNodeKind::Collection))
+            .unwrap();
+        let folder = repository
+            .create_folder(collection.id, "Folder".into())
+            .unwrap()
+            .nodes
+            .into_iter()
+            .find(|n| {
+                n.parent_id == Some(collection.id) && matches!(n.kind, WorkspaceNodeKind::Folder)
+            })
+            .unwrap();
+        let request = repository
+            .create_request(folder.id, "Request".into())
+            .unwrap();
+        for auth in [
+            serde_json::json!({"type":"oauth1","consumerKey":"{{key}}","consumerSecret":"{{secret}}"}),
+            serde_json::json!({"type":"oauth2","accessToken":"{{token}}"}),
+            serde_json::json!({"type":"jwt","secret":"{{secret}}","payload":"{\"sub\":\"{{user}}\"}"}),
+        ] {
+            let auth: AuthConfig = serde_json::from_value(auth).unwrap();
+            repository
+                .save_container(WorkspaceContainer {
+                    id: collection.id,
+                    name: collection.name.clone(),
+                    auth: auth.clone(),
+                    settings: Default::default(),
+                })
+                .unwrap();
+            let resolved = repository
+                .resolve_request_inheritance(request.id, default_request_spec())
+                .unwrap();
+            assert_eq!(
+                serde_json::to_value(&resolved.auth).unwrap(),
+                serde_json::to_value(&auth).unwrap()
+            );
+            let none = repository
+                .resolve_request_inheritance(
+                    request.id,
+                    RequestSpec {
+                        auth: AuthConfig::None,
+                        ..default_request_spec()
+                    },
+                )
+                .unwrap();
+            assert!(matches!(none.auth, AuthConfig::None));
+        }
+        let folder_auth:AuthConfig=serde_json::from_value(serde_json::json!({"type":"oauth2","accessToken":"folder-token","headerPrefix":"Token"})).unwrap();
+        repository
+            .save_container(WorkspaceContainer {
+                id: folder.id,
+                name: folder.name,
+                auth: folder_auth,
+                settings: Default::default(),
+            })
+            .unwrap();
+        assert!(
+            matches!(repository.resolve_request_inheritance(request.id,default_request_spec()).unwrap().auth,AuthConfig::OAuth2 {access_token,..} if access_token=="folder-token")
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn resolves_container_auth_and_settings_from_nearest_ancestor() {
         let root = std::env::temp_dir().join(format!("apogee-inherit-test-{}", Uuid::new_v4()));
         let repository = WorkspaceRepository::create(&root, "test".into()).unwrap();
@@ -2638,6 +3472,7 @@ durationMs: 2
                 },
                 settings: RequestSettings {
                     timeout_ms: Some(1000),
+                    verify_tls: Some(true),
                     ..Default::default()
                 },
             })
@@ -2674,6 +3509,24 @@ durationMs: 2
         assert!(matches!(spec.auth, AuthConfig::ApiKey { ref value, .. } if value == "folder"));
         assert_eq!(spec.settings.timeout_ms, Some(3000));
         assert_eq!(spec.settings.verify_tls, Some(false));
+        let token_spec = RequestSpec {
+            auth: AuthConfig::None,
+            settings: RequestSettings {
+                timeout_ms: Some(4000),
+                ..Default::default()
+            },
+            ..default_request_spec()
+        };
+        let resolved = repository
+            .resolve_token_request_inheritance(folder.id, token_spec)
+            .unwrap();
+        // The edited folder timeout wins over its persisted timeout; only ancestor settings apply.
+        assert_eq!(resolved.settings.timeout_ms, Some(4000));
+        assert_eq!(resolved.settings.verify_tls, Some(true));
+        assert!(matches!(resolved.auth, AuthConfig::None));
+        assert!(repository
+            .resolve_request_inheritance(folder.id, default_request_spec())
+            .is_err());
         fs::remove_dir_all(root).unwrap();
     }
 

@@ -10,7 +10,7 @@ Apogee 是一个本地优先、启动即用的桌面 API 客户端，目标是�
 - 前端：Vue 3.5、TypeScript、Vite、Pinia、Naive UI、CodeMirror 6
 - 后端：Rust 2021、Tokio、Reqwest + rustls
 - 包管理器：pnpm 11
-- Rust 最低版本：1.85
+- Rust 最低版本：1.89
 - 当前主要平台：Windows；macOS 为 v1.0 目标，Linux 不在 v1.0 范围
 
 权威设计文档：

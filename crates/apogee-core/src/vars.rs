@@ -244,6 +244,59 @@ impl Resolver {
             AuthConfig::Bearer { token } => AuthConfig::Bearer {
                 token: self.resolve_text(token)?,
             },
+            AuthConfig::OAuth1 {
+                consumer_key,
+                consumer_secret,
+                token,
+                token_secret,
+                signature_method,
+                realm,
+                callback,
+                verifier,
+                nonce,
+                timestamp,
+            } => AuthConfig::OAuth1 {
+                consumer_key: self.resolve_text(consumer_key)?,
+                consumer_secret: self.resolve_text(consumer_secret)?,
+                token: self.resolve_text(token)?,
+                token_secret: self.resolve_text(token_secret)?,
+                signature_method: *signature_method,
+                realm: self.resolve_text(realm)?,
+                callback: self.resolve_text(callback)?,
+                verifier: self.resolve_text(verifier)?,
+                nonce: self.resolve_text(nonce)?,
+                timestamp: self.resolve_text(timestamp)?,
+            },
+            AuthConfig::OAuth2 {
+                access_token,
+                header_prefix,
+                token_request,
+                obtained_at,
+                expires_at,
+                auto_refresh,
+                token_context,
+            } => AuthConfig::OAuth2 {
+                access_token: self.resolve_text(access_token)?,
+                header_prefix: self.resolve_text(header_prefix)?,
+                token_request: token_request.clone(),
+                obtained_at: *obtained_at,
+                expires_at: *expires_at,
+                auto_refresh: *auto_refresh,
+                token_context: token_context.clone(),
+            },
+            AuthConfig::Jwt {
+                secret,
+                payload,
+                header,
+                algorithm,
+                header_prefix,
+            } => AuthConfig::Jwt {
+                secret: self.resolve_text(secret)?,
+                payload: self.resolve_text(payload)?,
+                header: self.resolve_text(header)?,
+                algorithm: *algorithm,
+                header_prefix: self.resolve_text(header_prefix)?,
+            },
             AuthConfig::ApiKey {
                 key,
                 value,
@@ -288,6 +341,49 @@ mod tests {
                     enabled: true,
                 })
                 .collect(),
+        }
+    }
+
+    #[test]
+    fn resolves_all_new_auth_fields_without_changing_algorithms() {
+        let env = environment(&[("v", "resolved")]);
+        let resolver = Resolver::from_environment(Some(&env)).unwrap();
+        let auth = serde_json::json!({"type":"oauth1","consumerKey":"{{v}}","consumerSecret":"{{v}}",
+            "token":"{{v}}","tokenSecret":"{{v}}","realm":"{{v}}","callback":"{{v}}","verifier":"{{v}}",
+            "nonce":"{{v}}","timestamp":"{{v}}","signatureMethod":"HMAC-SHA256"});
+        let resolved = resolver
+            .resolve_auth(&serde_json::from_value(auth).unwrap())
+            .unwrap();
+        let resolved = serde_json::to_value(resolved).unwrap();
+        for key in [
+            "consumerKey",
+            "consumerSecret",
+            "token",
+            "tokenSecret",
+            "realm",
+            "callback",
+            "verifier",
+            "nonce",
+            "timestamp",
+        ] {
+            assert_eq!(resolved[key], "resolved");
+        }
+        assert_eq!(resolved["signatureMethod"], "HMAC-SHA256");
+        for auth in [
+            serde_json::json!({"type":"oauth2","accessToken":"{{v}}","headerPrefix":"{{v}}"}),
+            serde_json::json!({"type":"jwt","secret":"{{v}}","payload":"{{v}}","header":"{{v}}","headerPrefix":"{{v}}","algorithm":"HS512"}),
+        ] {
+            let resolved = serde_json::to_value(
+                resolver
+                    .resolve_auth(&serde_json::from_value(auth).unwrap())
+                    .unwrap(),
+            )
+            .unwrap();
+            for (key, value) in resolved.as_object().unwrap() {
+                if key != "type" && key != "algorithm" {
+                    assert_eq!(value, "resolved");
+                }
+            }
         }
     }
 

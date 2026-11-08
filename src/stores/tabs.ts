@@ -1,3 +1,4 @@
+import { pathParameterNames } from '@/features/requestParameters'
 import { defineStore } from 'pinia'
 import { ref, shallowRef, computed, markRaw } from 'vue'
 import type {
@@ -58,6 +59,8 @@ export interface Tab {
    * 只有这个字段允许触发请求 YAML 自动保存；调试用例标签必须保持为空。
    */
   nodeId?: string
+  /** Last observed Auth on disk, private optimistic-save baseline; never in RequestSpec. */
+  persistedAuth?: AuthConfig
   /**
    * 独立调试标签的来源请求 id。它只参与集合/文件夹继承解析，绝不能作为保存目标。
    */
@@ -92,22 +95,6 @@ const WARM_LIMIT = 3
 let seq = 0
 function nextId() {
   return `tab-${++seq}`
-}
-
-/** 从 URL 路径中识别 :id / {id} 占位符，不把 {{variable}} 当成路径参数。 */
-function pathParamNames(url: string): string[] {
-  const path = url.split(/[?#]/, 1)[0] ?? ''
-  const names: string[] = []
-  const seen = new Set<string>()
-  const pattern = /\{\{([A-Za-z_][A-Za-z0-9_-]*)\}\}|:([A-Za-z_][A-Za-z0-9_-]*)|(?<!\{)\{([A-Za-z_][A-Za-z0-9_-]*)\}(?!\})/g
-  for (const match of path.matchAll(pattern)) {
-    const name = match[1] ?? match[2] ?? match[3]
-    if (name && !seen.has(name)) {
-      seen.add(name)
-      names.push(name)
-    }
-  }
-  return names
 }
 
 export const useTabsStore = defineStore('tabs', () => {
@@ -146,11 +133,18 @@ export const useTabsStore = defineStore('tabs', () => {
   async function persist(tab: Tab): Promise<AppError | null> {
     if (!inTauri || !tab.nodeId) return null
     try {
-      await ipc.workspaceSaveRequest(tab.nodeId, tab.title, requestSpec(tab))
+      await ipc.workspaceSaveRequest(tab.nodeId, tab.title, requestSpec(tab), tab.persistedAuth)
+      const current = tabs.value.find(item => item.id === tab.id && item.nodeId === tab.nodeId)
+      if (current && current.persistedAuth === tab.persistedAuth) patch(tab.id, { persistedAuth: tab.auth })
       return null
     } catch (error) {
-      console.error('[workspace] 保存请求失败', error)
-      return normalizeError(error)
+      const normalized = normalizeError(error)
+      const failure: AppError = normalized.message === 'AUTH_CONFIG_STALE' ? { kind: 'io', message: '认证来源已更新，保存已停止，未覆盖新凭据', hints: [{ label: '重新加载接口后重试；保留当前未保存编辑以便手动合并' }] } : normalized
+      // Autosave has no awaiting UI caller. Surface its safe error without logging raw IPC values;
+      // a late rejected save must not mark a newly rotated baseline as stale.
+      const current = tabs.value.find(item => item.id === tab.id && item.nodeId === tab.nodeId)
+      if (current && current.persistedAuth === tab.persistedAuth) patch(tab.id, { dirty: true, error: failure })
+      return failure
     }
   }
 
@@ -237,6 +231,7 @@ export const useTabsStore = defineStore('tabs', () => {
           debugCaseId: undefined,
           debugCaseEditor: undefined,
           ...init,
+          persistedAuth: init.nodeId ? init.auth ?? { type: 'inherit' } : undefined,
           id: existing.id,
           preview: true,
           dirty: false,
@@ -273,6 +268,7 @@ export const useTabsStore = defineStore('tabs', () => {
       historyPreview: false,
       newPanel: false,
       ...init,
+      persistedAuth: init?.nodeId ? init.auth ?? { type: 'inherit' } : undefined,
     })
     tabs.value = [...tabs.value, tab]
     activate(tab.id)
@@ -376,7 +372,7 @@ export const useTabsStore = defineStore('tabs', () => {
     // 同一个对象引用，Vue 可能认为值没有变化，依赖它的 editorSections 直到
     // 切换标签才会重新计算。创建新对象同时满足 shallowRef 的整体替换约束。
     const current = tabs.value[index]
-    const next = markRaw({ ...current, ...delta })
+    const next = markRaw({ ...current, ...delta, ...(delta.nodeId && delta.nodeId !== current.nodeId && !delta.persistedAuth ? { persistedAuth: { type: 'inherit' } as AuthConfig } : {}) })
     tabs.value = tabs.value.map((tab, tabIndex) => (tabIndex === index ? next : tab))
 
     if (Object.keys(delta).some((key) => PERSISTED_FIELDS.has(key))) schedulePersist(next)
@@ -426,7 +422,7 @@ export const useTabsStore = defineStore('tabs', () => {
     if (!t) return
 
     const oldRows = t.pathParams ?? []
-    const nextRows = pathParamNames(url).map((name) => {
+    const nextRows = pathParameterNames(url).map((name) => {
       const existing = oldRows.find((row) => row.key === name)
       return existing ?? {
         enabled: true,

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { authSummary } from '@/features/requestAuth'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { NTabPane, NTabs } from 'naive-ui'
 import { AppAlert, AppButton, AppTag } from '@/components/ui'
@@ -51,10 +52,7 @@ const visualParams = computed(() => (previewSpec.value?.params ?? []).filter((it
 const visualAuth = computed(() => {
   const auth = previewSpec.value?.auth
   if (!auth || auth.type === 'none') return '无鉴权'
-  if (auth.type === 'basic') return `Basic Auth (${auth.username})`
-  if (auth.type === 'bearer') return 'Bearer Token'
-  if (auth.type === 'apiKey') return `API Key (${auth.key}, ${auth.location})`
-  return '继承'
+  return authSummary(auth)
 })
 const visualBody = computed(() => {
   const body = previewSpec.value?.body

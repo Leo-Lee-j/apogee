@@ -1,5 +1,7 @@
 use crate::model::KeyValue;
-use crate::request::{AuthConfig, Body, RequestSpec};
+use crate::request::{
+    ApiKeyIn, AuthConfig, Body, JwtAlgorithm, OAuth1SignatureMethod, RequestSpec,
+};
 use crate::vars::{Environment, EnvironmentVariable};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -107,11 +109,13 @@ pub fn import_json(input: &str) -> Result<PostmanImportResult, crate::error::App
         .to_string();
     let mut requests = Vec::new();
     let mut warnings = Vec::new();
+    let inherited_auth = import_auth(root.get("auth"), &AuthConfig::None, &mut warnings);
     walk_items(
         root.get("item").and_then(|v| v.as_array()),
         &mut Vec::new(),
         &mut requests,
         &mut warnings,
+        &inherited_auth,
     );
     if requests.is_empty() {
         warnings.push("集合中没有可导入的请求".into());
@@ -128,13 +132,15 @@ fn walk_items(
     folder: &mut Vec<String>,
     out: &mut Vec<ImportedRequest>,
     warnings: &mut Vec<String>,
+    inherited_auth: &AuthConfig,
 ) {
     for item in items.into_iter().flatten() {
         if let Some(children) = item.get("item").and_then(|v| v.as_array()) {
             if let Some(name) = item.get("name").and_then(|v| v.as_str()) {
                 folder.push(name.into());
             }
-            walk_items(Some(children), folder, out, warnings);
+            let folder_auth = import_auth(item.get("auth"), inherited_auth, warnings);
+            walk_items(Some(children), folder, out, warnings, &folder_auth);
             if item.get("name").is_some() {
                 folder.pop();
             }
@@ -176,12 +182,8 @@ fn walk_items(
             .and_then(|value| value.get("variable"))
             .map(rows_value)
             .unwrap_or_default();
-        let body = request
-            .get("body")
-            .and_then(|b| b.get("raw"))
-            .and_then(|v| v.as_str())
-            .map(|s| Body::Json { content: s.into() })
-            .unwrap_or(Body::None);
+        let body = import_body(request.get("body"));
+        let auth = import_auth(request.get("auth"), inherited_auth, warnings);
         out.push(ImportedRequest {
             name: item
                 .get("name")
@@ -194,17 +196,238 @@ fn walk_items(
                 // Apifox exports its service URL as `{{baseUrl}}` in the Postman
                 // collection, but not its value. Apogee represents that scope as the
                 // active environment host, so keep only the relative request path.
-                url: normalize_apifox_base_url(&url),
+                url: normalize_apifox_base_url(&if url_value
+                    .and_then(|v| v.get("query"))
+                    .is_some_and(|v| v.is_array() || v.is_object())
+                {
+                    // Object query rows are authoritative, including disabled rows. Keeping
+                    // raw query as well would duplicate parameters and change OAuth signatures.
+                    let (base, fragment) = url
+                        .split_once('#')
+                        .map_or((url.as_str(), None), |(base, fragment)| {
+                            (base, Some(fragment))
+                        });
+                    let base = base.split_once('?').map_or(base, |(base, _)| base);
+                    fragment
+                        .map_or_else(|| base.to_string(), |fragment| format!("{base}#{fragment}"))
+                } else {
+                    url.clone()
+                }),
                 params,
                 path_params,
                 headers,
                 body,
-                auth: AuthConfig::None,
+                auth,
                 settings: Default::default(),
             },
         });
     }
 }
+/// Postman v2.0 uses an object; v2.1 uses an array of { key, value, type }.
+fn auth_field(auth: &serde_json::Value, kind: &str, key: &str) -> Option<String> {
+    let config = auth.get(kind)?;
+    if let Some(array) = config.as_array() {
+        return array
+            .iter()
+            .find(|v| v.get("key").and_then(|v| v.as_str()) == Some(key))
+            .map(|v| value_text(v.get("value")));
+    }
+    config.get(key).map(|v| value_text(Some(v)))
+}
+
+fn import_auth(
+    value: Option<&serde_json::Value>,
+    inherited: &AuthConfig,
+    warnings: &mut Vec<String>,
+) -> AuthConfig {
+    let Some(auth) = value.filter(|v| !v.is_null()) else {
+        return inherited.clone();
+    };
+    match parse_auth(auth) {
+        Ok(AuthConfig::Inherit) => inherited.clone(),
+        Ok(auth) => auth,
+        Err(message) => {
+            // Static messages only: do not print credentials or arbitrary import contents.
+            warnings.push(message.into());
+            AuthConfig::None
+        }
+    }
+}
+
+fn parse_auth(auth: &serde_json::Value) -> Result<AuthConfig, &'static str> {
+    let kind = auth
+        .get("type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("inherit");
+    let field = |key| auth_field(auth, kind, key).unwrap_or_default();
+    let default_field =
+        |key, default: &str| auth_field(auth, kind, key).unwrap_or_else(|| default.into());
+    Ok(match kind {
+        "inherit" => AuthConfig::Inherit,
+        "noauth" => AuthConfig::None,
+        "basic" => AuthConfig::Basic {
+            username: field("username"),
+            password: field("password"),
+        },
+        "bearer" => AuthConfig::Bearer {
+            token: field("token"),
+        },
+        "apikey" => AuthConfig::ApiKey {
+            key: field("key"),
+            value: field("value"),
+            location: match field("in").as_str() {
+                "header" | "" => ApiKeyIn::Header,
+                "query" => ApiKeyIn::Query,
+                "cookie" => ApiKeyIn::Cookie,
+                _ => return Err("Postman API Key 位置不受支持，该层已导入为无鉴权，请手动配置"),
+            },
+        },
+        "oauth1" => {
+            if default_field("addParamsToHeader", "true") != "true"
+                || field("addEmptyParamsToSign") == "true"
+            {
+                return Err("Postman OAuth 1.0 仅支持 Header 模式且不签名空协议参数，该层已导入为无鉴权，请手动配置");
+            }
+            let signature_method = match default_field("signatureMethod", "HMAC-SHA1").as_str() {
+                "HMAC-SHA1" => OAuth1SignatureMethod::HmacSha1,
+                "HMAC-SHA256" => OAuth1SignatureMethod::HmacSha256,
+                _ => {
+                    return Err(
+                        "Postman OAuth 1.0 签名算法不受支持，该层已导入为无鉴权，请手动配置",
+                    )
+                }
+            };
+            AuthConfig::OAuth1 {
+                consumer_key: field("consumerKey"),
+                consumer_secret: field("consumerSecret"),
+                token: field("token"),
+                token_secret: field("tokenSecret"),
+                signature_method,
+                realm: field("realm"),
+                callback: field("callback"),
+                verifier: field("verifier"),
+                nonce: field("nonce"),
+                timestamp: field("timestamp"),
+            }
+        }
+        "oauth2" => {
+            if default_field("addTokenTo", "header") != "header" {
+                return Err("Postman OAuth 2.0 仅支持 Header 模式，该层已导入为无鉴权，请手动配置");
+            }
+            let token_request = if matches!(
+                field("grant_type").as_str(),
+                "client_credentials"
+                    | "refresh_token"
+                    | "authorization_code"
+                    | "authorization_code_with_pkce"
+            ) && !field("accessTokenUrl").is_empty()
+                && !field("clientId").is_empty()
+            {
+                let client_auth = match default_field("client_authentication", "header").as_str() {
+                    "header" => crate::oauth2::OAuth2ClientAuth::Basic,
+                    "body" => crate::oauth2::OAuth2ClientAuth::Body,
+                    _ => return Err(
+                        "Postman OAuth 2.0 客户端凭据模式不受支持，该层已导入为无鉴权，请手动配置",
+                    ),
+                };
+                Some(Box::new(crate::oauth2::OAuth2TokenRequest {
+                    token_url: field("accessTokenUrl"),
+                    client_id: field("clientId"),
+                    client_secret: field("clientSecret"),
+                    scope: field("scope"),
+                    refresh_token: field("refreshToken"),
+                    client_auth,
+                    grant_type: if matches!(
+                        field("grant_type").as_str(),
+                        "authorization_code" | "authorization_code_with_pkce"
+                    ) {
+                        crate::oauth2::OAuth2Flow::AuthorizationCode
+                    } else {
+                        crate::oauth2::OAuth2Flow::ClientCredentials
+                    },
+                    authorization_url: field("authUrl"),
+                    redirect_uri: field("redirect_uri"),
+                }))
+            } else {
+                None
+            };
+            if field("accessToken").is_empty() && token_request.is_none() {
+                return Err("Postman OAuth 2.0 需要已有 Access Token 或可执行 Token 获取配置，该层已导入为无鉴权，请手动配置");
+            }
+            AuthConfig::OAuth2 {
+                access_token: field("accessToken"),
+                header_prefix: default_field("headerPrefix", "Bearer"),
+                token_request,
+                obtained_at: None,
+                expires_at: None,
+                auto_refresh: false,
+                token_context: None,
+            }
+        }
+        "jwt" => {
+            if default_field("addTokenTo", "header") != "header"
+                || field("isSecretBase64Encoded") == "true"
+            {
+                return Err(
+                    "Postman JWT 仅支持 Header 模式和 UTF-8 Secret，该层已导入为无鉴权，请手动配置",
+                );
+            }
+            let algorithm = match default_field("algorithm", "HS256").as_str() {
+                "HS256" => JwtAlgorithm::HS256,
+                "HS384" => JwtAlgorithm::HS384,
+                "HS512" => JwtAlgorithm::HS512,
+                _ => return Err("Postman JWT 签名算法不受支持，该层已导入为无鉴权，请手动配置"),
+            };
+            AuthConfig::Jwt {
+                secret: field("secret"),
+                payload: default_field("payload", "{}"),
+                header: default_field("header", "{}"),
+                algorithm,
+                header_prefix: default_field("headerPrefix", "Bearer"),
+            }
+        }
+        _ => return Err("Postman 鉴权类型不受支持，该层已导入为无鉴权，请手动配置"),
+    })
+}
+
+fn import_body(value: Option<&serde_json::Value>) -> Body {
+    let Some(value) = value else {
+        return Body::None;
+    };
+    match value.get("mode").and_then(|v| v.as_str()) {
+        Some("urlencoded") => Body::UrlEncoded {
+            rows: rows(value.get("urlencoded")),
+        },
+        Some("raw") | None => {
+            let Some(raw) = value.get("raw").and_then(|v| v.as_str()) else {
+                return Body::None;
+            };
+            match value
+                .pointer("/options/raw/language")
+                .and_then(|v| v.as_str())
+                .unwrap_or("json")
+            {
+                "json" => Body::Json {
+                    content: raw.into(),
+                },
+                "xml" => Body::Text {
+                    content: raw.into(),
+                    content_type: "application/xml".into(),
+                },
+                "html" => Body::Text {
+                    content: raw.into(),
+                    content_type: "text/html".into(),
+                },
+                _ => Body::Text {
+                    content: raw.into(),
+                    content_type: "text/plain".into(),
+                },
+            }
+        }
+        _ => Body::None,
+    }
+}
+
 fn rows(value: Option<&serde_json::Value>) -> Vec<KeyValue> {
     value.map(rows_value).unwrap_or_default()
 }
@@ -259,6 +482,102 @@ fn normalize_apifox_base_url(url: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn imports_pkce_configuration_without_ever_importing_ephemeral_codes() {
+        let auth = parse_auth(&serde_json::json!({"type":"oauth2", "oauth2":[
+            {"key":"grant_type","value":"authorization_code_with_pkce"},
+            {"key":"accessTokenUrl","value":"https://provider.test/token"},
+            {"key":"authUrl","value":"https://provider.test/authorize"},
+            {"key":"redirect_uri","value":"http://127.0.0.1:53682/cb"},
+            {"key":"clientId","value":"public-client"}, {"key":"code_verifier","value":"private-verifier"}
+        ]})).unwrap();
+        assert!(
+            matches!(&auth, AuthConfig::OAuth2 { token_request: Some(config), .. }
+            if config.grant_type == crate::oauth2::OAuth2Flow::AuthorizationCode && config.redirect_uri.ends_with("/cb") && config.client_secret.is_empty())
+        );
+        let json = serde_json::to_string(&auth).unwrap();
+        assert!(!json.contains("private-verifier"));
+        let yaml = crate::yaml::to_string(&auth).unwrap();
+        let roundtrip: AuthConfig = crate::yaml::from_str(&yaml).unwrap();
+        assert_eq!(
+            serde_json::to_value(auth).unwrap(),
+            serde_json::to_value(roundtrip).unwrap()
+        );
+    }
+
+    #[test]
+    fn imports_oauth2_client_credentials_without_existing_token() {
+        let auth=parse_auth(&serde_json::json!({"type":"oauth2","oauth2":[{"key":"grant_type","value":"client_credentials"},
+            {"key":"accessTokenUrl","value":"{{tokenUrl}}"},{"key":"clientId","value":"{{clientId}}"},
+            {"key":"clientSecret","value":"{{clientSecret}}"},{"key":"client_authentication","value":"body"}]})).unwrap();
+        assert!(
+            matches!(auth,AuthConfig::OAuth2 {access_token,token_request:Some(config),..}
+            if access_token.is_empty() && config.client_secret=="{{clientSecret}}" && config.client_auth==crate::oauth2::OAuth2ClientAuth::Body)
+        );
+    }
+
+    #[test]
+    fn imported_query_rows_are_sent_once_and_disabled_raw_query_is_not_signed() {
+        let imported=import_json(r#"{"item":[{"request":{"url":{"raw":"https://example.test/?x=1&x=2&disabled=secret#part",
+            "query":[{"key":"x","value":"1"},{"key":"x","value":"2"},{"key":"disabled","value":"secret","disabled":true}]}}}]}"#).unwrap();
+        let spec = &imported.requests[0].spec;
+        assert_eq!(
+            crate::http::build_url(spec).unwrap(),
+            "https://example.test/?x=1&x=2#part"
+        );
+    }
+
+    #[test]
+    fn auth_imports_v20_v21_and_flattens_container_inheritance() {
+        let imported = import_json(&serde_json::json!({"info":{"name":"Auth"},
+            "auth":{"type":"bearer","bearer":{"token":"collection-token"}},
+            "item":[{"name":"collection inherit","request":{"url":"https://example.test/"}},
+                {"name":"folder","auth":{"type":"oauth1","oauth1":[{"key":"consumerKey","value":"{{key}}"},
+                    {"key":"consumerSecret","value":"secret"},{"key":"signatureMethod","value":"HMAC-SHA256"}]},
+                "item":[{"name":"inherit","request":{"url":"https://example.test/","body":{"mode":"urlencoded","urlencoded":[{"key":"a","value":"b"}]}}},
+                    {"name":"none","request":{"url":"https://example.test/","auth":{"type":"noauth"}}},
+                    {"name":"own","request":{"url":"https://example.test/","auth":{"type":"basic","basic":{"username":"u","password":"p"}}}}]}]}).to_string()).unwrap();
+        assert!(imported.warnings.is_empty());
+        assert!(
+            matches!(&imported.requests[0].spec.auth,AuthConfig::Bearer {token} if token=="collection-token")
+        );
+        assert!(
+            matches!(&imported.requests[1].spec.auth,AuthConfig::OAuth1 {consumer_key,signature_method,..} if consumer_key=="{{key}}" && *signature_method==OAuth1SignatureMethod::HmacSha256)
+        );
+        assert!(matches!(&imported.requests[1].spec.body,Body::UrlEncoded {rows} if rows.len()==1));
+        assert!(matches!(&imported.requests[2].spec.auth, AuthConfig::None));
+        assert!(
+            matches!(&imported.requests[3].spec.auth,AuthConfig::Basic {password,..} if password=="p")
+        );
+    }
+    #[test]
+    fn oauth2_jwt_and_api_key_import_and_unsupported_modes_warn_without_secrets() {
+        for auth in [
+            serde_json::json!({"type":"oauth2","oauth2":{"accessToken":"secret","headerPrefix":"Token"}}),
+            serde_json::json!({"type":"jwt","jwt":{"secret":"secret","payload":"{}","algorithm":"HS384"}}),
+            serde_json::json!({"type":"apikey","apikey":{"key":"x","value":"secret","in":"cookie"}}),
+        ] {
+            assert!(!matches!(
+                parse_auth(&auth).unwrap(),
+                AuthConfig::None | AuthConfig::Inherit
+            ));
+        }
+        for auth in [
+            serde_json::json!({"type":"oauth1","oauth1":{"consumerSecret":"private-secret","signatureMethod":"RSA-SHA1"}}),
+            serde_json::json!({"type":"oauth2","oauth2":{"accessToken":"private-secret","addTokenTo":"queryParams"}}),
+            serde_json::json!({"type":"jwt","jwt":{"secret":"private-secret","algorithm":"none"}}),
+            serde_json::json!({"type":"ntlm","ntlm":{"password":"private-secret"}}),
+        ] {
+            let mut warnings = Vec::new();
+            assert!(matches!(
+                import_auth(Some(&auth), &AuthConfig::None, &mut warnings),
+                AuthConfig::None
+            ));
+            assert_eq!(warnings.len(), 1);
+            assert!(!warnings[0].contains("private-secret"));
+        }
+    }
 
     #[test]
     fn imports_postman_environment_current_values() {

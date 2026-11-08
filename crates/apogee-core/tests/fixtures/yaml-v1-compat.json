@@ -1,0 +1,1502 @@
+[
+  {
+    "expected": {
+      "apogee": 1,
+      "collections": [
+        {
+          "directory": "collections/fixture",
+          "id": "00000000-0000-4000-8000-000000000001",
+          "name": "Auth"
+        }
+      ],
+      "environments": [
+        {
+          "id": "00000000-0000-4000-8000-000000000001",
+          "name": "测试"
+        }
+      ],
+      "id": "00000000-0000-4000-8000-000000000001",
+      "name": "中文 🚀 工作区"
+    },
+    "kind": "manifest",
+    "yaml": "apogee: 1\nid: 00000000-0000-4000-8000-000000000001\nname: 中文 🚀 工作区\ncollections:\n- id: 00000000-0000-4000-8000-000000000001\n  name: Auth\n  directory: collections/fixture\nenvironments:\n- id: 00000000-0000-4000-8000-000000000001\n  name: 测试\n"
+  },
+  {
+    "expected": {
+      "host": "https://fixture.test",
+      "id": "00000000-0000-4000-8000-000000000001",
+      "name": "Fixture",
+      "variables": [
+        {
+          "enabled": false,
+          "key": "token",
+          "value": "{{fixture}}: #\nsecond line\n"
+        },
+        {
+          "enabled": true,
+          "key": "numeric",
+          "value": "001_000"
+        },
+        {
+          "enabled": true,
+          "key": "boolean",
+          "value": "yes"
+        }
+      ]
+    },
+    "kind": "environment",
+    "yaml": "id: 00000000-0000-4000-8000-000000000001\nname: Fixture\nhost: https://fixture.test\nvariables:\n- key: token\n  value: |\n    {{fixture}}: #\n    second line\n  enabled: false\n- key: numeric\n  value: 001_000\n  enabled: true\n- key: boolean\n  value: yes\n  enabled: true\n"
+  },
+  {
+    "expected": {
+      "apogee": 1,
+      "auth": {
+        "type": "inherit"
+      },
+      "id": "00000000-0000-4000-8000-000000000001",
+      "name": "Auth: # yes",
+      "settings": {
+        "encodeUrl": null,
+        "followRedirects": null,
+        "httpVersion": null,
+        "maxRedirects": null,
+        "proxyUrl": "direct://",
+        "retryBackoffMs": null,
+        "retryCount": null,
+        "sendCookies": null,
+        "timeoutMs": 1234,
+        "verifyTls": false
+      }
+    },
+    "kind": "container",
+    "yaml": "apogee: 1\nid: 00000000-0000-4000-8000-000000000001\nname: 'Auth: # yes'\nauth:\n  type: inherit\nsettings:\n  timeoutMs: 1234\n  followRedirects: null\n  maxRedirects: null\n  verifyTls: false\n  httpVersion: null\n  encodeUrl: null\n  sendCookies: null\n  proxyUrl: direct://\n  retryCount: null\n  retryBackoffMs: null\n"
+  },
+  {
+    "expected": {
+      "apogee": 1,
+      "auth": {
+        "type": "inherit"
+      },
+      "body": {
+        "type": "none"
+      },
+      "debugCases": [
+        {
+          "caseType": "exception",
+          "createdAtMs": 1,
+          "id": "00000000-0000-4000-8000-000000000001",
+          "name": "Debug",
+          "requestId": "00000000-0000-4000-8000-000000000001",
+          "spec": {
+            "auth": {
+              "type": "inherit"
+            },
+            "body": {
+              "type": "none"
+            },
+            "headers": [
+              {
+                "enabled": true,
+                "key": "X-Fixture",
+                "kind": "secret",
+                "value": "fixture-secret"
+              }
+            ],
+            "method": "POST",
+            "params": [
+              {
+                "description": "多行\n说明",
+                "enabled": true,
+                "key": "dup",
+                "kind": "secret",
+                "value": "yes"
+              },
+              {
+                "enabled": false,
+                "key": "dup",
+                "kind": "text",
+                "value": "001"
+              }
+            ],
+            "pathParams": [
+              {
+                "enabled": true,
+                "key": "id",
+                "kind": "text",
+                "value": "001"
+              }
+            ],
+            "settings": {
+              "encodeUrl": null,
+              "followRedirects": null,
+              "httpVersion": null,
+              "maxRedirects": null,
+              "proxyUrl": null,
+              "retryBackoffMs": null,
+              "retryCount": null,
+              "sendCookies": null,
+              "timeoutMs": 0,
+              "verifyTls": true
+            },
+            "url": "https://fixture.test/{{id}}?q={{token}}"
+          },
+          "updatedAtMs": 2
+        }
+      ],
+      "headers": [
+        {
+          "enabled": true,
+          "key": "X-Fixture",
+          "kind": "secret",
+          "value": "fixture-secret"
+        }
+      ],
+      "id": "00000000-0000-4000-8000-000000000001",
+      "method": "POST",
+      "name": "Fixture # request",
+      "params": [
+        {
+          "description": "多行\n说明",
+          "enabled": true,
+          "key": "dup",
+          "kind": "secret",
+          "value": "yes"
+        },
+        {
+          "enabled": false,
+          "key": "dup",
+          "kind": "text",
+          "value": "001"
+        }
+      ],
+      "pathParams": [
+        {
+          "enabled": true,
+          "key": "id",
+          "kind": "text",
+          "value": "001"
+        }
+      ],
+      "settings": {
+        "encodeUrl": null,
+        "followRedirects": null,
+        "httpVersion": null,
+        "maxRedirects": null,
+        "proxyUrl": null,
+        "retryBackoffMs": null,
+        "retryCount": null,
+        "sendCookies": null,
+        "timeoutMs": 0,
+        "verifyTls": true
+      },
+      "url": "https://fixture.test/{{id}}?q={{token}}"
+    },
+    "kind": "request",
+    "yaml": "apogee: 1\nid: 00000000-0000-4000-8000-000000000001\nname: 'Fixture # request'\nmethod: POST\nurl: https://fixture.test/{{id}}?q={{token}}\nparams:\n- enabled: true\n  key: dup\n  value: yes\n  description: |-\n    多行\n    说明\n  kind: secret\n- enabled: false\n  key: dup\n  value: '001'\n  kind: text\npathParams:\n- enabled: true\n  key: id\n  value: '001'\n  kind: text\nheaders:\n- enabled: true\n  key: X-Fixture\n  value: fixture-secret\n  kind: secret\nbody:\n  type: none\nauth:\n  type: inherit\nsettings:\n  timeoutMs: 0\n  followRedirects: null\n  maxRedirects: null\n  verifyTls: true\n  httpVersion: null\n  encodeUrl: null\n  sendCookies: null\n  proxyUrl: null\n  retryCount: null\n  retryBackoffMs: null\ndebugCases:\n- id: 00000000-0000-4000-8000-000000000001\n  requestId: 00000000-0000-4000-8000-000000000001\n  name: Debug\n  caseType: exception\n  spec:\n    method: POST\n    url: https://fixture.test/{{id}}?q={{token}}\n    params:\n    - enabled: true\n      key: dup\n      value: yes\n      description: |-\n        多行\n        说明\n      kind: secret\n    - enabled: false\n      key: dup\n      value: '001'\n      kind: text\n    pathParams:\n    - enabled: true\n      key: id\n      value: '001'\n      kind: text\n    headers:\n    - enabled: true\n      key: X-Fixture\n      value: fixture-secret\n      kind: secret\n    body:\n      type: none\n    auth:\n      type: inherit\n    settings:\n      timeoutMs: 0\n      followRedirects: null\n      maxRedirects: null\n      verifyTls: true\n      httpVersion: null\n      encodeUrl: null\n      sendCookies: null\n      proxyUrl: null\n      retryCount: null\n      retryBackoffMs: null\n  createdAtMs: 1\n  updatedAtMs: 2\n"
+  },
+  {
+    "expected": {
+      "apogee": 1,
+      "auth": {
+        "type": "none"
+      },
+      "id": "00000000-0000-4000-8000-000000000001",
+      "name": "Auth: # yes",
+      "settings": {
+        "encodeUrl": null,
+        "followRedirects": null,
+        "httpVersion": null,
+        "maxRedirects": null,
+        "proxyUrl": "direct://",
+        "retryBackoffMs": null,
+        "retryCount": null,
+        "sendCookies": null,
+        "timeoutMs": 1234,
+        "verifyTls": false
+      }
+    },
+    "kind": "container",
+    "yaml": "apogee: 1\nid: 00000000-0000-4000-8000-000000000001\nname: 'Auth: # yes'\nauth:\n  type: none\nsettings:\n  timeoutMs: 1234\n  followRedirects: null\n  maxRedirects: null\n  verifyTls: false\n  httpVersion: null\n  encodeUrl: null\n  sendCookies: null\n  proxyUrl: direct://\n  retryCount: null\n  retryBackoffMs: null\n"
+  },
+  {
+    "expected": {
+      "apogee": 1,
+      "auth": {
+        "type": "none"
+      },
+      "body": {
+        "content": "{\n  \"null\": \"001\",\n  \"line\": true\n}\n",
+        "type": "json"
+      },
+      "debugCases": [
+        {
+          "caseType": "exception",
+          "createdAtMs": 1,
+          "id": "00000000-0000-4000-8000-000000000001",
+          "name": "Debug",
+          "requestId": "00000000-0000-4000-8000-000000000001",
+          "spec": {
+            "auth": {
+              "type": "none"
+            },
+            "body": {
+              "content": "{\n  \"null\": \"001\",\n  \"line\": true\n}\n",
+              "type": "json"
+            },
+            "headers": [
+              {
+                "enabled": true,
+                "key": "X-Fixture",
+                "kind": "secret",
+                "value": "fixture-secret"
+              }
+            ],
+            "method": "POST",
+            "params": [
+              {
+                "description": "多行\n说明",
+                "enabled": true,
+                "key": "dup",
+                "kind": "secret",
+                "value": "yes"
+              },
+              {
+                "enabled": false,
+                "key": "dup",
+                "kind": "text",
+                "value": "001"
+              }
+            ],
+            "pathParams": [
+              {
+                "enabled": true,
+                "key": "id",
+                "kind": "text",
+                "value": "001"
+              }
+            ],
+            "settings": {
+              "encodeUrl": null,
+              "followRedirects": null,
+              "httpVersion": null,
+              "maxRedirects": null,
+              "proxyUrl": null,
+              "retryBackoffMs": null,
+              "retryCount": null,
+              "sendCookies": null,
+              "timeoutMs": 0,
+              "verifyTls": true
+            },
+            "url": "https://fixture.test/{{id}}?q={{token}}"
+          },
+          "updatedAtMs": 2
+        }
+      ],
+      "headers": [
+        {
+          "enabled": true,
+          "key": "X-Fixture",
+          "kind": "secret",
+          "value": "fixture-secret"
+        }
+      ],
+      "id": "00000000-0000-4000-8000-000000000001",
+      "method": "POST",
+      "name": "Fixture # request",
+      "params": [
+        {
+          "description": "多行\n说明",
+          "enabled": true,
+          "key": "dup",
+          "kind": "secret",
+          "value": "yes"
+        },
+        {
+          "enabled": false,
+          "key": "dup",
+          "kind": "text",
+          "value": "001"
+        }
+      ],
+      "pathParams": [
+        {
+          "enabled": true,
+          "key": "id",
+          "kind": "text",
+          "value": "001"
+        }
+      ],
+      "settings": {
+        "encodeUrl": null,
+        "followRedirects": null,
+        "httpVersion": null,
+        "maxRedirects": null,
+        "proxyUrl": null,
+        "retryBackoffMs": null,
+        "retryCount": null,
+        "sendCookies": null,
+        "timeoutMs": 0,
+        "verifyTls": true
+      },
+      "url": "https://fixture.test/{{id}}?q={{token}}"
+    },
+    "kind": "request",
+    "yaml": "apogee: 1\nid: 00000000-0000-4000-8000-000000000001\nname: 'Fixture # request'\nmethod: POST\nurl: https://fixture.test/{{id}}?q={{token}}\nparams:\n- enabled: true\n  key: dup\n  value: yes\n  description: |-\n    多行\n    说明\n  kind: secret\n- enabled: false\n  key: dup\n  value: '001'\n  kind: text\npathParams:\n- enabled: true\n  key: id\n  value: '001'\n  kind: text\nheaders:\n- enabled: true\n  key: X-Fixture\n  value: fixture-secret\n  kind: secret\nbody:\n  type: json\n  content: |\n    {\n      \"null\": \"001\",\n      \"line\": true\n    }\nauth:\n  type: none\nsettings:\n  timeoutMs: 0\n  followRedirects: null\n  maxRedirects: null\n  verifyTls: true\n  httpVersion: null\n  encodeUrl: null\n  sendCookies: null\n  proxyUrl: null\n  retryCount: null\n  retryBackoffMs: null\ndebugCases:\n- id: 00000000-0000-4000-8000-000000000001\n  requestId: 00000000-0000-4000-8000-000000000001\n  name: Debug\n  caseType: exception\n  spec:\n    method: POST\n    url: https://fixture.test/{{id}}?q={{token}}\n    params:\n    - enabled: true\n      key: dup\n      value: yes\n      description: |-\n        多行\n        说明\n      kind: secret\n    - enabled: false\n      key: dup\n      value: '001'\n      kind: text\n    pathParams:\n    - enabled: true\n      key: id\n      value: '001'\n      kind: text\n    headers:\n    - enabled: true\n      key: X-Fixture\n      value: fixture-secret\n      kind: secret\n    body:\n      type: json\n      content: |\n        {\n          \"null\": \"001\",\n          \"line\": true\n        }\n    auth:\n      type: none\n    settings:\n      timeoutMs: 0\n      followRedirects: null\n      maxRedirects: null\n      verifyTls: true\n      httpVersion: null\n      encodeUrl: null\n      sendCookies: null\n      proxyUrl: null\n      retryCount: null\n      retryBackoffMs: null\n  createdAtMs: 1\n  updatedAtMs: 2\n"
+  },
+  {
+    "expected": {
+      "apogee": 1,
+      "auth": {
+        "password": "fixture: secret #\n",
+        "type": "basic",
+        "username": "yes"
+      },
+      "id": "00000000-0000-4000-8000-000000000001",
+      "name": "Auth: # yes",
+      "settings": {
+        "encodeUrl": null,
+        "followRedirects": null,
+        "httpVersion": null,
+        "maxRedirects": null,
+        "proxyUrl": "direct://",
+        "retryBackoffMs": null,
+        "retryCount": null,
+        "sendCookies": null,
+        "timeoutMs": 1234,
+        "verifyTls": false
+      }
+    },
+    "kind": "container",
+    "yaml": "apogee: 1\nid: 00000000-0000-4000-8000-000000000001\nname: 'Auth: # yes'\nauth:\n  type: basic\n  username: yes\n  password: |\n    fixture: secret #\nsettings:\n  timeoutMs: 1234\n  followRedirects: null\n  maxRedirects: null\n  verifyTls: false\n  httpVersion: null\n  encodeUrl: null\n  sendCookies: null\n  proxyUrl: direct://\n  retryCount: null\n  retryBackoffMs: null\n"
+  },
+  {
+    "expected": {
+      "apogee": 1,
+      "auth": {
+        "password": "fixture: secret #\n",
+        "type": "basic",
+        "username": "yes"
+      },
+      "body": {
+        "content": "line 1\nline 2\n\n",
+        "contentType": "text/plain",
+        "type": "text"
+      },
+      "debugCases": [
+        {
+          "caseType": "exception",
+          "createdAtMs": 1,
+          "id": "00000000-0000-4000-8000-000000000001",
+          "name": "Debug",
+          "requestId": "00000000-0000-4000-8000-000000000001",
+          "spec": {
+            "auth": {
+              "password": "fixture: secret #\n",
+              "type": "basic",
+              "username": "yes"
+            },
+            "body": {
+              "content": "line 1\nline 2\n\n",
+              "contentType": "text/plain",
+              "type": "text"
+            },
+            "headers": [
+              {
+                "enabled": true,
+                "key": "X-Fixture",
+                "kind": "secret",
+                "value": "fixture-secret"
+              }
+            ],
+            "method": "POST",
+            "params": [
+              {
+                "description": "多行\n说明",
+                "enabled": true,
+                "key": "dup",
+                "kind": "secret",
+                "value": "yes"
+              },
+              {
+                "enabled": false,
+                "key": "dup",
+                "kind": "text",
+                "value": "001"
+              }
+            ],
+            "pathParams": [
+              {
+                "enabled": true,
+                "key": "id",
+                "kind": "text",
+                "value": "001"
+              }
+            ],
+            "settings": {
+              "encodeUrl": null,
+              "followRedirects": null,
+              "httpVersion": null,
+              "maxRedirects": null,
+              "proxyUrl": null,
+              "retryBackoffMs": null,
+              "retryCount": null,
+              "sendCookies": null,
+              "timeoutMs": 0,
+              "verifyTls": true
+            },
+            "url": "https://fixture.test/{{id}}?q={{token}}"
+          },
+          "updatedAtMs": 2
+        }
+      ],
+      "headers": [
+        {
+          "enabled": true,
+          "key": "X-Fixture",
+          "kind": "secret",
+          "value": "fixture-secret"
+        }
+      ],
+      "id": "00000000-0000-4000-8000-000000000001",
+      "method": "POST",
+      "name": "Fixture # request",
+      "params": [
+        {
+          "description": "多行\n说明",
+          "enabled": true,
+          "key": "dup",
+          "kind": "secret",
+          "value": "yes"
+        },
+        {
+          "enabled": false,
+          "key": "dup",
+          "kind": "text",
+          "value": "001"
+        }
+      ],
+      "pathParams": [
+        {
+          "enabled": true,
+          "key": "id",
+          "kind": "text",
+          "value": "001"
+        }
+      ],
+      "settings": {
+        "encodeUrl": null,
+        "followRedirects": null,
+        "httpVersion": null,
+        "maxRedirects": null,
+        "proxyUrl": null,
+        "retryBackoffMs": null,
+        "retryCount": null,
+        "sendCookies": null,
+        "timeoutMs": 0,
+        "verifyTls": true
+      },
+      "url": "https://fixture.test/{{id}}?q={{token}}"
+    },
+    "kind": "request",
+    "yaml": "apogee: 1\nid: 00000000-0000-4000-8000-000000000001\nname: 'Fixture # request'\nmethod: POST\nurl: https://fixture.test/{{id}}?q={{token}}\nparams:\n- enabled: true\n  key: dup\n  value: yes\n  description: |-\n    多行\n    说明\n  kind: secret\n- enabled: false\n  key: dup\n  value: '001'\n  kind: text\npathParams:\n- enabled: true\n  key: id\n  value: '001'\n  kind: text\nheaders:\n- enabled: true\n  key: X-Fixture\n  value: fixture-secret\n  kind: secret\nbody:\n  type: text\n  content: |+\n    line 1\n    line 2\n\n  contentType: text/plain\nauth:\n  type: basic\n  username: yes\n  password: |\n    fixture: secret #\nsettings:\n  timeoutMs: 0\n  followRedirects: null\n  maxRedirects: null\n  verifyTls: true\n  httpVersion: null\n  encodeUrl: null\n  sendCookies: null\n  proxyUrl: null\n  retryCount: null\n  retryBackoffMs: null\ndebugCases:\n- id: 00000000-0000-4000-8000-000000000001\n  requestId: 00000000-0000-4000-8000-000000000001\n  name: Debug\n  caseType: exception\n  spec:\n    method: POST\n    url: https://fixture.test/{{id}}?q={{token}}\n    params:\n    - enabled: true\n      key: dup\n      value: yes\n      description: |-\n        多行\n        说明\n      kind: secret\n    - enabled: false\n      key: dup\n      value: '001'\n      kind: text\n    pathParams:\n    - enabled: true\n      key: id\n      value: '001'\n      kind: text\n    headers:\n    - enabled: true\n      key: X-Fixture\n      value: fixture-secret\n      kind: secret\n    body:\n      type: text\n      content: |+\n        line 1\n        line 2\n\n      contentType: text/plain\n    auth:\n      type: basic\n      username: yes\n      password: |\n        fixture: secret #\n    settings:\n      timeoutMs: 0\n      followRedirects: null\n      maxRedirects: null\n      verifyTls: true\n      httpVersion: null\n      encodeUrl: null\n      sendCookies: null\n      proxyUrl: null\n      retryCount: null\n      retryBackoffMs: null\n  createdAtMs: 1\n  updatedAtMs: 2\n"
+  },
+  {
+    "expected": {
+      "apogee": 1,
+      "auth": {
+        "token": "0123",
+        "type": "bearer"
+      },
+      "id": "00000000-0000-4000-8000-000000000001",
+      "name": "Auth: # yes",
+      "settings": {
+        "encodeUrl": null,
+        "followRedirects": null,
+        "httpVersion": null,
+        "maxRedirects": null,
+        "proxyUrl": "direct://",
+        "retryBackoffMs": null,
+        "retryCount": null,
+        "sendCookies": null,
+        "timeoutMs": 1234,
+        "verifyTls": false
+      }
+    },
+    "kind": "container",
+    "yaml": "apogee: 1\nid: 00000000-0000-4000-8000-000000000001\nname: 'Auth: # yes'\nauth:\n  type: bearer\n  token: '0123'\nsettings:\n  timeoutMs: 1234\n  followRedirects: null\n  maxRedirects: null\n  verifyTls: false\n  httpVersion: null\n  encodeUrl: null\n  sendCookies: null\n  proxyUrl: direct://\n  retryCount: null\n  retryBackoffMs: null\n"
+  },
+  {
+    "expected": {
+      "apogee": 1,
+      "auth": {
+        "token": "0123",
+        "type": "bearer"
+      },
+      "body": {
+        "rows": [
+          {
+            "enabled": true,
+            "key": "file",
+            "kind": "file",
+            "value": "C:\\数据\\fixture.bin"
+          }
+        ],
+        "type": "formData"
+      },
+      "debugCases": [
+        {
+          "caseType": "exception",
+          "createdAtMs": 1,
+          "id": "00000000-0000-4000-8000-000000000001",
+          "name": "Debug",
+          "requestId": "00000000-0000-4000-8000-000000000001",
+          "spec": {
+            "auth": {
+              "token": "0123",
+              "type": "bearer"
+            },
+            "body": {
+              "rows": [
+                {
+                  "enabled": true,
+                  "key": "file",
+                  "kind": "file",
+                  "value": "C:\\数据\\fixture.bin"
+                }
+              ],
+              "type": "formData"
+            },
+            "headers": [
+              {
+                "enabled": true,
+                "key": "X-Fixture",
+                "kind": "secret",
+                "value": "fixture-secret"
+              }
+            ],
+            "method": "POST",
+            "params": [
+              {
+                "description": "多行\n说明",
+                "enabled": true,
+                "key": "dup",
+                "kind": "secret",
+                "value": "yes"
+              },
+              {
+                "enabled": false,
+                "key": "dup",
+                "kind": "text",
+                "value": "001"
+              }
+            ],
+            "pathParams": [
+              {
+                "enabled": true,
+                "key": "id",
+                "kind": "text",
+                "value": "001"
+              }
+            ],
+            "settings": {
+              "encodeUrl": null,
+              "followRedirects": null,
+              "httpVersion": null,
+              "maxRedirects": null,
+              "proxyUrl": null,
+              "retryBackoffMs": null,
+              "retryCount": null,
+              "sendCookies": null,
+              "timeoutMs": 0,
+              "verifyTls": true
+            },
+            "url": "https://fixture.test/{{id}}?q={{token}}"
+          },
+          "updatedAtMs": 2
+        }
+      ],
+      "headers": [
+        {
+          "enabled": true,
+          "key": "X-Fixture",
+          "kind": "secret",
+          "value": "fixture-secret"
+        }
+      ],
+      "id": "00000000-0000-4000-8000-000000000001",
+      "method": "POST",
+      "name": "Fixture # request",
+      "params": [
+        {
+          "description": "多行\n说明",
+          "enabled": true,
+          "key": "dup",
+          "kind": "secret",
+          "value": "yes"
+        },
+        {
+          "enabled": false,
+          "key": "dup",
+          "kind": "text",
+          "value": "001"
+        }
+      ],
+      "pathParams": [
+        {
+          "enabled": true,
+          "key": "id",
+          "kind": "text",
+          "value": "001"
+        }
+      ],
+      "settings": {
+        "encodeUrl": null,
+        "followRedirects": null,
+        "httpVersion": null,
+        "maxRedirects": null,
+        "proxyUrl": null,
+        "retryBackoffMs": null,
+        "retryCount": null,
+        "sendCookies": null,
+        "timeoutMs": 0,
+        "verifyTls": true
+      },
+      "url": "https://fixture.test/{{id}}?q={{token}}"
+    },
+    "kind": "request",
+    "yaml": "apogee: 1\nid: 00000000-0000-4000-8000-000000000001\nname: 'Fixture # request'\nmethod: POST\nurl: https://fixture.test/{{id}}?q={{token}}\nparams:\n- enabled: true\n  key: dup\n  value: yes\n  description: |-\n    多行\n    说明\n  kind: secret\n- enabled: false\n  key: dup\n  value: '001'\n  kind: text\npathParams:\n- enabled: true\n  key: id\n  value: '001'\n  kind: text\nheaders:\n- enabled: true\n  key: X-Fixture\n  value: fixture-secret\n  kind: secret\nbody:\n  type: formData\n  rows:\n  - enabled: true\n    key: file\n    value: C:\\数据\\fixture.bin\n    kind: file\nauth:\n  type: bearer\n  token: '0123'\nsettings:\n  timeoutMs: 0\n  followRedirects: null\n  maxRedirects: null\n  verifyTls: true\n  httpVersion: null\n  encodeUrl: null\n  sendCookies: null\n  proxyUrl: null\n  retryCount: null\n  retryBackoffMs: null\ndebugCases:\n- id: 00000000-0000-4000-8000-000000000001\n  requestId: 00000000-0000-4000-8000-000000000001\n  name: Debug\n  caseType: exception\n  spec:\n    method: POST\n    url: https://fixture.test/{{id}}?q={{token}}\n    params:\n    - enabled: true\n      key: dup\n      value: yes\n      description: |-\n        多行\n        说明\n      kind: secret\n    - enabled: false\n      key: dup\n      value: '001'\n      kind: text\n    pathParams:\n    - enabled: true\n      key: id\n      value: '001'\n      kind: text\n    headers:\n    - enabled: true\n      key: X-Fixture\n      value: fixture-secret\n      kind: secret\n    body:\n      type: formData\n      rows:\n      - enabled: true\n        key: file\n        value: C:\\数据\\fixture.bin\n        kind: file\n    auth:\n      type: bearer\n      token: '0123'\n    settings:\n      timeoutMs: 0\n      followRedirects: null\n      maxRedirects: null\n      verifyTls: true\n      httpVersion: null\n      encodeUrl: null\n      sendCookies: null\n      proxyUrl: null\n      retryCount: null\n      retryBackoffMs: null\n  createdAtMs: 1\n  updatedAtMs: 2\n"
+  },
+  {
+    "expected": {
+      "apogee": 1,
+      "auth": {
+        "key": "X-Key",
+        "location": "cookie",
+        "type": "apiKey",
+        "value": "fixture-secret"
+      },
+      "id": "00000000-0000-4000-8000-000000000001",
+      "name": "Auth: # yes",
+      "settings": {
+        "encodeUrl": null,
+        "followRedirects": null,
+        "httpVersion": null,
+        "maxRedirects": null,
+        "proxyUrl": "direct://",
+        "retryBackoffMs": null,
+        "retryCount": null,
+        "sendCookies": null,
+        "timeoutMs": 1234,
+        "verifyTls": false
+      }
+    },
+    "kind": "container",
+    "yaml": "apogee: 1\nid: 00000000-0000-4000-8000-000000000001\nname: 'Auth: # yes'\nauth:\n  type: apiKey\n  key: X-Key\n  value: fixture-secret\n  location: cookie\nsettings:\n  timeoutMs: 1234\n  followRedirects: null\n  maxRedirects: null\n  verifyTls: false\n  httpVersion: null\n  encodeUrl: null\n  sendCookies: null\n  proxyUrl: direct://\n  retryCount: null\n  retryBackoffMs: null\n"
+  },
+  {
+    "expected": {
+      "apogee": 1,
+      "auth": {
+        "key": "X-Key",
+        "location": "cookie",
+        "type": "apiKey",
+        "value": "fixture-secret"
+      },
+      "body": {
+        "rows": [
+          {
+            "enabled": false,
+            "key": "yes",
+            "kind": "secret",
+            "value": "null"
+          }
+        ],
+        "type": "urlEncoded"
+      },
+      "debugCases": [
+        {
+          "caseType": "exception",
+          "createdAtMs": 1,
+          "id": "00000000-0000-4000-8000-000000000001",
+          "name": "Debug",
+          "requestId": "00000000-0000-4000-8000-000000000001",
+          "spec": {
+            "auth": {
+              "key": "X-Key",
+              "location": "cookie",
+              "type": "apiKey",
+              "value": "fixture-secret"
+            },
+            "body": {
+              "rows": [
+                {
+                  "enabled": false,
+                  "key": "yes",
+                  "kind": "secret",
+                  "value": "null"
+                }
+              ],
+              "type": "urlEncoded"
+            },
+            "headers": [
+              {
+                "enabled": true,
+                "key": "X-Fixture",
+                "kind": "secret",
+                "value": "fixture-secret"
+              }
+            ],
+            "method": "POST",
+            "params": [
+              {
+                "description": "多行\n说明",
+                "enabled": true,
+                "key": "dup",
+                "kind": "secret",
+                "value": "yes"
+              },
+              {
+                "enabled": false,
+                "key": "dup",
+                "kind": "text",
+                "value": "001"
+              }
+            ],
+            "pathParams": [
+              {
+                "enabled": true,
+                "key": "id",
+                "kind": "text",
+                "value": "001"
+              }
+            ],
+            "settings": {
+              "encodeUrl": null,
+              "followRedirects": null,
+              "httpVersion": null,
+              "maxRedirects": null,
+              "proxyUrl": null,
+              "retryBackoffMs": null,
+              "retryCount": null,
+              "sendCookies": null,
+              "timeoutMs": 0,
+              "verifyTls": true
+            },
+            "url": "https://fixture.test/{{id}}?q={{token}}"
+          },
+          "updatedAtMs": 2
+        }
+      ],
+      "headers": [
+        {
+          "enabled": true,
+          "key": "X-Fixture",
+          "kind": "secret",
+          "value": "fixture-secret"
+        }
+      ],
+      "id": "00000000-0000-4000-8000-000000000001",
+      "method": "POST",
+      "name": "Fixture # request",
+      "params": [
+        {
+          "description": "多行\n说明",
+          "enabled": true,
+          "key": "dup",
+          "kind": "secret",
+          "value": "yes"
+        },
+        {
+          "enabled": false,
+          "key": "dup",
+          "kind": "text",
+          "value": "001"
+        }
+      ],
+      "pathParams": [
+        {
+          "enabled": true,
+          "key": "id",
+          "kind": "text",
+          "value": "001"
+        }
+      ],
+      "settings": {
+        "encodeUrl": null,
+        "followRedirects": null,
+        "httpVersion": null,
+        "maxRedirects": null,
+        "proxyUrl": null,
+        "retryBackoffMs": null,
+        "retryCount": null,
+        "sendCookies": null,
+        "timeoutMs": 0,
+        "verifyTls": true
+      },
+      "url": "https://fixture.test/{{id}}?q={{token}}"
+    },
+    "kind": "request",
+    "yaml": "apogee: 1\nid: 00000000-0000-4000-8000-000000000001\nname: 'Fixture # request'\nmethod: POST\nurl: https://fixture.test/{{id}}?q={{token}}\nparams:\n- enabled: true\n  key: dup\n  value: yes\n  description: |-\n    多行\n    说明\n  kind: secret\n- enabled: false\n  key: dup\n  value: '001'\n  kind: text\npathParams:\n- enabled: true\n  key: id\n  value: '001'\n  kind: text\nheaders:\n- enabled: true\n  key: X-Fixture\n  value: fixture-secret\n  kind: secret\nbody:\n  type: urlEncoded\n  rows:\n  - enabled: false\n    key: yes\n    value: 'null'\n    kind: secret\nauth:\n  type: apiKey\n  key: X-Key\n  value: fixture-secret\n  location: cookie\nsettings:\n  timeoutMs: 0\n  followRedirects: null\n  maxRedirects: null\n  verifyTls: true\n  httpVersion: null\n  encodeUrl: null\n  sendCookies: null\n  proxyUrl: null\n  retryCount: null\n  retryBackoffMs: null\ndebugCases:\n- id: 00000000-0000-4000-8000-000000000001\n  requestId: 00000000-0000-4000-8000-000000000001\n  name: Debug\n  caseType: exception\n  spec:\n    method: POST\n    url: https://fixture.test/{{id}}?q={{token}}\n    params:\n    - enabled: true\n      key: dup\n      value: yes\n      description: |-\n        多行\n        说明\n      kind: secret\n    - enabled: false\n      key: dup\n      value: '001'\n      kind: text\n    pathParams:\n    - enabled: true\n      key: id\n      value: '001'\n      kind: text\n    headers:\n    - enabled: true\n      key: X-Fixture\n      value: fixture-secret\n      kind: secret\n    body:\n      type: urlEncoded\n      rows:\n      - enabled: false\n        key: yes\n        value: 'null'\n        kind: secret\n    auth:\n      type: apiKey\n      key: X-Key\n      value: fixture-secret\n      location: cookie\n    settings:\n      timeoutMs: 0\n      followRedirects: null\n      maxRedirects: null\n      verifyTls: true\n      httpVersion: null\n      encodeUrl: null\n      sendCookies: null\n      proxyUrl: null\n      retryCount: null\n      retryBackoffMs: null\n  createdAtMs: 1\n  updatedAtMs: 2\n"
+  },
+  {
+    "expected": {
+      "apogee": 1,
+      "auth": {
+        "callback": "",
+        "consumerKey": "{{key}}",
+        "consumerSecret": "fixture-secret",
+        "nonce": "00123",
+        "realm": "",
+        "signatureMethod": "HMAC-SHA256",
+        "timestamp": "1700000000",
+        "token": "",
+        "tokenSecret": "",
+        "type": "oauth1",
+        "verifier": ""
+      },
+      "id": "00000000-0000-4000-8000-000000000001",
+      "name": "Auth: # yes",
+      "settings": {
+        "encodeUrl": null,
+        "followRedirects": null,
+        "httpVersion": null,
+        "maxRedirects": null,
+        "proxyUrl": "direct://",
+        "retryBackoffMs": null,
+        "retryCount": null,
+        "sendCookies": null,
+        "timeoutMs": 1234,
+        "verifyTls": false
+      }
+    },
+    "kind": "container",
+    "yaml": "apogee: 1\nid: 00000000-0000-4000-8000-000000000001\nname: 'Auth: # yes'\nauth:\n  type: oauth1\n  consumerKey: '{{key}}'\n  consumerSecret: fixture-secret\n  token: ''\n  tokenSecret: ''\n  signatureMethod: HMAC-SHA256\n  realm: ''\n  callback: ''\n  verifier: ''\n  nonce: '00123'\n  timestamp: '1700000000'\nsettings:\n  timeoutMs: 1234\n  followRedirects: null\n  maxRedirects: null\n  verifyTls: false\n  httpVersion: null\n  encodeUrl: null\n  sendCookies: null\n  proxyUrl: direct://\n  retryCount: null\n  retryBackoffMs: null\n"
+  },
+  {
+    "expected": {
+      "apogee": 1,
+      "auth": {
+        "callback": "",
+        "consumerKey": "{{key}}",
+        "consumerSecret": "fixture-secret",
+        "nonce": "00123",
+        "realm": "",
+        "signatureMethod": "HMAC-SHA256",
+        "timestamp": "1700000000",
+        "token": "",
+        "tokenSecret": "",
+        "type": "oauth1",
+        "verifier": ""
+      },
+      "body": {
+        "path": "C:\\数据\\fixture.bin",
+        "type": "binary"
+      },
+      "debugCases": [
+        {
+          "caseType": "exception",
+          "createdAtMs": 1,
+          "id": "00000000-0000-4000-8000-000000000001",
+          "name": "Debug",
+          "requestId": "00000000-0000-4000-8000-000000000001",
+          "spec": {
+            "auth": {
+              "callback": "",
+              "consumerKey": "{{key}}",
+              "consumerSecret": "fixture-secret",
+              "nonce": "00123",
+              "realm": "",
+              "signatureMethod": "HMAC-SHA256",
+              "timestamp": "1700000000",
+              "token": "",
+              "tokenSecret": "",
+              "type": "oauth1",
+              "verifier": ""
+            },
+            "body": {
+              "path": "C:\\数据\\fixture.bin",
+              "type": "binary"
+            },
+            "headers": [
+              {
+                "enabled": true,
+                "key": "X-Fixture",
+                "kind": "secret",
+                "value": "fixture-secret"
+              }
+            ],
+            "method": "POST",
+            "params": [
+              {
+                "description": "多行\n说明",
+                "enabled": true,
+                "key": "dup",
+                "kind": "secret",
+                "value": "yes"
+              },
+              {
+                "enabled": false,
+                "key": "dup",
+                "kind": "text",
+                "value": "001"
+              }
+            ],
+            "pathParams": [
+              {
+                "enabled": true,
+                "key": "id",
+                "kind": "text",
+                "value": "001"
+              }
+            ],
+            "settings": {
+              "encodeUrl": null,
+              "followRedirects": null,
+              "httpVersion": null,
+              "maxRedirects": null,
+              "proxyUrl": null,
+              "retryBackoffMs": null,
+              "retryCount": null,
+              "sendCookies": null,
+              "timeoutMs": 0,
+              "verifyTls": true
+            },
+            "url": "https://fixture.test/{{id}}?q={{token}}"
+          },
+          "updatedAtMs": 2
+        }
+      ],
+      "headers": [
+        {
+          "enabled": true,
+          "key": "X-Fixture",
+          "kind": "secret",
+          "value": "fixture-secret"
+        }
+      ],
+      "id": "00000000-0000-4000-8000-000000000001",
+      "method": "POST",
+      "name": "Fixture # request",
+      "params": [
+        {
+          "description": "多行\n说明",
+          "enabled": true,
+          "key": "dup",
+          "kind": "secret",
+          "value": "yes"
+        },
+        {
+          "enabled": false,
+          "key": "dup",
+          "kind": "text",
+          "value": "001"
+        }
+      ],
+      "pathParams": [
+        {
+          "enabled": true,
+          "key": "id",
+          "kind": "text",
+          "value": "001"
+        }
+      ],
+      "settings": {
+        "encodeUrl": null,
+        "followRedirects": null,
+        "httpVersion": null,
+        "maxRedirects": null,
+        "proxyUrl": null,
+        "retryBackoffMs": null,
+        "retryCount": null,
+        "sendCookies": null,
+        "timeoutMs": 0,
+        "verifyTls": true
+      },
+      "url": "https://fixture.test/{{id}}?q={{token}}"
+    },
+    "kind": "request",
+    "yaml": "apogee: 1\nid: 00000000-0000-4000-8000-000000000001\nname: 'Fixture # request'\nmethod: POST\nurl: https://fixture.test/{{id}}?q={{token}}\nparams:\n- enabled: true\n  key: dup\n  value: yes\n  description: |-\n    多行\n    说明\n  kind: secret\n- enabled: false\n  key: dup\n  value: '001'\n  kind: text\npathParams:\n- enabled: true\n  key: id\n  value: '001'\n  kind: text\nheaders:\n- enabled: true\n  key: X-Fixture\n  value: fixture-secret\n  kind: secret\nbody:\n  type: binary\n  path: C:\\数据\\fixture.bin\nauth:\n  type: oauth1\n  consumerKey: '{{key}}'\n  consumerSecret: fixture-secret\n  token: ''\n  tokenSecret: ''\n  signatureMethod: HMAC-SHA256\n  realm: ''\n  callback: ''\n  verifier: ''\n  nonce: '00123'\n  timestamp: '1700000000'\nsettings:\n  timeoutMs: 0\n  followRedirects: null\n  maxRedirects: null\n  verifyTls: true\n  httpVersion: null\n  encodeUrl: null\n  sendCookies: null\n  proxyUrl: null\n  retryCount: null\n  retryBackoffMs: null\ndebugCases:\n- id: 00000000-0000-4000-8000-000000000001\n  requestId: 00000000-0000-4000-8000-000000000001\n  name: Debug\n  caseType: exception\n  spec:\n    method: POST\n    url: https://fixture.test/{{id}}?q={{token}}\n    params:\n    - enabled: true\n      key: dup\n      value: yes\n      description: |-\n        多行\n        说明\n      kind: secret\n    - enabled: false\n      key: dup\n      value: '001'\n      kind: text\n    pathParams:\n    - enabled: true\n      key: id\n      value: '001'\n      kind: text\n    headers:\n    - enabled: true\n      key: X-Fixture\n      value: fixture-secret\n      kind: secret\n    body:\n      type: binary\n      path: C:\\数据\\fixture.bin\n    auth:\n      type: oauth1\n      consumerKey: '{{key}}'\n      consumerSecret: fixture-secret\n      token: ''\n      tokenSecret: ''\n      signatureMethod: HMAC-SHA256\n      realm: ''\n      callback: ''\n      verifier: ''\n      nonce: '00123'\n      timestamp: '1700000000'\n    settings:\n      timeoutMs: 0\n      followRedirects: null\n      maxRedirects: null\n      verifyTls: true\n      httpVersion: null\n      encodeUrl: null\n      sendCookies: null\n      proxyUrl: null\n      retryCount: null\n      retryBackoffMs: null\n  createdAtMs: 1\n  updatedAtMs: 2\n"
+  },
+  {
+    "expected": {
+      "apogee": 1,
+      "auth": {
+        "accessToken": "fixture-token",
+        "headerPrefix": "Bearer",
+        "tokenRequest": {
+          "clientAuth": "body",
+          "clientId": "id",
+          "clientSecret": "fixture-secret",
+          "refreshToken": "fixture-refresh",
+          "scope": "read write",
+          "tokenUrl": "https://fixture.test/token"
+        },
+        "type": "oauth2"
+      },
+      "id": "00000000-0000-4000-8000-000000000001",
+      "name": "Auth: # yes",
+      "settings": {
+        "encodeUrl": null,
+        "followRedirects": null,
+        "httpVersion": null,
+        "maxRedirects": null,
+        "proxyUrl": "direct://",
+        "retryBackoffMs": null,
+        "retryCount": null,
+        "sendCookies": null,
+        "timeoutMs": 1234,
+        "verifyTls": false
+      }
+    },
+    "kind": "container",
+    "yaml": "apogee: 1\nid: 00000000-0000-4000-8000-000000000001\nname: 'Auth: # yes'\nauth:\n  type: oauth2\n  accessToken: fixture-token\n  headerPrefix: Bearer\n  tokenRequest:\n    tokenUrl: https://fixture.test/token\n    clientId: id\n    clientSecret: fixture-secret\n    scope: read write\n    refreshToken: fixture-refresh\n    clientAuth: body\nsettings:\n  timeoutMs: 1234\n  followRedirects: null\n  maxRedirects: null\n  verifyTls: false\n  httpVersion: null\n  encodeUrl: null\n  sendCookies: null\n  proxyUrl: direct://\n  retryCount: null\n  retryBackoffMs: null\n"
+  },
+  {
+    "expected": {
+      "apogee": 1,
+      "auth": {
+        "accessToken": "fixture-token",
+        "headerPrefix": "Bearer",
+        "tokenRequest": {
+          "clientAuth": "body",
+          "clientId": "id",
+          "clientSecret": "fixture-secret",
+          "refreshToken": "fixture-refresh",
+          "scope": "read write",
+          "tokenUrl": "https://fixture.test/token"
+        },
+        "type": "oauth2"
+      },
+      "body": {
+        "operationName": "User",
+        "query": "query { user { id } }\n",
+        "type": "graphQl",
+        "variables": "{}"
+      },
+      "debugCases": [
+        {
+          "caseType": "exception",
+          "createdAtMs": 1,
+          "id": "00000000-0000-4000-8000-000000000001",
+          "name": "Debug",
+          "requestId": "00000000-0000-4000-8000-000000000001",
+          "spec": {
+            "auth": {
+              "accessToken": "fixture-token",
+              "headerPrefix": "Bearer",
+              "tokenRequest": {
+                "clientAuth": "body",
+                "clientId": "id",
+                "clientSecret": "fixture-secret",
+                "refreshToken": "fixture-refresh",
+                "scope": "read write",
+                "tokenUrl": "https://fixture.test/token"
+              },
+              "type": "oauth2"
+            },
+            "body": {
+              "operationName": "User",
+              "query": "query { user { id } }\n",
+              "type": "graphQl",
+              "variables": "{}"
+            },
+            "headers": [
+              {
+                "enabled": true,
+                "key": "X-Fixture",
+                "kind": "secret",
+                "value": "fixture-secret"
+              }
+            ],
+            "method": "POST",
+            "params": [
+              {
+                "description": "多行\n说明",
+                "enabled": true,
+                "key": "dup",
+                "kind": "secret",
+                "value": "yes"
+              },
+              {
+                "enabled": false,
+                "key": "dup",
+                "kind": "text",
+                "value": "001"
+              }
+            ],
+            "pathParams": [
+              {
+                "enabled": true,
+                "key": "id",
+                "kind": "text",
+                "value": "001"
+              }
+            ],
+            "settings": {
+              "encodeUrl": null,
+              "followRedirects": null,
+              "httpVersion": null,
+              "maxRedirects": null,
+              "proxyUrl": null,
+              "retryBackoffMs": null,
+              "retryCount": null,
+              "sendCookies": null,
+              "timeoutMs": 0,
+              "verifyTls": true
+            },
+            "url": "https://fixture.test/{{id}}?q={{token}}"
+          },
+          "updatedAtMs": 2
+        }
+      ],
+      "headers": [
+        {
+          "enabled": true,
+          "key": "X-Fixture",
+          "kind": "secret",
+          "value": "fixture-secret"
+        }
+      ],
+      "id": "00000000-0000-4000-8000-000000000001",
+      "method": "POST",
+      "name": "Fixture # request",
+      "params": [
+        {
+          "description": "多行\n说明",
+          "enabled": true,
+          "key": "dup",
+          "kind": "secret",
+          "value": "yes"
+        },
+        {
+          "enabled": false,
+          "key": "dup",
+          "kind": "text",
+          "value": "001"
+        }
+      ],
+      "pathParams": [
+        {
+          "enabled": true,
+          "key": "id",
+          "kind": "text",
+          "value": "001"
+        }
+      ],
+      "settings": {
+        "encodeUrl": null,
+        "followRedirects": null,
+        "httpVersion": null,
+        "maxRedirects": null,
+        "proxyUrl": null,
+        "retryBackoffMs": null,
+        "retryCount": null,
+        "sendCookies": null,
+        "timeoutMs": 0,
+        "verifyTls": true
+      },
+      "url": "https://fixture.test/{{id}}?q={{token}}"
+    },
+    "kind": "request",
+    "yaml": "apogee: 1\nid: 00000000-0000-4000-8000-000000000001\nname: 'Fixture # request'\nmethod: POST\nurl: https://fixture.test/{{id}}?q={{token}}\nparams:\n- enabled: true\n  key: dup\n  value: yes\n  description: |-\n    多行\n    说明\n  kind: secret\n- enabled: false\n  key: dup\n  value: '001'\n  kind: text\npathParams:\n- enabled: true\n  key: id\n  value: '001'\n  kind: text\nheaders:\n- enabled: true\n  key: X-Fixture\n  value: fixture-secret\n  kind: secret\nbody:\n  type: graphQl\n  query: |\n    query { user { id } }\n  variables: '{}'\n  operationName: User\nauth:\n  type: oauth2\n  accessToken: fixture-token\n  headerPrefix: Bearer\n  tokenRequest:\n    tokenUrl: https://fixture.test/token\n    clientId: id\n    clientSecret: fixture-secret\n    scope: read write\n    refreshToken: fixture-refresh\n    clientAuth: body\nsettings:\n  timeoutMs: 0\n  followRedirects: null\n  maxRedirects: null\n  verifyTls: true\n  httpVersion: null\n  encodeUrl: null\n  sendCookies: null\n  proxyUrl: null\n  retryCount: null\n  retryBackoffMs: null\ndebugCases:\n- id: 00000000-0000-4000-8000-000000000001\n  requestId: 00000000-0000-4000-8000-000000000001\n  name: Debug\n  caseType: exception\n  spec:\n    method: POST\n    url: https://fixture.test/{{id}}?q={{token}}\n    params:\n    - enabled: true\n      key: dup\n      value: yes\n      description: |-\n        多行\n        说明\n      kind: secret\n    - enabled: false\n      key: dup\n      value: '001'\n      kind: text\n    pathParams:\n    - enabled: true\n      key: id\n      value: '001'\n      kind: text\n    headers:\n    - enabled: true\n      key: X-Fixture\n      value: fixture-secret\n      kind: secret\n    body:\n      type: graphQl\n      query: |\n        query { user { id } }\n      variables: '{}'\n      operationName: User\n    auth:\n      type: oauth2\n      accessToken: fixture-token\n      headerPrefix: Bearer\n      tokenRequest:\n        tokenUrl: https://fixture.test/token\n        clientId: id\n        clientSecret: fixture-secret\n        scope: read write\n        refreshToken: fixture-refresh\n        clientAuth: body\n    settings:\n      timeoutMs: 0\n      followRedirects: null\n      maxRedirects: null\n      verifyTls: true\n      httpVersion: null\n      encodeUrl: null\n      sendCookies: null\n      proxyUrl: null\n      retryCount: null\n      retryBackoffMs: null\n  createdAtMs: 1\n  updatedAtMs: 2\n"
+  },
+  {
+    "expected": {
+      "apogee": 1,
+      "auth": {
+        "algorithm": "HS512",
+        "header": "{}",
+        "headerPrefix": "Bearer",
+        "payload": "{\"sub\":\"user\"}\n",
+        "secret": "fixture-secret",
+        "type": "jwt"
+      },
+      "id": "00000000-0000-4000-8000-000000000001",
+      "name": "Auth: # yes",
+      "settings": {
+        "encodeUrl": null,
+        "followRedirects": null,
+        "httpVersion": null,
+        "maxRedirects": null,
+        "proxyUrl": "direct://",
+        "retryBackoffMs": null,
+        "retryCount": null,
+        "sendCookies": null,
+        "timeoutMs": 1234,
+        "verifyTls": false
+      }
+    },
+    "kind": "container",
+    "yaml": "apogee: 1\nid: 00000000-0000-4000-8000-000000000001\nname: 'Auth: # yes'\nauth:\n  type: jwt\n  secret: fixture-secret\n  payload: |\n    {\"sub\":\"user\"}\n  header: '{}'\n  algorithm: HS512\n  headerPrefix: Bearer\nsettings:\n  timeoutMs: 1234\n  followRedirects: null\n  maxRedirects: null\n  verifyTls: false\n  httpVersion: null\n  encodeUrl: null\n  sendCookies: null\n  proxyUrl: direct://\n  retryCount: null\n  retryBackoffMs: null\n"
+  },
+  {
+    "expected": {
+      "apogee": 1,
+      "auth": {
+        "algorithm": "HS512",
+        "header": "{}",
+        "headerPrefix": "Bearer",
+        "payload": "{\"sub\":\"user\"}\n",
+        "secret": "fixture-secret",
+        "type": "jwt"
+      },
+      "body": {
+        "type": "none"
+      },
+      "debugCases": [
+        {
+          "caseType": "exception",
+          "createdAtMs": 1,
+          "id": "00000000-0000-4000-8000-000000000001",
+          "name": "Debug",
+          "requestId": "00000000-0000-4000-8000-000000000001",
+          "spec": {
+            "auth": {
+              "algorithm": "HS512",
+              "header": "{}",
+              "headerPrefix": "Bearer",
+              "payload": "{\"sub\":\"user\"}\n",
+              "secret": "fixture-secret",
+              "type": "jwt"
+            },
+            "body": {
+              "type": "none"
+            },
+            "headers": [
+              {
+                "enabled": true,
+                "key": "X-Fixture",
+                "kind": "secret",
+                "value": "fixture-secret"
+              }
+            ],
+            "method": "POST",
+            "params": [
+              {
+                "description": "多行\n说明",
+                "enabled": true,
+                "key": "dup",
+                "kind": "secret",
+                "value": "yes"
+              },
+              {
+                "enabled": false,
+                "key": "dup",
+                "kind": "text",
+                "value": "001"
+              }
+            ],
+            "pathParams": [
+              {
+                "enabled": true,
+                "key": "id",
+                "kind": "text",
+                "value": "001"
+              }
+            ],
+            "settings": {
+              "encodeUrl": null,
+              "followRedirects": null,
+              "httpVersion": null,
+              "maxRedirects": null,
+              "proxyUrl": null,
+              "retryBackoffMs": null,
+              "retryCount": null,
+              "sendCookies": null,
+              "timeoutMs": 0,
+              "verifyTls": true
+            },
+            "url": "https://fixture.test/{{id}}?q={{token}}"
+          },
+          "updatedAtMs": 2
+        }
+      ],
+      "headers": [
+        {
+          "enabled": true,
+          "key": "X-Fixture",
+          "kind": "secret",
+          "value": "fixture-secret"
+        }
+      ],
+      "id": "00000000-0000-4000-8000-000000000001",
+      "method": "POST",
+      "name": "Fixture # request",
+      "params": [
+        {
+          "description": "多行\n说明",
+          "enabled": true,
+          "key": "dup",
+          "kind": "secret",
+          "value": "yes"
+        },
+        {
+          "enabled": false,
+          "key": "dup",
+          "kind": "text",
+          "value": "001"
+        }
+      ],
+      "pathParams": [
+        {
+          "enabled": true,
+          "key": "id",
+          "kind": "text",
+          "value": "001"
+        }
+      ],
+      "settings": {
+        "encodeUrl": null,
+        "followRedirects": null,
+        "httpVersion": null,
+        "maxRedirects": null,
+        "proxyUrl": null,
+        "retryBackoffMs": null,
+        "retryCount": null,
+        "sendCookies": null,
+        "timeoutMs": 0,
+        "verifyTls": true
+      },
+      "url": "https://fixture.test/{{id}}?q={{token}}"
+    },
+    "kind": "request",
+    "yaml": "apogee: 1\nid: 00000000-0000-4000-8000-000000000001\nname: 'Fixture # request'\nmethod: POST\nurl: https://fixture.test/{{id}}?q={{token}}\nparams:\n- enabled: true\n  key: dup\n  value: yes\n  description: |-\n    多行\n    说明\n  kind: secret\n- enabled: false\n  key: dup\n  value: '001'\n  kind: text\npathParams:\n- enabled: true\n  key: id\n  value: '001'\n  kind: text\nheaders:\n- enabled: true\n  key: X-Fixture\n  value: fixture-secret\n  kind: secret\nbody:\n  type: none\nauth:\n  type: jwt\n  secret: fixture-secret\n  payload: |\n    {\"sub\":\"user\"}\n  header: '{}'\n  algorithm: HS512\n  headerPrefix: Bearer\nsettings:\n  timeoutMs: 0\n  followRedirects: null\n  maxRedirects: null\n  verifyTls: true\n  httpVersion: null\n  encodeUrl: null\n  sendCookies: null\n  proxyUrl: null\n  retryCount: null\n  retryBackoffMs: null\ndebugCases:\n- id: 00000000-0000-4000-8000-000000000001\n  requestId: 00000000-0000-4000-8000-000000000001\n  name: Debug\n  caseType: exception\n  spec:\n    method: POST\n    url: https://fixture.test/{{id}}?q={{token}}\n    params:\n    - enabled: true\n      key: dup\n      value: yes\n      description: |-\n        多行\n        说明\n      kind: secret\n    - enabled: false\n      key: dup\n      value: '001'\n      kind: text\n    pathParams:\n    - enabled: true\n      key: id\n      value: '001'\n      kind: text\n    headers:\n    - enabled: true\n      key: X-Fixture\n      value: fixture-secret\n      kind: secret\n    body:\n      type: none\n    auth:\n      type: jwt\n      secret: fixture-secret\n      payload: |\n        {\"sub\":\"user\"}\n      header: '{}'\n      algorithm: HS512\n      headerPrefix: Bearer\n    settings:\n      timeoutMs: 0\n      followRedirects: null\n      maxRedirects: null\n      verifyTls: true\n      httpVersion: null\n      encodeUrl: null\n      sendCookies: null\n      proxyUrl: null\n      retryCount: null\n      retryBackoffMs: null\n  createdAtMs: 1\n  updatedAtMs: 2\n"
+  },
+  {
+    "expected": "yes",
+    "kind": "value",
+    "yaml": "yes"
+  },
+  {
+    "expected": "no",
+    "kind": "value",
+    "yaml": "no"
+  },
+  {
+    "expected": "on",
+    "kind": "value",
+    "yaml": "on"
+  },
+  {
+    "expected": "off",
+    "kind": "value",
+    "yaml": "off"
+  },
+  {
+    "expected": true,
+    "kind": "value",
+    "yaml": "true"
+  },
+  {
+    "expected": false,
+    "kind": "value",
+    "yaml": "FALSE"
+  },
+  {
+    "expected": null,
+    "kind": "value",
+    "yaml": "null"
+  },
+  {
+    "expected": null,
+    "kind": "value",
+    "yaml": "~"
+  },
+  {
+    "expected": "0755",
+    "kind": "value",
+    "yaml": "0755"
+  },
+  {
+    "expected": "1_000",
+    "kind": "value",
+    "yaml": "1_000"
+  },
+  {
+    "expected": "0xFF_FF",
+    "kind": "value",
+    "yaml": "0xFF_FF"
+  },
+  {
+    "expected": "0b10_01",
+    "kind": "value",
+    "yaml": "0b10_01"
+  },
+  {
+    "expected": 255,
+    "kind": "value",
+    "yaml": "0xFF"
+  },
+  {
+    "expected": null,
+    "kind": "value",
+    "yaml": ".nan"
+  },
+  {
+    "expected": null,
+    "kind": "value",
+    "yaml": ".inf"
+  },
+  {
+    "expected": null,
+    "kind": "value",
+    "yaml": "-.inf"
+  },
+  {
+    "expected": "true",
+    "kind": "value",
+    "yaml": "!!str true"
+  },
+  {
+    "expected": "Zml4dHVyZQ==",
+    "kind": "value",
+    "yaml": "!!binary Zml4dHVyZQ=="
+  },
+  {
+    "expected": "${FIXTURE}",
+    "kind": "value",
+    "yaml": "${FIXTURE}"
+  },
+  {
+    "expected": {
+      "a": {
+        "v": 1
+      },
+      "b": {
+        "v": 1
+      }
+    },
+    "kind": "value",
+    "yaml": "a: &anchor {v: 1}\nb: *anchor"
+  },
+  {
+    "expected": {
+      "a": {
+        "v": 1
+      },
+      "b": {
+        "<<": {
+          "v": 1
+        },
+        "n": 2
+      }
+    },
+    "kind": "value",
+    "yaml": "a: &anchor {v: 1}\nb: {<<: *anchor, n: 2}"
+  },
+  {
+    "expected": {
+      "k": "last"
+    },
+    "kind": "value",
+    "yaml": "k: first\nk: last"
+  },
+  {
+    "expected": {
+      "0xB": "a",
+      "11": "b"
+    },
+    "kind": "value",
+    "yaml": "0xB: a\n11: b"
+  }
+]

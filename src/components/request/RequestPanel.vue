@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useOAuth2TokenActions } from '@/features/oauth2TokenOperation'
 import { computed, defineAsyncComponent, ref, watch } from 'vue'
 import { open as openFileDialog } from '@tauri-apps/plugin-dialog'
 import type { AuthConfig, Body, KeyValue } from '@/ipc'
@@ -15,11 +16,13 @@ import {
 import { IconFolderOpen } from '@/components/ui/icons'
 import NaiveThemeScope from '@/components/NaiveThemeScope.vue'
 import ParameterEditor from './ParameterEditor.vue'
+import AuthEditor from './AuthEditor.vue'
 import VariableInput from './VariableInput.vue'
 import RequestDocumentation from './RequestDocumentation.vue'
 import { commonHeadersFor, isKnownOfficialHeader } from '@/features/commonHeaders'
 import { buildRequestDocumentation, type RequestDocViewModel } from '@/features/requestDocumentation'
 import { booleanSetting, httpVersionSetting, numberSetting, settingBooleanValue } from '@/features/requestSettings'
+import { parameterRowsEqual, parseParameterRows, serializeParameterRows, type ParameterParseError } from '@/features/requestParameters'
 
 /**
  * 请求编辑区 —— v0.1 先落地 Params、Headers、Body 三条发送主链。
@@ -44,21 +47,13 @@ const BODY_TYPES: BodyOption[] = [
   { type: 'graphQl', label: 'GraphQL' },
 ]
 
-type AuthType = AuthConfig['type']
-const AUTH_TYPES: { type: AuthType; label: string }[] = [
-  { type: 'inherit', label: '继承' },
-  { type: 'none', label: '无鉴权' },
-  { type: 'basic', label: 'Basic Auth' },
-  { type: 'bearer', label: 'Bearer Token' },
-  { type: 'apiKey', label: 'API Key' },
-]
-
 interface EditorSection {
   kind: RowField
   label: string
   rows: KeyValue[]
 }
 
+const tokenFetcher = useOAuth2TokenActions()
 const tabs = useTabsStore()
 const tab = computed(() => tabs.active)
 const emptyDocumentation: RequestDocViewModel = {
@@ -141,6 +136,29 @@ const bodyPlaceholder = computed(() =>
 )
 const auth = computed<AuthConfig>(() => tab.value?.auth ?? { type: 'none' })
 
+/** 捕获渲染时的请求身份；旧 DOM 的 focusout 可能晚于 active Tab 切换。 */
+function parameterEditorGuard(id: string, expectedBodyType?: BodyType) {
+  return () => tab.value?.id === id && (expectedBodyType == null || tab.value.body.type === expectedBodyType)
+}
+
+/** Capture the editor identity before asynchronous preflight; never follow the active tab. */
+function authTokenFetcher(currentTab: Tab) {
+  return tokenFetcher(
+    currentTab.nodeId ?? currentTab.sourceRequestId,
+    currentTab.settings,
+    parameterEditorGuard(currentTab.id),
+    currentTab.id,
+    !currentTab.nodeId,
+    async () => !currentTab.nodeId || (await tabs.save(currentTab.id)).ok,
+    () => currentTab.nodeId ? tabs.tabs.find(item => item.id === currentTab.id)?.persistedAuth : undefined,
+  )
+}
+
+function onTokenUpdated(value: AuthConfig) {
+  const currentTab = tab.value
+  if (currentTab?.nodeId) tabs.patch(currentTab.id, { persistedAuth: value })
+}
+
 function patchTab(delta: Partial<Tab>) {
   const currentTab = tab.value
   if (!currentTab) return
@@ -152,6 +170,7 @@ function rowsFor(kind: RowField): KeyValue[] {
 }
 
 function patchRows(kind: RowField, rows: KeyValue[]) {
+  if (parameterRowsEqual(rowsFor(kind), rows)) return
   const delta: Partial<Tab> = { dirty: true }
   if (kind === 'params') delta.params = rows
   else if (kind === 'pathParams') delta.pathParams = rows
@@ -176,13 +195,7 @@ function updateRow(kind: RowField, index: number, delta: Partial<KeyValue>) {
   const currentRow = rows[sourceIndex]
   if (!currentRow) return
   const nextRow = { ...currentRow, ...delta }
-  const empty = !nextRow.key && !nextRow.value && !nextRow.description
-  patchRows(
-    kind,
-    empty
-      ? rows.filter((_, rowIndex) => rowIndex !== sourceIndex)
-      : rows.map((row, rowIndex) => rowIndex === sourceIndex ? nextRow : row),
-  )
+  patchRows(kind, rows.map((row, rowIndex) => rowIndex === sourceIndex ? nextRow : row))
 }
 
 function removeRow(kind: RowField, index: number) {
@@ -209,15 +222,13 @@ function updateParameterField(
   field: 'key' | 'value' | 'description',
   value: string,
 ) {
-  if (sourceIndexFor(kind, index) != null) {
-    updateRow(kind, index, { [field]: value })
-    return
-  }
-  if (!value) return
-  patchRows(kind, [
-    ...rowsFor(kind),
-    { enabled: true, key: '', value: '', description: '', kind: 'text', [field]: value },
-  ])
+  if (kind === 'pathParams' && field === 'key') return
+  updateRow(kind, index, { [field]: value })
+}
+
+function appendParameterRows(kind: RowField, rows: KeyValue[]) {
+  if (kind === 'pathParams' || !rows.length) return
+  patchRows(kind, [...rowsFor(kind), ...rows])
 }
 
 function reorderRows(kind: RowField, from: number, to: number) {
@@ -268,11 +279,15 @@ function patchVisibleHeaders(nextVisibleRows: KeyValue[]) {
  */
 const bulkEditing = ref(false)
 const bulkDraft = ref('')
+const bulkErrors = ref<ParameterParseError[]>([])
+watch(bulkDraft, () => { bulkErrors.value = [] })
 
 watch(() => tab.value?.id, () => {
   // A bulk draft belongs to the visible editor instance; changing requests
   // must not carry it into another request's document view.
   bulkEditing.value = false
+  bulkDraft.value = ''
+  bulkErrors.value = []
 }, { immediate: true })
 
 const bulkKind = computed<RowField | null>(() => {
@@ -281,51 +296,28 @@ const bulkKind = computed<RowField | null>(() => {
   return null
 })
 
-function rowsToBulkText(rows: KeyValue[]): string {
-  return rows
-    .map((row) => {
-      const pair = row.value ? `${row.key}: ${row.value}` : row.key
-      return row.enabled ? pair : `// ${pair}`
-    })
-    .join('\n')
-}
-
-function bulkTextToRows(text: string): KeyValue[] {
-  return text.split('\n').flatMap((line): KeyValue[] => {
-    let enabled = true
-    let raw = line.trim()
-    if (raw.startsWith('//')) {
-      enabled = false
-      raw = raw.slice(2).trimStart()
-    }
-    if (!raw) return []
-    const colon = raw.indexOf(':')
-    const tab = raw.indexOf('\t')
-    let sep = colon
-    if (sep === -1 || (tab !== -1 && tab < sep)) sep = tab
-    const key = sep === -1 ? raw : raw.slice(0, sep).trim()
-    if (!key) return []
-    const value = sep === -1 ? '' : raw.slice(sep + 1).trim()
-    return [{ enabled, key, value, description: '', kind: 'text' }]
-  })
-}
-
 function openBulkEdit() {
   const kind = bulkKind.value
   if (!kind || !tab.value) return
-  bulkDraft.value = rowsToBulkText(displayedRowsFor(kind))
+  bulkDraft.value = serializeParameterRows(displayedRowsFor(kind))
   bulkEditing.value = true
 }
 
-function applyBulkEdit() {
+function applyBulkEdit(): boolean {
   const kind = bulkKind.value
-  if (kind === 'headers') patchVisibleHeaders(bulkTextToRows(bulkDraft.value))
-  else if (kind) patchRows(kind, bulkTextToRows(bulkDraft.value))
+  if (!kind) return false
+  const parsed = parseParameterRows(bulkDraft.value, displayedRowsFor(kind), kind === 'headers' ? 'headers' : 'query')
+  bulkErrors.value = parsed.errors
+  if (parsed.errors.length) return false
+  if (kind === 'headers') patchVisibleHeaders(parsed.rows)
+  else patchRows(kind, parsed.rows)
   bulkEditing.value = false
+  return true
 }
 
 function cancelBulkEdit() {
   bulkEditing.value = false
+  bulkErrors.value = []
 }
 
 function setPanelMode(next: PanelMode) {
@@ -338,7 +330,7 @@ function setPanelMode(next: PanelMode) {
 
 function selectTab(next: PanelTab) {
   if (next === current.value) return
-  if (bulkEditing.value) applyBulkEdit()
+  if (bulkEditing.value && !applyBulkEdit()) return
   current.value = next
 }
 
@@ -377,17 +369,15 @@ function bodyRows(): KeyValue[] {
 }
 
 function patchBodyRows(rows: KeyValue[]) {
+  if (parameterRowsEqual(bodyRows(), rows)) return
   if (body.value.type === 'formData') patchTab({ body: { type: 'formData', rows } })
   else if (body.value.type === 'urlEncoded') patchTab({ body: { type: 'urlEncoded', rows } })
 }
 
 function updateBodyRow(index: number, delta: Partial<KeyValue>) {
   const rows = bodyRows()
-  if (index < rows.length) {
-    patchBodyRows(rows.map((row, rowIndex) => rowIndex === index ? { ...row, ...delta } : row))
-    return
-  }
-  patchBodyRows([...rows, { enabled: true, key: '', value: '', description: '', kind: 'text', ...delta }])
+  if (index < 0 || index >= rows.length) return
+  patchBodyRows(rows.map((row, rowIndex) => rowIndex === index ? { ...row, ...delta } : row))
 }
 
 function removeBodyRow(index: number) {
@@ -414,22 +404,6 @@ function patchBodyField(field: string, value: string) {
 async function chooseBinaryFile() {
   const selected = await openFileDialog({ multiple: false })
   if (typeof selected === 'string') patchBodyField('path', selected)
-}
-
-function setAuthType(type: AuthType) {
-  const currentAuth = auth.value
-  let next: AuthConfig
-  if (type === 'inherit' || type === 'none') next = { type }
-  else if (type === 'basic') next = currentAuth.type === 'basic' ? currentAuth : { type, username: '', password: '' }
-  else if (type === 'bearer') next = currentAuth.type === 'bearer' ? currentAuth : { type, token: '' }
-  else next = currentAuth.type === 'apiKey'
-    ? currentAuth
-    : { type, key: '', value: '', location: 'header' }
-  patchTab({ auth: next })
-}
-
-function patchAuth(delta: Record<string, string>) {
-  patchTab({ auth: { ...auth.value, ...delta } as AuthConfig })
 }
 
 function patchBooleanSetting(field: 'followRedirects' | 'verifyTls', value: string | number | null) {
@@ -508,15 +482,16 @@ function patchVersion(value: string | number | null) {
             class="bulk-textarea"
             spellcheck="false"
             aria-label="批量编辑内容"
-            :placeholder="'每行一个参数，格式：key: value\n以 // 开头的行应用后禁用该参数'"
+            :placeholder="'每行 key: value 或 key=value；支持 Query String 和 Tab 分隔文本\n以 // 开头的行应用后禁用该参数'"
           />
-          <p class="bulk-hint">每行一个参数；`key: value`，以 `//` 开头的行应用后禁用该参数。</p>
+          <p class="bulk-hint">支持 key: value 和 Tab 分隔文本；Query 参数还支持 Query String 及完整 URL 的查询部分。四列依次为名称、值、说明、类型（text/file/secret）；带引号的字段保留空格和换行。以 // 开头的行禁用该参数。</p>
+          <p v-for="error in bulkErrors" :key="error.line" class="bulk-error" role="alert">第 {{ error.line }} 行：{{ error.message }}</p>
         </section>
         <template v-else>
           <section v-for="section in editorSections" :key="section.kind" class="parameter-group">
             <header class="section-head">
               <strong>{{ section.label }}</strong>
-              <span>{{ section.rows.length + (section.kind === 'headers' && props.showCommonHeaders ? commonHeaders.length : 0) }} 项</span>
+              <span>{{ section.rows.filter(row => row.enabled).length }} / {{ section.rows.length }} 项启用</span>
               <button
                 v-if="section.kind === 'headers'"
                 type="button"
@@ -537,10 +512,17 @@ function patchVersion(value: string | number | null) {
               </div>
               <p v-else class="common-header-empty">当前请求已显式配置所有可预览的通用 Header。</p>
             </div>
+            <p v-if="section.kind === 'pathParams'" class="bulk-hint">参数名从 URL 模板自动同步；请修改地址以增删 Path 参数。</p>
             <div class="parameter-table">
               <ParameterEditor
+                :key="`${tab.id}-${section.kind}`"
+                :can-edit="parameterEditorGuard(tab.id)"
                 :rows="section.rows"
                 :allow-create="section.kind !== 'pathParams'"
+                :read-only-key="section.kind === 'pathParams'"
+                :allow-remove="section.kind !== 'pathParams'"
+                :paste-format="section.kind === 'headers' ? 'headers' : 'query'"
+                @append-rows="appendParameterRows(section.kind, $event)"
                 @update-field="(index, field, value) => updateParameterField(section.kind, index, field, value)"
                 @update-enabled="(index, enabled) => updateRow(section.kind, index, { enabled })"
                 @set-all-enabled="setAllRowsEnabled(section.kind, $event)"
@@ -591,8 +573,12 @@ function patchVersion(value: string | number | null) {
         <template v-else-if="bodyType === 'formData' || bodyType === 'urlEncoded'">
           <div class="body-parameter-table">
             <ParameterEditor
+              :key="`${tab.id}-${bodyType}`"
+              :can-edit="parameterEditorGuard(tab.id, bodyType)"
               :rows="bodyRows()"
               allow-create
+              paste-format="form"
+              @append-rows="patchBodyRows([...bodyRows(), ...$event])"
               :show-kind="bodyType === 'formData'"
               @update-field="(index, field, value) => updateBodyRow(index, { [field]: value })"
               @update-enabled="(index, enabled) => updateBodyRow(index, { enabled })"
@@ -622,22 +608,7 @@ function patchVersion(value: string | number | null) {
       </section>
 
       <section v-else-if="current === 'Auth'" class="config-block auth-editor">
-        <label class="field-stack auth-kind">
-          <span>鉴权类型</span>
-          <AppSelect :value="auth.type" :options="AUTH_TYPES.map((option) => ({ label: option.label, value: option.type }))" @update:value="setAuthType($event as AuthType)" />
-        </label>
-        <p v-if="auth.type === 'inherit'" class="editor-empty">继承集合或文件夹的鉴权配置；当前未配置上级时等同无鉴权。</p>
-        <p v-else-if="auth.type === 'none'" class="editor-empty">此请求不附加鉴权信息。</p>
-        <template v-else-if="auth.type === 'basic'">
-          <label class="field-stack"><span>用户名</span><AppInput :value="auth.username" autocomplete="username" @update:value="patchAuth({ username: $event })" /></label>
-          <label class="field-stack"><span>密码</span><AppInput :value="auth.password" type="password" show-password-on="click" autocomplete="current-password" @update:value="patchAuth({ password: $event })" /></label>
-        </template>
-        <label v-else-if="auth.type === 'bearer'" class="field-stack"><span>Token</span><AppInput :value="auth.token" type="password" show-password-on="click" autocomplete="off" @update:value="patchAuth({ token: $event })" /></label>
-        <template v-else-if="auth.type === 'apiKey'">
-          <label class="field-stack"><span>Key</span><AppInput :value="auth.key" @update:value="patchAuth({ key: $event })" /></label>
-          <label class="field-stack"><span>Value</span><AppInput :value="auth.value" type="password" show-password-on="click" autocomplete="off" @update:value="patchAuth({ value: $event })" /></label>
-          <label class="field-stack"><span>添加到</span><AppSelect :value="auth.location" :options="[{ label: 'Header', value: 'header' }, { label: 'Query', value: 'query' }, { label: 'Cookie', value: 'cookie' }]" @update:value="patchAuth({ location: $event })" /></label>
-        </template>
+        <AuthEditor allow-auto-refresh :key="tab.id" :value="auth" :can-edit="parameterEditorGuard(tab.id)" :fetch-token="authTokenFetcher(tab)" @update:value="patchTab({ auth: $event })" @token-updated="onTokenUpdated" />
       </section>
 
       <section v-else-if="current === 'Settings'" class="config-block request-settings">
@@ -675,6 +646,7 @@ function patchVersion(value: string | number | null) {
 </template>
 
 <style scoped>
+.bulk-error { color: var(--a-error); margin: 6px 0; font-size: var(--a-fs-xs); }
 .req { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; overflow: hidden; }
 .tabs {
   min-height: var(--a-h-toolbar); flex: 0 0 auto;
@@ -825,18 +797,15 @@ function patchVersion(value: string | number | null) {
 .graphql-grid :deep(.n-input) { min-height: 180px; background: var(--a-bg-3); }
 .graphql-grid :deep(.n-input__textarea-el) { min-height: 180px; padding: 8px; font: var(--a-fs-editor-sm)/1.5 var(--a-font-editor); }
 .graphql-grid label:last-child { grid-column: 1 / -1; }
-.auth-editor { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(240px, 2fr); align-content: start; gap: 12px; padding: 12px; }
-.auth-editor > .auth-kind { margin: -12px -12px 0; padding: 12px; border-bottom: 1px solid var(--a-border); }
-.auth-kind { grid-column: 1 / -1; max-width: 280px; }
-.auth-editor .editor-empty { padding: 0; grid-column: 1 / -1; }
+.auth-editor { display: block; padding: 12px; }
 .request-settings { overflow: hidden; }
 .request-settings .section-head span { margin-left: auto; color: var(--a-text-faint); font-size: var(--a-fs-xs); font-weight: 400; }
 .settings-grid { display: grid; grid-template-columns: repeat(2, minmax(180px, 1fr)); gap: 14px; padding: 12px; align-content: start; }
 .settings-grid :deep(.n-input-number), .settings-grid :deep(.n-select) { width: 100%; }
 .todo { padding: 12px; color: var(--a-text-dim); font-size: var(--a-fs-sm); }
 @media (max-width: 720px) {
-  .graphql-grid, .auth-editor, .settings-grid { grid-template-columns: 1fr; }
-  .graphql-grid label:last-child, .auth-kind { grid-column: 1; }
+  .graphql-grid, .settings-grid { grid-template-columns: 1fr; }
+  .graphql-grid label:last-child { grid-column: 1; }
   .request-settings .section-head span { display: none; }
 }
 </style>

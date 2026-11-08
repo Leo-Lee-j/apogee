@@ -11,7 +11,7 @@
 
 ## 本地环境
 
-请准备 Rust `1.85+`、pnpm `11.17.0`、Node.js、Windows 的 C++ Build Tools / Windows SDK，以及 WebView2 Runtime。安装依赖时使用锁文件：
+请准备 Rust `1.89+`、pnpm `11.17.0`、Node.js、Windows 的 C++ Build Tools / Windows SDK，以及 WebView2 Runtime。安装依赖时使用锁文件：
 
 ```powershell
 pnpm install --frozen-lockfile

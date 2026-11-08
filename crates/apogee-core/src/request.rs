@@ -84,6 +84,10 @@ pub struct ExecContext {
     /// 已保存请求的工作区节点 id。存在时发送前解析其容器继承链。
     #[serde(default)]
     pub request_node_id: Option<String>,
+    /// Explicit Auth belongs to a draft/case unless the caller identifies it as persistent.
+    /// None is the safe legacy default (ephemeral). Inherited Auth still updates its parent source.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ephemeral: Option<bool>,
 }
 
 /// `send_request` 的返回值（03 文档 §3.2）。命令**立即**返回它，不等网络。
@@ -97,8 +101,7 @@ pub struct ExecHandle {
 
 /// 鉴权。`Inherit` 是默认值，与 03 文档 §5.2 一致。
 ///
-/// OAuth2 / JWT / AwsSigV4 需要各自的密码学栈与令牌缓存，不在本切片内；
-/// 保留变体是为了让 `serde` 反序列化前端已有的配置时不报错，执行阶段会明确拒绝。
+/// OAuth 1.0 / JWT 在发送时签名；OAuth 2.0 附加 Access Token；桌面发送前可显式启用刷新。
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum AuthConfig {
@@ -112,12 +115,93 @@ pub enum AuthConfig {
     Bearer {
         token: String,
     },
+    #[serde(rename = "oauth1", rename_all = "camelCase")]
+    OAuth1 {
+        consumer_key: String,
+        consumer_secret: String,
+        #[serde(default)]
+        token: String,
+        #[serde(default)]
+        token_secret: String,
+        #[serde(default)]
+        signature_method: OAuth1SignatureMethod,
+        #[serde(default)]
+        realm: String,
+        #[serde(default)]
+        callback: String,
+        #[serde(default)]
+        verifier: String,
+        /// Empty means generate a fresh nonce / timestamp at send time.
+        #[serde(default)]
+        nonce: String,
+        #[serde(default)]
+        timestamp: String,
+    },
+    #[serde(rename = "oauth2", rename_all = "camelCase")]
+    OAuth2 {
+        access_token: String,
+        #[serde(default = "default_token_prefix")]
+        header_prefix: String,
+        /// Optional, backward-compatible token acquisition configuration; never a public DTO.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        token_request: Option<Box<crate::oauth2::OAuth2TokenRequest>>,
+        /// Conservative acquisition start / expiry Unix milliseconds. Never part of public DTOs.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        obtained_at: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        expires_at: Option<u64>,
+        /// Desktop request-editor opt-in; core HTTP does not acquire or replay credentials.
+        #[serde(default, skip_serializing_if = "is_false")]
+        auto_refresh: bool,
+        /// Private issuance context; isolates environment/configuration changes, never public DTOs.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        token_context: Option<String>,
+    },
+    #[serde(rename_all = "camelCase")]
+    Jwt {
+        secret: String,
+        payload: String,
+        #[serde(default = "default_json_object")]
+        header: String,
+        #[serde(default)]
+        algorithm: JwtAlgorithm,
+        #[serde(default = "default_token_prefix")]
+        header_prefix: String,
+    },
     #[serde(rename_all = "camelCase")]
     ApiKey {
         key: String,
         value: String,
         location: ApiKeyIn,
     },
+}
+
+fn is_false(value: &bool) -> bool {
+    !value
+}
+
+pub fn default_token_prefix() -> String {
+    "Bearer".into()
+}
+fn default_json_object() -> String {
+    "{}".into()
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum OAuth1SignatureMethod {
+    #[default]
+    #[serde(rename = "HMAC-SHA1")]
+    HmacSha1,
+    #[serde(rename = "HMAC-SHA256")]
+    HmacSha256,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum JwtAlgorithm {
+    #[default]
+    HS256,
+    HS384,
+    HS512,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -211,5 +295,52 @@ impl RequestSettings {
                 .unwrap_or(base.retry_backoff_ms)
                 .min(60_000),
         }
+    }
+}
+
+#[cfg(test)]
+mod oauth2_lifecycle_tests {
+    use super::*;
+    #[test]
+    fn legacy_oauth2_remains_opt_out_and_serializes_without_new_fields() {
+        let input =
+            serde_json::json!({"type":"oauth2","accessToken":"old","headerPrefix":"Bearer"});
+        let auth: AuthConfig = serde_json::from_value(input.clone()).unwrap();
+        assert!(matches!(
+            &auth,
+            AuthConfig::OAuth2 {
+                obtained_at: None,
+                expires_at: None,
+                auto_refresh: false,
+                ..
+            }
+        ));
+        assert_eq!(serde_json::to_value(auth).unwrap(), input);
+    }
+    #[test]
+    fn lifecycle_metadata_roundtrips_in_private_yaml_config() {
+        let input = serde_json::json!({"type":"oauth2","accessToken":"private", "headerPrefix":"Bearer",
+            "obtainedAt":1000,"expiresAt":61000,"autoRefresh":true,"tokenContext":"private-context"});
+        let auth: AuthConfig = serde_json::from_value(input.clone()).unwrap();
+        let yaml = crate::yaml::to_string(&auth).unwrap();
+        let decoded: AuthConfig = crate::yaml::from_str(&yaml).unwrap();
+        assert_eq!(serde_json::to_value(decoded).unwrap(), input);
+        let spec = RequestSpec {
+            method: "GET".into(),
+            url: "https://example.test/".into(),
+            params: vec![],
+            path_params: vec![],
+            headers: vec![],
+            body: Body::None,
+            auth,
+            settings: RequestSettings::default(),
+        };
+        let public =
+            serde_json::to_string(&crate::public::PublicRequestPreview::from(&spec)).unwrap();
+        assert!(!public.contains("private"));
+        assert!(!public.contains("expiresAt"));
+        assert!(!public.contains("obtainedAt"));
+        assert!(!public.contains("autoRefresh"));
+        assert!(!public.contains("tokenContext"));
     }
 }
