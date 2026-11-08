@@ -1,80 +1,97 @@
-# Apogee
+<p align="center">
+  <img src="src-tauri/icons/128x128.png" alt="Apogee logo" width="128" height="128">
+</p>
 
-Apogee 是一个本地优先、启动即用的桌面 API 客户端。它以 Tauri、Rust 和 Vue 构建，目标是在保留日常 API 调试所需能力的同时，控制启动时间、内存占用和安装包体积。
+<h1 align="center">Apogee</h1>
 
-> **项目状态：`0.1.0`。** 源码已按 [MIT](LICENSE) 公开；当前可验证、计划发布的桌面安装包范围为 Windows 10/11 x64。macOS 与 Linux 尚未提供受支持的发布物，请勿将规划文档中的平台目标视为已交付支持。
+<p align="center">
+  本地优先、启动即用的桌面 API 客户端。<br>
+  请求、集合、环境和响应，在一个轻量工作区里完成。
+</p>
 
-## 原则
+<p align="center">
+  <a href="https://github.com/Leo-Lee-j/apogee/actions/workflows/ci.yml"><img src="https://github.com/Leo-Lee-j/apogee/actions/workflows/ci.yml/badge.svg" alt="Windows CI"></a>
+  <img src="https://img.shields.io/badge/platform-Windows_x64-0078D4" alt="Windows x64">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-20cbb5" alt="MIT License"></a>
+</p>
 
-- **本地优先**：工作区与集合保留在用户选择的本地目录；核心流程不要求账号。
-- **可审计、可复现**：源码、锁文件、许可证门禁和发布校验信息均公开；开源不替代发布校验，正式发布仍应核对校验和、SBOM 以及签名（如有）。
-- **性能是产品约束**：大响应体走 Rust 侧的流式存储和按需读取，避免把完整内容经 JSON IPC 送入前端。
-- **数据可迁移**：集合使用面向 Git 的文本格式，并计划维护公开 Schema 与向后兼容承诺。
+<p align="center">
+  <a href="https://github.com/Leo-Lee-j/apogee/releases"><strong>下载 Windows 安装包</strong></a> ·
+  <a href="CHANGELOG.md">更新记录</a> ·
+  <a href="https://github.com/Leo-Lee-j/apogee/issues">反馈问题</a>
+</p>
 
-产品、交互与架构约束分别见 [产品设计](docs/01-产品设计文档.md)、[交互设计](docs/02-交互与界面设计.md) 和 [技术架构](docs/03-技术架构与数据模型.md)。
+Apogee 面向日常 API 调试：打开本地工作区，组织接口、配置环境、发送请求并查看响应，不需要注册 Apogee 账号。它使用 **Tauri 2、Rust 和 Vue 3** 构建，注重启动速度、内存占用和本地数据管理。
 
-## 获取与安装
+项目仍在持续开发，目前面向 **Windows 10/11 x64**。macOS 与 Linux 暂无官方安装包；规划中的功能不代表已经交付。
 
-稳定版或预发布安装包将发布在 [GitHub Releases](https://github.com/Leo-Lee-j/apogee/releases)。当前 NSIS 配置采用 WebView2 下载引导程序：目标 Windows 设备若没有 WebView2 Runtime，首次安装需要联网。
+## 主要功能
 
-应用内可从启动页“软件更新”、设置“关于”或底部状态栏检查 GitHub 版本标签，下载经过大小与 SHA-256 校验的安装包。默认只检查稳定版，支持预发布渠道和取消下载；安装需用户确认，应用不会自动退出。更新源须公开可访问，详见 [发布与更新说明](docs/release.md#应用内检查更新与下载)。
+- **组织接口。** 使用工作区、集合和文件夹管理请求，配置环境变量及继承设置；集合以文本文件保存，便于备份和纳入 Git。
+- **调试请求。** 编辑 Query、Path 参数和 Header，支持 JSON、表单、文件、二进制与 GraphQL 请求体，以及参数批量粘贴和编辑。
+- **配置认证。** 支持 Basic、Bearer、API Key、OAuth 1.0、OAuth 2.0 和 JWT；可从集合或文件夹继承认证，OAuth 2.0 提供令牌获取、刷新及授权码 + PKCE 流程。
+- **查看响应。** 查看状态、Header、耗时和响应内容，保存响应文件；大响应体由 Rust 流式写入本地文件，按需读取，避免整体传入前端。
+- **迁移现有接口。** 粘贴 cURL 导入请求，导入 Postman 集合与环境、导出 Postman 集合，或从 YApi 预览并导入项目。
+- **保持顺手。** 自定义主题、字体和快捷键，使用请求历史与命令面板，并从应用内检查、下载更新。
 
-在没有可用发布物时，可按以下步骤从源码构建。开发环境需要：
+## 开始使用
 
-- Windows 10/11、WebView2 Runtime，以及 Visual Studio C++ Build Tools / Windows SDK；
-- Rust `1.89` 或更高版本，并安装 `x86_64-pc-windows-msvc` 目标；
-- 与锁文件兼容的 Node.js，以及 pnpm `11.17.0`（仓库在 `packageManager` 字段中固定）。
+### 安装
+
+1. 打开 [GitHub Releases](https://github.com/Leo-Lee-j/apogee/releases)，下载 `Apogee_<version>_x64-setup.exe` 并安装。
+2. 启动 Apogee，创建工作区或打开已有的本地工作区。
+3. 新建或导入请求，填写接口地址，选择环境并发送。
+
+安装包以发布页实际提供的附件为准；若尚无可用安装包，可以按下方说明从源码运行。目标设备缺少 **WebView2 Runtime** 时，安装程序会联网下载。
+
+### 数据与更新
+
+工作区、集合和环境保存在用户选择的本地目录。请求会访问你配置的接口，更新检查会访问 GitHub；本地存储不意味着所有功能都能离线使用。分享集合、日志或截图前，请移除 Token、密码和其他私密信息。
+
+在启动页“软件更新”、**设置 → 关于**或底部状态栏检查版本。默认只检查稳定版，也可包含预发布版；下载支持取消，并校验大小与 SHA-256。安装程序需用户确认后打开，应用不会自动退出。Windows 代码签名为可选，未签名安装包可能出现系统安全提示。
+
+## 从源码运行
+
+需要 **Windows x64**、WebView2 Runtime、Visual Studio C++ Build Tools / Windows SDK，以及：
+
+- Rust **1.89 或更新版本**（MSVC 工具链）；
+- Node.js **24**；
+- pnpm **11.17.0**（与 `package.json` 中的版本一致）。
 
 ```powershell
 pnpm install --frozen-lockfile
-pnpm typecheck
-pnpm test
 pnpm tauri dev
 ```
 
-生产构建：
+构建 Windows 安装包：
 
 ```powershell
 pnpm build
 pnpm tauri build --bundles nsis
 ```
 
-Tauri 的生产打包仅执行 `pnpm build:nocheck`，所以不能以打包成功替代 TypeScript 检查；请始终单独运行 `pnpm typecheck` 或 `pnpm build`。
-
-## 本地验证
-
-提交前按改动范围运行相应门禁：
+按改动范围验证代码：
 
 ```powershell
 pnpm typecheck
 pnpm test
-pnpm build
-pnpm check:contrast
-pnpm licenses:check
-
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
 ```
 
-真实桌面 E2E 只支持 Windows，并会启动本地 Vite、Tauri 和隔离的 WebView2 数据目录：
+发布使用版本 tag 触发 GitHub Actions，自动生成安装包和校验材料，无需额外 Token 或必配的 Windows 证书。详细步骤见[发布指南](docs/release.md)。
 
-```powershell
-cargo build -p apogee-desktop --locked
-pnpm test:e2e
-```
+## 文档
 
-推送版本 tag 即可自动打包并发布 GitHub Release，无需配置 Windows 证书或额外 Token。完整发布检查、产物清单、SBOM、归属声明和可选签名说明见 [发布指南](docs/release.md)。
+| 文档 | 内容 |
+| --- | --- |
+| [更新记录](CHANGELOG.md) | 已实现的改动与版本记录 |
+| [产品设计](docs/01-产品设计文档.md) | 产品定位、支持范围与路线图 |
+| [交互设计](docs/02-交互与界面设计.md) | 界面组织与操作流程 |
+| [技术架构](docs/03-技术架构与数据模型.md) | 数据模型、分层与工作区生命周期 |
+| [发布指南](docs/release.md) | 构建、发布附件、校验与应用内更新 |
 
-## 参与贡献
+## 许可证
 
-欢迎 bug 报告、文档改进、测试补充和聚焦的功能改动。开始前请阅读：
-
-- [贡献指南](CONTRIBUTING.md)
-- [行为准则](CODE_OF_CONDUCT.md)
-- [安全政策](SECURITY.md)（安全问题不要公开提交 Issue）
-- [变更记录](CHANGELOG.md)
-
-## 许可证与第三方组件
-
-Apogee 源码以 [MIT License](LICENSE) 发布。二进制发布物还会附带 Rust 与 npm 两类第三方归属声明（`THIRD-PARTY-NOTICES.txt`、`THIRD-PARTY-NOTICES-NPM.txt`）及对应的 SPDX SBOM；请从官方 Release 附件取得并核对。项目自身的 MIT 授权不会改变任何第三方组件的许可证义务。
+Apogee 以 [MIT License](LICENSE) 开源。第三方组件遵循各自的许可证；官方发布附件包含 Rust / npm 归属声明及 SPDX SBOM。

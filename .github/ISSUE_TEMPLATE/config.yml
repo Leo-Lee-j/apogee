@@ -1,8 +1,5 @@
 blank_issues_enabled: false
 contact_links:
-  - name: Report a security vulnerability privately
-    url: https://github.com/Leo-Lee-j/apogee/security/policy
-    about: Do not disclose vulnerabilities in public issues. Follow SECURITY.md and use GitHub private reporting when enabled.
-  - name: Read the contribution guide
-    url: https://github.com/Leo-Lee-j/apogee/blob/main/CONTRIBUTING.md
-    about: Check scope, validation expectations, and contribution licensing before opening an issue or pull request.
+  - name: Read the project documentation
+    url: https://github.com/Leo-Lee-j/apogee/blob/master/README.md
+    about: See setup, supported features, development commands, and release information.

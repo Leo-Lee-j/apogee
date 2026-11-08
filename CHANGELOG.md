@@ -4,6 +4,14 @@
 
 ## [Unreleased]
 
+### Changed
+
+- 参考 conduit 重整 README，集中展示功能、安装、源码开发与文档入口。
+
+### Removed
+
+- 移除独立的安全政策、社区行为准则和贡献指南，并清理 Issue 模板及其他文档中的旧引用。
+
 ### Fixed
 
 - HTTP 内部执行失败的请求快照改为装箱存储，修复 Rust 1.99 stable Clippy 的 `result_large_err` 检查，同时保留错误提示和失败请求快照。

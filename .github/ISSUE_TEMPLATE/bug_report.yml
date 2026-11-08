@@ -8,7 +8,6 @@ body:
     attributes:
       value: |
         Thanks for helping improve Apogee. Do not include API keys, cookies, private URLs, real request/response bodies, or other secrets.
-        If this could be a security vulnerability, stop here and follow SECURITY.md instead of filing a public issue.
 
   - type: input
     id: version

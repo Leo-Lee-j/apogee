@@ -98,7 +98,7 @@ Get-AuthenticodeSignature .\Apogee_<version>_x64-setup.exe
 ## 安全与回滚
 
 - 建议按需启用 GitHub Private Vulnerability Reporting、Dependabot alerts 和 Secret Scanning；这些平台开关不阻塞标签发布。见 [GitHub 发布与可选配置](github-admin-checklist.md)。
-- 发现高危漏洞时，先按 [安全政策](../SECURITY.md) 协调修复和披露，再发布新的不可变版本及完整校验材料。
+- 发现高危漏洞时，先与维护者私下协调修复和披露，再发布新的不可变版本及完整校验材料。
 - 已发现错误的发布不要悄悄替换附件。应标记或撤回受影响 Release、在说明中给出受影响版本和替代版本，并保留足够的审计线索。
 - 代码签名或 SBOM 不能证明产品无漏洞；它们只帮助确认发布来源、内容和依赖构成。
 ## 应用内检查更新与下载
