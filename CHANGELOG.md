@@ -6,6 +6,7 @@
 
 ### Changed
 
+- README 提供中英双版，默认首页显示英文，简体中文版保存在 `README.zh-CN.md`，并增加双向语言切换入口。
 - 参考 conduit 重整 README，集中展示功能、安装、源码开发与文档入口。
 
 ### Removed
