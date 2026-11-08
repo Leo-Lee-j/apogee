@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- HTTP 内部执行失败的请求快照改为装箱存储，修复 Rust 1.99 stable Clippy 的 `result_large_err` 检查，同时保留错误提示和失败请求快照。
+
 ## [0.1.0] - 2026-11-08
 
 ### Added

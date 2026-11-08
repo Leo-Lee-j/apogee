@@ -314,6 +314,53 @@ mod tests {
     }
 
     #[test]
+    fn execute_failure_fits_within_clippy_large_error_limit() {
+        assert!(std::mem::size_of::<ExecuteFailure>() <= 128);
+        let failure = ExecuteFailure::from(
+            AppError::new(ErrorKind::Parse, "invalid request")
+                .code("INVALID_REQUEST")
+                .hint(Hint::new("check URL")),
+        );
+        assert!(failure.actual_request.is_none());
+        assert_eq!(failure.error.code.as_deref(), Some("INVALID_REQUEST"));
+        assert_eq!(failure.error.hints[0].label, "check URL");
+    }
+
+    #[tokio::test]
+    async fn timeout_failure_preserves_boxed_actual_request() {
+        // 保持监听端口开放但不发送响应头，稳定触发 TTFB 超时，无需外网。
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let root = std::env::temp_dir().join(format!("apogee-http-failure-{}", Uuid::new_v4()));
+        let spool = Spool::new(&root).unwrap();
+        let mut request = spec(&format!("http://{address}/pending"));
+        request.headers = vec![kv("X-Test", "snapshot", true)];
+        request.settings.timeout_ms = Some(50);
+        request.settings.proxy_url = Some("direct://".into());
+        let (_sender, cancel) = tokio::sync::oneshot::channel();
+        let outcome = execute(Uuid::new_v4(), &request, None, &spool, cancel, |_| {}).await;
+        let Outcome::Failed {
+            error,
+            actual_request,
+        } = outcome
+        else {
+            panic!("expected timeout failure");
+        };
+        assert_eq!(error.kind, ErrorKind::Timeout);
+        assert!(!error.hints.is_empty());
+        let actual = actual_request.as_ref().as_ref().unwrap();
+        assert_eq!(actual.url, request.url);
+        assert_eq!(actual.method, "GET");
+        assert!(actual
+            .headers
+            .iter()
+            .any(|(key, value)| key.eq_ignore_ascii_case("x-test") && value == "snapshot"));
+        drop(listener);
+        drop(spool);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn bare_host_gets_https_not_http() {
         // 用户在地址栏打 `api.example.com/users` 是极常见输入。
         // 补 https 而非 http：默认加密，降级必须显式写。
@@ -1093,14 +1140,15 @@ pub enum Outcome {
 #[derive(Debug)]
 struct ExecuteFailure {
     error: AppError,
-    actual_request: Option<ActualRequest>,
+    // 与 Outcome::Failed 共用装箱快照，避免内联大对象放大 Result 的 Err 分支。
+    actual_request: Box<Option<ActualRequest>>,
 }
 
 impl From<AppError> for ExecuteFailure {
     fn from(error: AppError) -> Self {
         Self {
             error,
-            actual_request: None,
+            actual_request: Box::new(None),
         }
     }
 }
@@ -1122,7 +1170,7 @@ pub async fn execute(
         Ok(None) => Outcome::Cancelled,
         Err(failure) => Outcome::Failed {
             error: failure.error,
-            actual_request: Box::new(failure.actual_request),
+            actual_request: failure.actual_request,
         },
     }
 }
@@ -1179,12 +1227,12 @@ async fn execute_inner(
                         "settings.request.timeout",
                     ))
                     .hint(Hint::new("确认服务地址可达、没被代理或防火墙拦住")),
-                    actual_request: Some(actual_request.clone()),
+                    actual_request: Box::new(Some(actual_request.clone())),
                 })
             }
             Ok(Err(error)) => return Err(ExecuteFailure {
                 error: map_reqwest_error(&error, &url),
-                actual_request: Some(actual_request.clone()),
+                actual_request: Box::new(Some(actual_request.clone())),
             }),
             Ok(Ok(response)) => response,
         },
@@ -1201,7 +1249,7 @@ async fn execute_inner(
         .await
         .map_err(|error| ExecuteFailure {
             error,
-            actual_request: Some(actual_request.clone()),
+            actual_request: Box::new(Some(actual_request.clone())),
         })?;
     let Some((size_bytes, truncated)) = streamed else {
         return Ok(None);
