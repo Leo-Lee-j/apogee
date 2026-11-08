@@ -32,7 +32,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util
 # 未预期 panic 转成诊断性 `request:error`。release 使用 `panic = "abort"`，不能从
 # panic 恢复，也不得把该依赖视为 release 可靠性机制。Release 不引入异步运行时，体积增量可忽略。
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
-fontdb = "0.23"
+fontdb = "0.24"
 uuid = { version = "1", features = ["v4", "serde"] }
 
 # ── HTTP 客户端（03 文档 §2.1 技术选型）───────────────────────────────
