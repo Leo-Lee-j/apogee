@@ -19,4 +19,4 @@ serde_json.workspace = true
 # jsonschema 默认带远程 $ref 解析，会把 reqwest + hyper + rustls 整条 HTTP 栈拖进来。
 # 我们用的是本地 schema 副本（03 文档 §8.3），不需要联网解析 —— 这对
 # 「安装包 < 15MB」的预算是实打实的差别。这条约束要带进生产代码。
-jsonschema = { version = "0.49", default-features = false }
+jsonschema = { version = "0.60", default-features = false }
