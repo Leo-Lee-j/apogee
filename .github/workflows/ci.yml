@@ -3,7 +3,7 @@ name: CI
 on:
   push:
     branches:
-      - main
+      - master
   pull_request:
   workflow_dispatch:
 
@@ -39,6 +39,7 @@ jobs:
       - name: Install Rust MSRV
         shell: pwsh
         run: |
+          $PSNativeCommandUseErrorActionPreference = $true
           rustup toolchain install 1.89.0-x86_64-pc-windows-msvc --profile minimal --component rustfmt --component clippy
           rustup default 1.89.0-x86_64-pc-windows-msvc
           rustc --version
@@ -50,6 +51,7 @@ jobs:
       - name: Install Rust compliance tools
         shell: pwsh
         run: |
+          $PSNativeCommandUseErrorActionPreference = $true
           cargo +stable install cargo-deny --version 0.20.2 --locked
           cargo deny --version
 
@@ -99,6 +101,7 @@ jobs:
       - name: Install current stable Rust
         shell: pwsh
         run: |
+          $PSNativeCommandUseErrorActionPreference = $true
           rustup toolchain install stable --profile minimal --component rustfmt --component clippy
           rustc +stable --version
           cargo +stable --version

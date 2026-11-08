@@ -27,6 +27,10 @@ jobs:
       CARGO_TERM_COLOR: always
       RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
     steps:
+      - name: Preserve source line endings on Windows
+        shell: pwsh
+        run: git config --global core.autocrlf false
+
       - name: Check out release source
         uses: actions/checkout@v4
         with:
@@ -36,6 +40,7 @@ jobs:
       - name: Validate tag and version metadata
         shell: pwsh
         run: |
+          $PSNativeCommandUseErrorActionPreference = $true
           $tag = $env:RELEASE_TAG
           if ($tag -notmatch '^v(?<version>(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?)$') {
             throw "Release tag must be v<semver>; got '$tag'."
@@ -71,7 +76,8 @@ jobs:
       - name: Install Rust MSRV
         shell: pwsh
         run: |
-          rustup toolchain install 1.89.0-x86_64-pc-windows-msvc --profile minimal
+          $PSNativeCommandUseErrorActionPreference = $true
+          rustup toolchain install 1.89.0-x86_64-pc-windows-msvc --profile minimal --component rustfmt --component clippy
           rustup default 1.89.0-x86_64-pc-windows-msvc
           rustc --version
 
@@ -81,12 +87,16 @@ jobs:
       - name: Install Rust compliance tools
         shell: pwsh
         run: |
+          $PSNativeCommandUseErrorActionPreference = $true
           cargo +stable install cargo-deny --version 0.20.2 --locked
-          cargo +stable install cargo-about --version 0.9.1 --locked
+          cargo +stable install cargo-about --version 0.9.1 --locked --features cli
+          cargo deny --version
+          cargo about --version
 
       - name: Verify release quality gates
         shell: pwsh
         run: |
+          $PSNativeCommandUseErrorActionPreference = $true
           pnpm audit --prod --audit-level=low --json
           pnpm licenses:check
           pnpm typecheck
@@ -102,12 +112,25 @@ jobs:
       - name: Generate third-party notices and SBOMs
         shell: pwsh
         run: |
+          $PSNativeCommandUseErrorActionPreference = $true
           pnpm licenses:rust
           pnpm licenses:npm
           pnpm generate:sbom
 
       - name: Build Windows NSIS installer
-        run: pnpm tauri build --bundles nsis
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            try {
+              pnpm tauri build --bundles nsis
+              break
+            } catch {
+              if ($attempt -eq 3) { throw }
+              Write-Warning "Installer build attempt $attempt failed; retrying with the existing build cache."
+              Start-Sleep -Seconds (15 * $attempt)
+            }
+          }
 
       - name: Sign and verify Windows installer when credentials are available
         shell: pwsh
@@ -115,6 +138,7 @@ jobs:
           WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
         run: |
+          $PSNativeCommandUseErrorActionPreference = $true
           $installers = @(Get-ChildItem -LiteralPath target/release/bundle/nsis -File -Filter 'Apogee_*_x64-setup.exe')
           if ($installers.Count -ne 1) { throw "Expected exactly one current NSIS installer, found $($installers.Count)." }
           $hasCertificate = -not [string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_BASE64)
@@ -150,6 +174,7 @@ jobs:
       - name: Assemble release assets and checksums
         shell: pwsh
         run: |
+          $PSNativeCommandUseErrorActionPreference = $true
           $assetDir = Join-Path $env:GITHUB_WORKSPACE 'release-assets'
           New-Item -ItemType Directory -Path $assetDir -Force | Out-Null
           $installer = Get-ChildItem -LiteralPath target/release/bundle/nsis -File -Filter 'Apogee_*_x64-setup.exe'
@@ -207,6 +232,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          $PSNativeCommandUseErrorActionPreference = $true
           $assets = @(Get-ChildItem -LiteralPath $env:RELEASE_ASSET_DIR -File | Sort-Object Name | ForEach-Object FullName)
           if ($assets.Count -lt 2) { throw 'Release asset collection is unexpectedly incomplete.' }
           $arguments = @('release', 'create', $env:RELEASE_TAG, '--repo', $env:GITHUB_REPOSITORY, '--verify-tag', '--title', "Apogee $env:RELEASE_VERSION", '--notes-file', $env:RELEASE_NOTES_FILE)
