@@ -35,7 +35,7 @@
     "generate:sbom": "pnpm sbom --sbom-format spdx --prod --lockfile-only --out apogee-npm.spdx.json && node scripts/generate-sbom.mjs"
   },
   "dependencies": {
-    "@codemirror/autocomplete": "6.20.3",
+    "@codemirror/autocomplete": "6.20.4",
     "@codemirror/commands": "6.10.4",
     "@codemirror/lang-json": "6.0.2",
     "@codemirror/language": "6.12.4",
