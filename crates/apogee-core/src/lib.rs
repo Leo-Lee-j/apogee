@@ -19,6 +19,7 @@ pub mod postman;
 pub mod public;
 pub mod request;
 pub mod response;
+pub mod update;
 pub mod vars;
 pub mod workspace;
 pub mod yaml;

@@ -18,6 +18,7 @@ mod persistence;
 mod protocol;
 mod request_preparation;
 mod state;
+mod update;
 mod workspace;
 mod workspace_registry;
 mod workspace_state;
@@ -53,6 +54,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(state)
+        .manage(Arc::new(update::UpdateState::default()))
         // 注册 apogee:// 协议。异步版本很重要：同步 handler 会阻塞 WebView 线程，
         // 100MB 文件的 IO 卡在那里就等于界面卡死。
         //
@@ -72,6 +74,11 @@ pub fn run() {
             commands::app_settings_save,
             commands::system_font_families,
             commands::app_restart,
+            update::update_current_version,
+            update::update_check,
+            update::update_download,
+            update::update_cancel,
+            update::update_open_download,
             commands::spike_make_response,
             commands::spike_index_response,
             commands::spike_get_response_tree,

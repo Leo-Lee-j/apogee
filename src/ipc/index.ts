@@ -10,6 +10,7 @@
 
 import { invoke as tauriInvoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
+import { version as packageVersion } from '../../package.json'
 
 // ─────────────────────────────────────────────────────────────────────
 // 类型契约
@@ -397,7 +398,49 @@ export interface YapiImportResult {
   warnings: string[]
 }
 
+export interface UpdateRelease {
+  tag: string
+  version: string
+  notes: string
+  publishedAt: string | null
+  prerelease: boolean
+  filename: string
+  size: number
+  sha256: string
+}
+export interface UpdateCheckResult {
+  currentVersion: string
+  latest: UpdateRelease | null
+  updateAvailable: boolean
+}
+export interface DownloadedUpdate {
+  tag: string
+  filename: string
+  path: string
+}
+export interface UpdateProgress {
+  operationId: string
+  downloaded: number
+  total: number
+}
+
 export const ipc = {
+  updateCurrentVersion(): Promise<string> {
+    return inTauri ? call('update_current_version') : Promise.resolve(packageVersion)
+  },
+  updateCheck(includePrerelease: boolean): Promise<UpdateCheckResult> {
+    return call('update_check', { includePrerelease })
+  },
+  updateDownload(operationId: string, tag: string): Promise<DownloadedUpdate> {
+    return call('update_download', { operationId, tag })
+  },
+  updateCancel(operationId: string): Promise<boolean> {
+    return call('update_cancel', { operationId })
+  },
+  updateOpenDownload(tag: string, reveal: boolean): Promise<void> {
+    return call('update_open_download', { tag, reveal })
+  },
+
   appSettingsLoad(): Promise<AppSettings> {
     return call('app_settings_load')
   },
@@ -1337,4 +1380,15 @@ export const windowControls = {
       unlisten()
     }
   },
+}
+
+/** Must be subscribed before invoking the download; IDs isolate old/foreign progress. */
+export async function onUpdateProgress(
+  operationId: string,
+  handler: (event: UpdateProgress) => void,
+): Promise<() => void> {
+  if (!inTauri) return () => {}
+  return tauriListen<UpdateProgress>('update:progress', (event) => {
+    if (event.payload.operationId === operationId) handler(event.payload)
+  })
 }

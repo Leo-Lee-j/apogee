@@ -1,26 +1,22 @@
-# GitHub 仓库管理员待办
+# GitHub 发布与可选配置
 
-> 本清单记录无法通过仓库代码自动完成的 GitHub 平台配置。完成一项后勾选；证书、密码和其他敏感信息只能保存在 GitHub Secrets，绝不能提交到仓库、Issue、日志或截图中。
+## 直接发布
 
-## 对外公开前
+仓库设为 Public 后，无需额外 Token、Windows 证书或更新签名密钥：
 
-- [ ] 在准备对外公开时，将 GitHub 仓库可见性设为 **Public**，并确认提交历史、配置和文档中不含凭据、个人数据或其他不应公开的信息。
-- [ ] 启用 **Private Vulnerability Reporting**，使安全研究者可以私下提交漏洞报告。
-- [ ] 启用 **Secret Scanning**；若当前 GitHub 计划支持，也启用 Push Protection。
-- [ ] 启用 **Dependabot alerts**。仓库已包含 Dependabot 更新配置，但告警开关需要管理员在 GitHub 平台启用。
+1. 提交并推送已审阅代码，确保当前提交包含 `.github/workflows/release.yml`。
+2. 确认 `package.json`、根 `Cargo.toml` 和 `src-tauri/tauri.conf.json` 的版本号一致。
+3. 创建并推送匹配的版本 tag（如 `v0.1.0`）。Actions 自动构建并上传安装包、校验和、许可证、notices 和 SBOM，生成 GitHub Release。
 
-## Windows 稳定版签名
+工作流使用 GitHub 自带的 `github.token`，已声明 `contents: write`，不需要配置个人访问令牌。应用匿名访问公开 Release，即可检查和下载更新。流程与验证命令见[发布指南](release.md)。
 
-- [ ] 在仓库的 Actions secrets 中配置 `WINDOWS_CERTIFICATE_BASE64`：用于签名的 PFX 证书的 base64 内容。
-- [ ] 在仓库的 Actions secrets 中配置 `WINDOWS_CERTIFICATE_PASSWORD`：该 PFX 证书的密码。
-- [ ] 确认证书私钥未保存在 Git、工作目录、共享目录或任何公开渠道中，并记录证书轮换与吊销责任人。
+## 可选配置，不是发布前提
 
-稳定标签（`vX.Y.Z`）缺少任一签名 secret 时，发布工作流会失败；这是一项有意的保护措施。带预发布后缀的标签（例如 `vX.Y.Z-rc.1`）可以生成未签名预发布，但 Release Notes 必须明确标注未签名状态。
+- **Windows 代码签名**：需要时成对配置 `WINDOWS_CERTIFICATE_BASE64` 和 `WINDOWS_CERTIFICATE_PASSWORD`。均不配置即可发布未签名稳定版或预发布；只配一个会报错。Release Notes 会注明签名状态，未签名包可能出现 Windows 安全提示。
+- **GitHub 安全功能**：建议启用 Private Vulnerability Reporting、Dependabot alerts、Secret Scanning，以及可用的 Push Protection。无需为此延迟发布。
 
-## 首个稳定版发布后核验
+证书、密码和其他凭据绝不能提交到仓库、Issue、日志或截图中；公开源码和提交历史也应确认不包含敏感信息。
 
-- [ ] 从已审阅的提交创建并推送新 tag，例如 `v0.1.0`，以触发 Release 工作流。
-- [ ] 确认 GitHub Release 包含 Windows NSIS 安装程序、`LICENSE`、`SHA256SUMS.txt`、两份第三方 notices 以及 Rust/npm 两份 SPDX SBOM。
-- [ ] 验证稳定版安装程序的 SHA-256 和 Authenticode 签名；具体命令见[发布指南](release.md)。
+## 发布后核验
 
-上述事项均需要仓库管理员权限；完成后，源码、CI 和稳定版发布链路即具备完整的开源发布保障。
+确认 Release 附件完整，安装包 SHA-256 与同一 Release 的 `SHA256SUMS.txt` 一致。仅在 Release Notes 标注已签名时检查 Authenticode 签名。首个 Release 发布后，再从旧版本应用实际检查、下载并验证安装包；没有 Release 时无法完成在线下载验收。

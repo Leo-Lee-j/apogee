@@ -1,15 +1,19 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref } from 'vue'
 import type { DropdownOption } from 'naive-ui'
 import { useAppStore } from '@/stores/app'
 import { useUiStore } from '@/stores/ui'
+import { useUpdateStore } from '@/stores/update'
 import { AppDropdown, AppIcon } from '@/components/ui'
 import { IconAdd, IconFolderOpen, IconMore, IconMoon, IconSun } from '@/components/ui/icons'
-import { windowControls, type Unlisten } from '@/ipc'
+import { inTauri, windowControls, type Unlisten } from '@/ipc'
 import logoUrl from '../../src-tauri/icons/128x128.png'
 
 const app = useAppStore()
 const ui = useUiStore()
+const updates = useUpdateStore()
+const updateOpen = ref(false)
+const UpdatePanel = defineAsyncComponent(() => import('@/components/settings/UpdatePanel.vue'))
 const focused = ref(0)
 const maximized = ref(false)
 let stopWatching: Unlisten | undefined
@@ -21,6 +25,7 @@ const rows = computed(() => [
 ])
 
 onMounted(async () => {
+  void updates.loadVersion()
   if (!windowControls.available) return
   maximized.value = await windowControls.isMaximized()
   stopWatching = await windowControls.onMaximizeChange((value) => { maximized.value = value })
@@ -91,7 +96,7 @@ function statusText(status: string) {
 </script>
 
 <template>
-  <div class="launcher" tabindex="0" @keydown="onKeydown">
+  <div class="launcher" :class="{ 'updates-expanded': updateOpen }" tabindex="0" @keydown="onKeydown">
     <!-- 启动页标题栏没有 gap/padding，spacer 占满整个 header，裸 drag-region
          只响应直接点击 header 本身，会完全拖不动；必须用 deep（见 TitleBar 注释）。 -->
     <header class="launcher-titlebar" data-tauri-drag-region="deep">
@@ -152,12 +157,24 @@ function statusText(status: string) {
         </div>
       </section>
       <p v-if="app.lastError" class="launcher-error">{{ app.lastError.message }}</p>
+      <div v-if="inTauri" class="launcher-updates" @keydown.stop>
+        <button type="button" class="update-entry" :aria-expanded="updateOpen" @click="updateOpen = !updateOpen">
+          v{{ updates.currentVersion }} · {{ updates.updateAvailable ? `发现 v${updates.latest?.version}` : '软件更新' }}
+          <span>{{ updateOpen ? '收起' : '展开' }}</span>
+        </button>
+        <UpdatePanel v-if="updateOpen" />
+      </div>
     </main>
   </div>
 </template>
 
 <style scoped>
 .launcher { height: 100%; background: var(--a-bg-1); outline: none; }
+.launcher.updates-expanded { overflow-y: auto; }
+.launcher-updates { margin-top: 20px; padding-bottom: 24px; }
+.update-entry { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 8px 0; border: 0; background: transparent; color: var(--a-text-dim); font: inherit; font-size: var(--a-fs-sm); cursor: pointer; }
+.update-entry:hover { color: var(--a-text); }
+.update-entry:focus-visible { outline: 1px solid var(--a-focus); outline-offset: 3px; }
 .launcher-titlebar { height: var(--a-h-titlebar); display: flex; align-items: stretch; }
 .launcher-spacer { flex: 1; }
 .title-icon, .window-controls button { border: 0; background: transparent; color: var(--a-text-dim); cursor: pointer; }

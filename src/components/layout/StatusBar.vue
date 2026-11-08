@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useTabsStore } from '@/stores/tabs'
 import { useUiStore } from '@/stores/ui'
 import { inTauri } from '@/ipc'
@@ -7,11 +7,18 @@ import { AppButton, AppIcon } from '@/components/ui'
 import { IconColumns, IconRows, IconMaximize } from '@/components/ui/icons'
 import MemoryMonitor from './MemoryMonitor.vue'
 import { useAppStore } from '@/stores/app'
+import { useUpdateStore } from '@/stores/update'
 
 /** 状态栏，24px（02 文档 §3.2）。可在设置里隐藏。 */
 const tabs = useTabsStore()
 const ui = useUiStore()
 const app = useAppStore()
+const updates = useUpdateStore()
+onMounted(() => { void updates.loadVersion() })
+function checkUpdate() {
+  tabs.openSettings('about')
+  if (!updates.busy && !updates.updateAvailable) void updates.check()
+}
 const dirtyCount = computed(() => tabs.tabs.filter((t) => t.dirty).length)
 const layoutEnabled = computed(() => tabs.active?.kind === 'request' && !tabs.active.newPanel)
 const layoutLabel = computed(() => ({
@@ -44,7 +51,10 @@ const proxyLabel = computed(() => {
     <span class="spacer" />
     <span class="dim">{{ inTauri ? 'Tauri' : '浏览器（Spike 对照）' }}</span>
     <span class="sep">|</span>
-    <span class="dim">v0.1.0</span>
+    <span class="dim">v{{ updates.currentVersion }}</span>
+    <AppButton v-if="inTauri" quaternary size="tiny" title="打开关于页并检查 GitHub 发布标签" @click="checkUpdate">
+      {{ updates.busy ? '更新处理中' : updates.updateAvailable ? `发现 v${updates.latest?.version}` : '检查更新' }}
+    </AppButton>
     <MemoryMonitor v-if="app.settings.showMemoryMonitor" />
     <AppButton
       class="layout-toggle"

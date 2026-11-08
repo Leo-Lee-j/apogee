@@ -20,6 +20,7 @@ serde-saphyr.workspace = true
 regex.workspace = true
 base64.workspace = true
 ring.workspace = true
+semver = "1"
 curl-parser.workspace = true
 url.workspace = true
 uuid.workspace = true
@@ -32,3 +33,4 @@ rustls.workspace = true
 # 在此之前 tokio 只是 tauri 的传递依赖。
 tokio = { workspace = true }
 tokio-util.workspace = true
+futures-util.workspace = true

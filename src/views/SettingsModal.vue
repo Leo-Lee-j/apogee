@@ -26,6 +26,8 @@ import {
 import { ipc } from '@/ipc'
 import { useUiStore } from '@/stores/ui'
 import { useAppStore } from '@/stores/app'
+import { useUpdateStore } from '@/stores/update'
+import UpdatePanel from '@/components/settings/UpdatePanel.vue'
 import type { FontFamilyMode, LanguageMode, ShortcutId, ThemeMode } from '@/stores/ui'
 
 /** 设置左侧导航分区；命令面板 / openSettings 可直达。 */
@@ -33,7 +35,7 @@ export type SettingsSection = 'appearance' | 'startup' | 'network' | 'performanc
 
 const LABEL_WIDTH = 140
 const PROXY_SAVE_DEBOUNCE_MS = 400
-const APP_VERSION = '0.1.0'
+const updates = useUpdateStore()
 
 const ui = useUiStore()
 const app = useAppStore()
@@ -544,13 +546,14 @@ async function restartApp() {
               <dl class="about-list settings-info-list">
                 <div class="setting-row">
                   <dt>版本</dt>
-                  <dd>v{{ APP_VERSION }}</dd>
+                  <dd>v{{ updates.currentVersion }}</dd>
                 </div>
                 <div class="setting-row">
                   <dt>产品定位</dt>
                   <dd class="plain">本地优先 · 启动即用</dd>
                 </div>
               </dl>
+              <UpdatePanel />
             </section>
           </template>
         </div>
