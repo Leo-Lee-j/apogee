@@ -23,7 +23,7 @@ jobs:
       CARGO_TERM_COLOR: always
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
@@ -96,7 +96,7 @@ jobs:
       CARGO_TERM_COLOR: always
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install current stable Rust
         shell: pwsh
