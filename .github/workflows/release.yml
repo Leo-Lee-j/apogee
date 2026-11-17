@@ -10,6 +10,11 @@ on:
         description: Existing v<semver> tag to release
         required: true
         type: string
+      e2e_ref:
+        description: Optional full master commit SHA containing a corrected E2E harness (tag source remains unchanged)
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: write
@@ -36,6 +41,19 @@ jobs:
         with:
           ref: ${{ inputs.tag || github.ref }}
           fetch-depth: 0
+
+      - name: Use corrected E2E harness when explicitly selected
+        if: github.event_name == 'workflow_dispatch' && inputs.e2e_ref != ''
+        shell: pwsh
+        env:
+          E2E_REF: ${{ inputs.e2e_ref }}
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          if ($env:E2E_REF -notmatch '^[0-9a-f]{40}$') { throw 'E2E ref must be a full commit SHA.' }
+          git merge-base --is-ancestor $env:E2E_REF origin/master
+          $script = git show "${env:E2E_REF}:scripts/e2e-workspace.mjs"
+          [IO.File]::WriteAllText((Join-Path $PWD 'scripts/e2e-workspace.mjs'), ($script -join "`n") + "`n", [Text.UTF8Encoding]::new($false))
+          "E2E_VERIFICATION_REF=$env:E2E_REF" | Add-Content -LiteralPath $env:GITHUB_ENV
 
       - name: Validate tag and version metadata
         shell: pwsh
@@ -216,6 +234,9 @@ jobs:
             '',
             'See `CHANGELOG.md` in this tagged source revision for user-visible changes.'
           ) -join "`n"
+          if ($env:E2E_VERIFICATION_REF) {
+            $notes += "E2E verification used the corrected test harness from commit $env:E2E_VERIFICATION_REF. Application source is unchanged from the release tag."
+          }
           Set-Content -LiteralPath $notesFile -Value $notes
           "RELEASE_ASSET_DIR=$assetDir" | Add-Content -LiteralPath $env:GITHUB_ENV
           "RELEASE_NOTES_FILE=$notesFile" | Add-Content -LiteralPath $env:GITHUB_ENV

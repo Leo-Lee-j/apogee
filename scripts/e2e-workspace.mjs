@@ -208,7 +208,10 @@ try {
   await dragHandles.nth(2).focus()
   await page.keyboard.press('Alt+ArrowUp')
   assert.equal(await query.getByRole('textbox', { name: '参数值', exact: true }).nth(1).inputValue(), 'second')
-  await query.locator('.parameter-row').first().hover()
+  // Editing cells can scroll the table horizontally on a narrow WebView. Bring
+  // the handle itself into view; a partially visible row does not reveal it.
+  await dragHandles.first().scrollIntoViewIfNeeded()
+  await dragHandles.first().hover()
   const handleBox = await dragHandles.first().boundingBox()
   const targetBox = await query.locator('.parameter-row').nth(1).boundingBox()
   assert.ok(handleBox && targetBox)
