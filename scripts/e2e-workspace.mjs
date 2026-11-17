@@ -89,9 +89,15 @@ try {
     )
   }
 
-  const context = browser.contexts()[0]
-  const page = context.pages()[0]
-  if (!page) throw new Error('Tauri main WebView page not found')
+  // CDP can accept connections before WebView2 creates its first page on a
+  // cold runner. Wait for the page as well as the debugging endpoint.
+  const pageDeadline = Date.now() + 30_000
+  let page
+  while (!page && Date.now() < pageDeadline) {
+    page = browser.contexts().flatMap(context => context.pages())[0]
+    if (!page) await new Promise(resolvePromise => setTimeout(resolvePromise, 100))
+  }
+  if (!page) throw new Error(`Tauri main WebView page did not become ready${externalAppStatus()}`)
 
   await page.waitForSelector('.launcher', { timeout: 30_000 })
   await page.getByText('示例工作区', { exact: true }).click()
