@@ -107,10 +107,14 @@ export const useTabsStore = defineStore('tabs', () => {
   const activeId = ref<string | null>(null)
   /** 最近访问顺序，队首最新。用来判定 warm/cold。 */
   const mru = ref<string[]>([])
+  const lastError = ref<AppError | null>(null)
   const persistTimers = new Map<string, ReturnType<typeof setTimeout>>()
-  const PERSISTED_FIELDS = new Set([
+  type SaveResult = { ok: boolean; error: AppError | null }
+  const pendingSaves = new Map<string, Promise<SaveResult>>()
+  let workspaceGeneration = 0
+  const PERSISTED_FIELDS = [
     'title', 'method', 'url', 'params', 'pathParams', 'headers', 'body', 'auth', 'settings',
-  ])
+  ] as const
 
   function requestSpec(tab: Tab): RequestSpec {
     return {
@@ -156,9 +160,24 @@ export const useTabsStore = defineStore('tabs', () => {
       tab.nodeId,
       setTimeout(() => {
         persistTimers.delete(tab.nodeId!)
-        void persist(tab)
+        const generation = workspaceGeneration
+        void save(tab.id).then(async ({ error }) => {
+          if (error) await showSaveError(error, generation)
+        })
       }, 300),
     )
+  }
+
+  async function showSaveError(error: AppError, generation: number) {
+    // 失败时才加载反馈组件，避免自动保存把 Naive UI 拉进启动路径。
+    const { toast, errorText } = await import('@/features/feedback')
+    if (generation === workspaceGeneration) toast().error(errorText(error.message, error.hints))
+  }
+
+  function clearPersistTimer(nodeId: string) {
+    const timer = persistTimers.get(nodeId)
+    if (timer !== undefined) clearTimeout(timer)
+    persistTimers.delete(nodeId)
   }
 
   function markClean(id: string) {
@@ -346,15 +365,20 @@ export const useTabsStore = defineStore('tabs', () => {
     touch(id)
   }
 
-  function close(id: string) {
-    const idx = tabs.value.findIndex((t) => t.id === id)
-    const current = tabs.value[idx]
+  async function close(id: string) {
+    const current = tabs.value.find((tab) => tab.id === id)
     if (current?.nodeId) {
-      const timer = persistTimers.get(current.nodeId)
-      if (timer !== undefined) clearTimeout(timer)
-      persistTimers.delete(current.nodeId)
-      void persist(current)
+      const generation = workspaceGeneration
+      const result = await save(id)
+      if (!result.ok) {
+        if (result.error) await showSaveError(result.error, generation)
+        return
+      }
+      // 保存完成与关闭之间若又发生编辑，保留标签让新的自动保存继续。
+      if (generation !== workspaceGeneration || tabs.value.find((tab) => tab.id === id)?.dirty) return
     }
+    const idx = tabs.value.findIndex((tab) => tab.id === id)
+    if (idx < 0) return
     tabs.value = tabs.value.filter((t) => t.id !== id)
     mru.value = mru.value.filter((x) => x !== id)
     if (activeId.value === id) {
@@ -372,10 +396,15 @@ export const useTabsStore = defineStore('tabs', () => {
     // 同一个对象引用，Vue 可能认为值没有变化，依赖它的 editorSections 直到
     // 切换标签才会重新计算。创建新对象同时满足 shallowRef 的整体替换约束。
     const current = tabs.value[index]
-    const next = markRaw({ ...current, ...delta, ...(delta.nodeId && delta.nodeId !== current.nodeId && !delta.persistedAuth ? { persistedAuth: { type: 'inherit' } as AuthConfig } : {}) })
+    const edited = PERSISTED_FIELDS.some((key) => Object.prototype.hasOwnProperty.call(delta, key))
+    const next = markRaw({
+      ...current, ...delta,
+      ...(delta.nodeId && delta.nodeId !== current.nodeId && !delta.persistedAuth ? { persistedAuth: { type: 'inherit' } as AuthConfig } : {}),
+      ...(delta.dirty === true ? { preview: false } : {}),
+    })
     tabs.value = tabs.value.map((tab, tabIndex) => (tabIndex === index ? next : tab))
 
-    if (Object.keys(delta).some((key) => PERSISTED_FIELDS.has(key))) schedulePersist(next)
+    if (edited) schedulePersist(next)
   }
 
   /**
@@ -385,30 +414,63 @@ export const useTabsStore = defineStore('tabs', () => {
    * 它没有可写盘的对象，保存要先走「保存到」选择器建节点（`workspace.saveTabAs`）。
    * 这里不再谎清脏标记，避免「脏点消失但内容没落盘」的假象。
    */
-  async function save(id: string): Promise<{ ok: boolean; error: AppError | null }> {
+  async function save(id: string): Promise<SaveResult> {
     const tab = tabs.value.find((item) => item.id === id)
     if (!tab || !tab.nodeId) return { ok: false, error: null }
-    const timer = persistTimers.get(tab.nodeId)
-    if (timer !== undefined) {
-      clearTimeout(timer)
-      persistTimers.delete(tab.nodeId)
-    }
-    const error = await persist(tab)
-    if (error) return { ok: false, error }
-    markClean(id)
-    return { ok: true, error: null }
+    const nodeId = tab.nodeId
+    clearPersistTimer(nodeId)
+    const pending = pendingSaves.get(id)
+    if (pending) return pending
+    const generation = workspaceGeneration
+    const task = (async (): Promise<SaveResult> => {
+      while (generation === workspaceGeneration) {
+        const snapshot = tabs.value.find((item) => item.id === id)
+        if (!snapshot || snapshot.nodeId !== nodeId) break
+        clearPersistTimer(nodeId)
+        const error = await persist(snapshot)
+        if (generation !== workspaceGeneration) break
+        const current = tabs.value.find((item) => item.id === id)
+        if (!current || current.nodeId !== snapshot.nodeId) break
+        if (error) {
+          lastError.value = error
+          patch(id, { dirty: true })
+          return { ok: false, error }
+        }
+        // 请求响应、焦点等非持久化状态可同时变化；只比较待写字段，且不复制大对象。
+        // 新编辑共用此任务继续写入，避免较旧的自动保存覆盖显式保存。
+        if (PERSISTED_FIELDS.every((key) => current[key] === snapshot[key])) {
+          clearPersistTimer(nodeId)
+          markClean(id)
+          lastError.value = null
+          return { ok: true, error: null }
+        }
+      }
+      return { ok: false, error: null }
+    })()
+    pendingSaves.set(id, task)
+    void task.then(() => {
+      if (pendingSaves.get(id) === task) pendingSaves.delete(id)
+    })
+    return task
   }
 
   async function flushAll(): Promise<boolean> {
-    for (const timer of persistTimers.values()) clearTimeout(timer)
-    persistTimers.clear()
-    for (const tab of tabs.value) {
-      if (tab.nodeId && (await persist(tab))) return false
-    }
-    return true
+    const generation = workspaceGeneration
+    do {
+      for (const timer of persistTimers.values()) clearTimeout(timer)
+      persistTimers.clear()
+      for (const tab of tabs.value) {
+        if (generation !== workspaceGeneration) return false
+        if (tab.nodeId && tabs.value.some((item) => item.id === tab.id) && !(await save(tab.id)).ok) return false
+      }
+    } while (generation === workspaceGeneration && tabs.value.some((tab) => tab.nodeId && tab.dirty))
+    return generation === workspaceGeneration
   }
 
   function resetWorkspace() {
+    workspaceGeneration += 1
+    pendingSaves.clear()
+    lastError.value = null
     for (const timer of persistTimers.values()) clearTimeout(timer)
     persistTimers.clear()
     tabs.value = []
@@ -445,6 +507,7 @@ export const useTabsStore = defineStore('tabs', () => {
     tabs,
     activeId,
     active,
+    lastError,
     mru,
     mountedIds,
     stateOf,

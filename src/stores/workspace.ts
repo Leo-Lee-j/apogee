@@ -50,8 +50,17 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const ready = ref(false)
   const lastError = ref<AppError | null>(null)
   let loadingPromise: Promise<void> | null = null
+  let workspaceGeneration = 0
+  const environmentSaves = new Map<string, Promise<boolean>>()
   const pendingStateSaves = new Set<Promise<boolean>>()
   let stateSaveQueue = Promise.resolve(true)
+
+  function sessionGuard() {
+    const generation = workspaceGeneration
+    const session = sessionId.value
+    const workspace = workspaceId.value
+    return () => generation === workspaceGeneration && session === sessionId.value && workspace === workspaceId.value
+  }
 
   const available = computed(() => inTauri)
   const collections = computed(() => (nodes.value ?? []).filter((node) => node.kind === 'collection'))
@@ -79,6 +88,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   function acceptOpen(result: WorkspaceOpenResult) {
+    workspaceGeneration += 1
+    environmentSaves.clear()
+    pendingStateSaves.clear()
+    stateSaveQueue = Promise.resolve(true)
+    loadingPromise = null
     nodes.value = undefined
     environments.value = []
     activeEnvironmentId.value = null
@@ -231,18 +245,22 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (!inTauri || !sessionId.value) return
     if (loadingPromise) return loadingPromise
 
+    const isCurrent = sessionGuard()
     loading.value = true
-    loadingPromise = ipc
+    const task = ipc
       .workspaceLoad()
-      .then(accept)
+      .then((snapshot) => { if (isCurrent()) accept(snapshot) })
       .catch((error) => {
-        report(error)
+        if (isCurrent()) report(error)
       })
       .finally(() => {
-        loading.value = false
-        loadingPromise = null
+        if (loadingPromise === task) {
+          loading.value = false
+          loadingPromise = null
+        }
       })
-    return loadingPromise
+    loadingPromise = task
+    return task
   }
 
   async function enter(result: WorkspaceOpenResult) {
@@ -255,6 +273,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   function reset() {
+    workspaceGeneration += 1
+    environmentSaves.clear()
+    pendingStateSaves.clear()
+    stateSaveQueue = Promise.resolve(true)
     invalidateDebugCaseCache()
     nodes.value = undefined
     workspaceId.value = null
@@ -271,11 +293,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   async function applySnapshot(task: Promise<WorkspaceSnapshot>): Promise<boolean> {
+    const isCurrent = sessionGuard()
     try {
-      accept(await task)
+      const snapshot = await task
+      if (!isCurrent()) return false
+      accept(snapshot)
       return true
     } catch (error) {
-      report(error)
+      if (isCurrent()) report(error)
       return false
     }
   }
@@ -296,11 +321,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   function persistWorkspaceState(): Promise<boolean> {
     if (!inTauri || !sessionId.value) return Promise.resolve(true)
     const selectedId = activeEnvironmentId.value
+    const isCurrent = sessionGuard()
     const task = stateSaveQueue.then(() =>
-      ipc.workspaceSaveState(selectedId).then(
-        () => true,
+      !isCurrent() ? false : ipc.workspaceSaveState(selectedId).then(
+        () => isCurrent(),
         (error) => {
-          report(error)
+          if (isCurrent()) report(error)
           return false
         },
       ),
@@ -365,24 +391,45 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   async function saveEnvironment(environmentId = activeEnvironmentId.value): Promise<boolean> {
     const environment = environments.value.find((item) => item.id === environmentId)
     if (!environment || !inTauri || !dirtyEnvironmentIds.has(environment.id)) return true
-    try {
-      const saved = await ipc.workspaceSaveEnvironment(environment)
-      environments.value = environments.value.map((item) =>
-        item.id === saved.id ? saved : item,
-      )
-      dirtyEnvironmentIds.delete(saved.id)
-      return true
-    } catch (error) {
-      report(error)
-      return false
-    }
+    const pending = environmentSaves.get(environment.id)
+    if (pending) return pending
+    const isCurrent = sessionGuard()
+    const task = (async () => {
+      try {
+        while (isCurrent() && dirtyEnvironmentIds.has(environment.id)) {
+          const snapshot = environments.value.find((item) => item.id === environment.id)
+          if (!snapshot) return false
+          const saved = await ipc.workspaceSaveEnvironment(snapshot)
+          if (!isCurrent()) return false
+          // 编辑以替换对象更新 shallowRef。只有同一份快照才能被确认；期间的新编辑
+          // 留在内存并在下一轮落盘。手动保存、发送和关闭共用同一个在途任务。
+          if (environments.value.find((item) => item.id === environment.id) === snapshot) {
+            environments.value = environments.value.map((item) => item === snapshot ? saved : item)
+            dirtyEnvironmentIds.delete(environment.id)
+          }
+        }
+        return isCurrent()
+      } catch (error) {
+        if (isCurrent()) report(error)
+        return false
+      }
+    })()
+    environmentSaves.set(environment.id, task)
+    void task.then(() => {
+      if (environmentSaves.get(environment.id) === task) environmentSaves.delete(environment.id)
+    })
+    return task
   }
 
   async function saveDirtyEnvironments(): Promise<boolean> {
-    for (const id of [...dirtyEnvironmentIds]) {
-      if (!(await saveEnvironment(id))) return false
+    if (!inTauri) return true
+    const isCurrent = sessionGuard()
+    while (isCurrent() && dirtyEnvironmentIds.size > 0) {
+      for (const id of [...dirtyEnvironmentIds]) {
+        if (!isCurrent() || !(await saveEnvironment(id))) return false
+      }
     }
-    return true
+    return isCurrent()
   }
 
   async function createEnvironment(name = '新环境'): Promise<Environment | null> {

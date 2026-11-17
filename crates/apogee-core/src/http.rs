@@ -53,55 +53,59 @@ pub fn build_url(spec: &RequestSpec) -> Result<String, AppError> {
     // 没写协议时补 https。用户在地址栏打 `api.example.com/users` 是极常见的输入，
     // 直接报「非法 URL」属于明知用户意图却不做事。补 https 而非 http：
     // 默认走加密，要降级得显式写出来。
-    if !url.contains("://") {
+    if !url
+        .split(['?', '#'])
+        .next()
+        .unwrap_or_default()
+        .contains("://")
+    {
         url = format!("https://{url}");
     }
 
-    // fragment 不属于 HTTP 请求目标，Query 必须追加在它之前。
-    let fragment = url.find('#').map(|index| url.split_off(index));
-
-    // 只替换路径中的完整占位符，一次扫描避免 :id 误替换 :identifier。
-    // authority/userinfo/query 中的同名文本不是路径参数。
+    // fragment 必须最后接回，否则新增 Query 会落进 fragment 而不会发给服务器。
+    let fragment = url
+        .find('#')
+        .map(|index| url.split_off(index))
+        .unwrap_or_default();
+    let path_end = url.find('?').unwrap_or(url.len());
     let authority_start = url.find("://").map_or(0, |index| index + 3);
-    if let Some(relative_start) = url[authority_start..].find('/') {
-        let start = authority_start + relative_start;
-        let end = url.find('?').unwrap_or(url.len());
-        if start < end
-            && spec
-                .path_params
-                .iter()
-                .any(|item| item.enabled && !item.key.is_empty())
+    if let Some(relative_start) = url[authority_start..path_end].find('/') {
+        let path_start = authority_start + relative_start;
+        let path = &url[path_start..path_end];
+        static PATH_TOKEN: OnceLock<regex::Regex> = OnceLock::new();
+        let pattern = PATH_TOKEN.get_or_init(|| {
+            regex::Regex::new(r"\{\{([A-Za-z_][A-Za-z0-9_-]*)\}\}|\{([A-Za-z_][A-Za-z0-9_-]*)\}|:([A-Za-z_][A-Za-z0-9_-]*)")
+                .expect("valid path token pattern")
+        });
+        let mut values = HashMap::new();
+        for param in spec
+            .path_params
+            .iter()
+            .filter(|item| item.enabled && !item.key.is_empty())
         {
-            static PATTERN: OnceLock<regex::Regex> = OnceLock::new();
-            let pattern = PATTERN.get_or_init(|| {
-                regex::Regex::new(r"\{\{([A-Za-z_][A-Za-z0-9_-]*)\}\}|:([A-Za-z_][A-Za-z0-9_-]*)|\{([A-Za-z_][A-Za-z0-9_-]*)\}")
-                    .expect("valid path parameter pattern")
-            });
-            let mut values = HashMap::new();
-            for param in spec
-                .path_params
-                .iter()
-                .filter(|item| item.enabled && !item.key.is_empty())
-            {
-                values
-                    .entry(param.key.as_str())
-                    .or_insert_with(|| urlencoding_path(&param.value));
-            }
-            let path = pattern.replace_all(&url[start..end], |captures: &regex::Captures<'_>| {
-                let name = captures
-                    .get(1)
-                    .or_else(|| captures.get(2))
-                    .or_else(|| captures.get(3))
-                    .unwrap()
-                    .as_str();
-                values
-                    .get(name)
-                    .cloned()
-                    .unwrap_or_else(|| captures[0].to_string())
-            });
-            let rebuilt = format!("{}{}{}", &url[..start], path, &url[end..]);
-            url = rebuilt;
+            values
+                .entry(param.key.as_str())
+                .or_insert_with(|| urlencoding_path(&param.value));
         }
+        let replaced = pattern
+            .replace_all(path, |captures: &regex::Captures<'_>| {
+                let token = captures.get(0).expect("matched path token");
+                let colon = captures.get(3);
+                let valid = if colon.is_some() {
+                    path[..token.start()].ends_with('/')
+                } else {
+                    !path[..token.start()].ends_with('{') && !path[token.end()..].starts_with('}')
+                };
+                let name = captures.get(1).or_else(|| captures.get(2)).or(colon);
+                if valid {
+                    if let Some(value) = name.and_then(|name| values.get(name.as_str())) {
+                        return value.clone();
+                    }
+                }
+                token.as_str().to_string()
+            })
+            .into_owned();
+        url.replace_range(path_start..path_end, &replaced);
     }
 
     // query 参数
@@ -138,16 +142,15 @@ pub fn build_url(spec: &RequestSpec) -> Result<String, AppError> {
     }
 
     if !pairs.is_empty() {
-        // URL 里可能已经带了 query（用户粘贴过来的常常带），那时要用 `&` 接。
-        // 判断依据是 `?` 而不是「有没有参数」—— `?a=1` 与 `?` 都算已有 query 段。
-        let sep = if url.contains('?') { '&' } else { '?' };
-        url.push(sep);
+        if !url.contains('?') {
+            url.push('?');
+        } else if !url.ends_with(['?', '&']) {
+            url.push('&');
+        }
         url.push_str(&pairs.join("&"));
     }
+    url.push_str(&fragment);
 
-    if let Some(fragment) = fragment {
-        url.push_str(&fragment);
-    }
     Ok(url)
 }
 
@@ -404,7 +407,7 @@ mod tests {
     fn trailing_question_mark_counts_as_existing_query() {
         let mut s = spec("https://a.test/x?");
         s.params = vec![kv("a", "1", true)];
-        assert_eq!(build_url(&s).unwrap(), "https://a.test/x?&a=1");
+        assert_eq!(build_url(&s).unwrap(), "https://a.test/x?a=1");
     }
 
     #[test]
@@ -501,6 +504,66 @@ mod tests {
         assert_eq!(
             build_url(&s).unwrap(),
             "https://a.test/x?token=a%26b#fragment"
+        );
+    }
+
+    #[test]
+    fn path_tokens_match_complete_names_and_only_in_path() {
+        let mut s =
+            spec("https://user:id@a.test/:id2/:id/{id}/{{id}}/literal:id?copy=:id&x={id}#{{id}}");
+        s.path_params = vec![kv("id", "42", true), kv("id2", "two", true)];
+        assert_eq!(
+            build_url(&s).unwrap(),
+            "https://user:id@a.test/two/42/42/42/literal:id?copy=:id&x={id}#{{id}}"
+        );
+    }
+
+    #[test]
+    fn unmatched_disabled_and_malformed_path_tokens_are_unchanged() {
+        let mut s = spec("https://a.test/:id2/:off/{{{id}}}/{{id}}/{missing}");
+        s.path_params = vec![kv("id", "a b/#?", true), kv("off", "hidden", false)];
+        assert_eq!(
+            build_url(&s).unwrap(),
+            "https://a.test/:id2/:off/{{{id}}}/a%20b/%23%3F/{missing}"
+        );
+    }
+
+    #[test]
+    fn query_and_api_key_are_inserted_before_fragment() {
+        for (input, expected) in [
+            (
+                "https://a.test/x#frag?x=1",
+                "https://a.test/x?q=one&q=two&token=a%26b#frag?x=1",
+            ),
+            (
+                "https://a.test/x?raw=%2f&#frag",
+                "https://a.test/x?raw=%2f&q=one&q=two&token=a%26b#frag",
+            ),
+        ] {
+            let mut s = spec(input);
+            s.params = vec![
+                kv("q", "one", true),
+                kv("q", "two", true),
+                kv("drop", "x", false),
+                kv("", "blank", true),
+            ];
+            s.auth = AuthConfig::ApiKey {
+                key: "token".into(),
+                value: "a&b".into(),
+                location: ApiKeyIn::Query,
+            };
+            assert_eq!(build_url(&s).unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn authority_and_query_without_path_are_untouched() {
+        let mut s = spec("http://[::1]:8080?next=https://a.test/:id#/:id");
+        s.path_params = vec![kv("id", "42", true)];
+        s.params = vec![kv("q", "", true)];
+        assert_eq!(
+            build_url(&s).unwrap(),
+            "http://[::1]:8080?next=https://a.test/:id&q=#/:id"
         );
     }
 

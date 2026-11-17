@@ -13,7 +13,7 @@ import { useRequest } from '@/stores/request'
 import { useWorkspaceStore } from '@/stores/workspace'
 import type { RequestSpec } from '@/ipc'
 import { AppButton, AppDropdown, AppIcon, AppSelect } from '@/components/ui'
-import { IconLink, IconSend } from '@/components/ui/icons'
+import { IconClose, IconLink, IconSend } from '@/components/ui/icons'
 import NaiveThemeScope from '@/components/NaiveThemeScope.vue'
 import { toast } from '@/features/feedback'
 import SaveToPicker from './SaveToPicker.vue'
@@ -39,7 +39,7 @@ const NO_ENVIRONMENT_KEY = '__no_environment__'
 const tabs = useTabsStore()
 const ui = useUiStore()
 const workspace = useWorkspaceStore()
-const { sending, send } = useRequest()
+const { sending, send, cancel } = useRequest()
 const inputEl = ref<InputInst | null>(null)
 const urlFocused = ref(false)
 
@@ -173,6 +173,12 @@ function triggerSend() {
   if (!sending.value) void send()
 }
 
+function cancelPendingRequest(): boolean {
+  if (!sending.value || casesOpen.value) return false
+  cancel()
+  return true
+}
+
 function openDebugCases() {
   if (!debugCaseRequestId.value) {
     toast().warning('请先保存请求，再保存调试用例。')
@@ -181,10 +187,10 @@ function openDebugCases() {
   casesOpen.value = true
 }
 
-/** URL 中出现 :id / {id} 时自动创建对应的路径参数行。 */
+/** 同 URL 的不同请求也需各自同步 :id / {id} / {{id}} 路径参数。 */
 watch(
-  () => tab.value?.url,
-  (url) => {
+  [() => tab.value?.id, () => tab.value?.url],
+  ([, url]) => {
     const current = tab.value
     if (current && url !== undefined) tabs.syncPathParams(current.id, url)
   },
@@ -219,6 +225,7 @@ watch(
 defineExpose({
   focus: () => inputEl.value?.select(),
   send: triggerSend,
+  cancel: cancelPendingRequest,
 })
 </script>
 
@@ -284,12 +291,13 @@ defineExpose({
       class="send"
       type="primary"
       size="medium"
-      :loading="sending"
-      :disabled="sending"
-      @click="triggerSend"
+      :disabled="!sending && (!tab || tab.historyPreview || !tab.url.trim())"
+      :aria-label="sending ? '取消请求' : '发送请求'"
+      :title="sending ? '取消请求（Esc）' : '发送请求（Ctrl/Cmd+Enter）'"
+      @click="sending ? cancelPendingRequest() : triggerSend()"
     >
-      <template #icon><AppIcon :component="IconSend" :size="16" /></template>
-      发送
+      <template #icon><AppIcon :component="sending ? IconClose : IconSend" :size="16" /></template>
+      {{ sending ? '取消' : '发送' }}
     </AppButton>
     <AppButton class="cases" secondary size="medium" title="将当前请求参数保存为调试用例" @click="openDebugCases">
       保存用例

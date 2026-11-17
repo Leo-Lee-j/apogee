@@ -2,7 +2,7 @@
 import { useOAuth2TokenActions } from '@/features/oauth2TokenOperation'
 import { computed, defineAsyncComponent, ref, watch } from 'vue'
 import { open as openFileDialog } from '@tauri-apps/plugin-dialog'
-import type { AuthConfig, Body, KeyValue } from '@/ipc'
+import { normalizeError, type AuthConfig, type Body, type KeyValue } from '@/ipc'
 import { useTabsStore, type Tab } from '@/stores/tabs'
 import {
   AppButton,
@@ -22,7 +22,7 @@ import RequestDocumentation from './RequestDocumentation.vue'
 import { commonHeadersFor, isKnownOfficialHeader } from '@/features/commonHeaders'
 import { buildRequestDocumentation, type RequestDocViewModel } from '@/features/requestDocumentation'
 import { booleanSetting, httpVersionSetting, numberSetting, settingBooleanValue } from '@/features/requestSettings'
-import { parameterRowsEqual, parseParameterRows, serializeParameterRows, type ParameterParseError } from '@/features/requestParameters'
+import { convertFormBody, parameterRowsEqual, parseParameterRows, serializeParameterRows, type ParameterParseError } from '@/features/requestParameters'
 
 /**
  * 请求编辑区 —— v0.1 先落地 Params、Headers、Body 三条发送主链。
@@ -80,8 +80,9 @@ const emit = defineEmits<{
   'update:showCommonHeaders': [show: boolean]
 }>()
 const headers = computed<KeyValue[]>(() => tab.value?.headers ?? [])
+let editedHeaders = new WeakSet<KeyValue>()
 const visibleHeaderIndices = computed(() => headers.value.flatMap((header, index) =>
-  props.showCommonHeaders || !isKnownOfficialHeader(header.key) ? [index] : [],
+  props.showCommonHeaders || editedHeaders.has(header) || !isKnownOfficialHeader(header.key) ? [index] : [],
 ))
 const visibleHeaders = computed(() => visibleHeaderIndices.value
   .map((index) => headers.value[index])
@@ -89,6 +90,7 @@ const visibleHeaders = computed(() => visibleHeaderIndices.value
 const commonHeaders = computed(() => commonHeadersFor(headers.value))
 
 function toggleCommonHeaders() {
+  if (props.showCommonHeaders) editedHeaders = new WeakSet<KeyValue>()
   emit('update:showCommonHeaders', !props.showCommonHeaders)
 }
 
@@ -195,6 +197,7 @@ function updateRow(kind: RowField, index: number, delta: Partial<KeyValue>) {
   const currentRow = rows[sourceIndex]
   if (!currentRow) return
   const nextRow = { ...currentRow, ...delta }
+  if (kind === 'headers') editedHeaders.add(nextRow)
   patchRows(kind, rows.map((row, rowIndex) => rowIndex === sourceIndex ? nextRow : row))
 }
 
@@ -211,9 +214,12 @@ function setAllRowsEnabled(kind: RowField, enabled: boolean) {
   }
 
   const visible = new Set(visibleHeaderIndices.value)
-  patchRows('headers', rowsFor('headers').map((row, index) =>
-    visible.has(index) ? { ...row, enabled } : row,
-  ))
+  patchRows('headers', rowsFor('headers').map((row, index) => {
+    if (!visible.has(index)) return row
+    const nextRow = { ...row, enabled }
+    if (editedHeaders.has(row)) editedHeaders.add(nextRow)
+    return nextRow
+  }))
 }
 
 function updateParameterField(
@@ -228,6 +234,7 @@ function updateParameterField(
 
 function appendParameterRows(kind: RowField, rows: KeyValue[]) {
   if (kind === 'pathParams' || !rows.length) return
+  if (kind === 'headers') rows.forEach(row => editedHeaders.add(row))
   patchRows(kind, [...rowsFor(kind), ...rows])
 }
 
@@ -262,6 +269,7 @@ function displayedRowsFor(kind: RowField): KeyValue[] {
 
 /** 用批量编辑结果替换可见 Header，保留默认隐藏的通用 Header。 */
 function patchVisibleHeaders(nextVisibleRows: KeyValue[]) {
+  nextVisibleRows.forEach(row => editedHeaders.add(row))
   const visible = new Set(visibleHeaderIndices.value)
   let nextVisibleIndex = 0
   const nextRows = rowsFor('headers').flatMap((row, index) => {
@@ -283,6 +291,7 @@ const bulkErrors = ref<ParameterParseError[]>([])
 watch(bulkDraft, () => { bulkErrors.value = [] })
 
 watch(() => tab.value?.id, () => {
+  editedHeaders = new WeakSet<KeyValue>()
   // A bulk draft belongs to the visible editor instance; changing requests
   // must not carry it into another request's document view.
   bulkEditing.value = false
@@ -336,6 +345,12 @@ function selectTab(next: PanelTab) {
 
 function setBodyType(nextType: BodyType) {
   const currentBody = body.value
+  if (nextType === currentBody.type) return
+  if (nextType === 'formData' || nextType === 'urlEncoded') {
+    try { patchTab({ body: convertFormBody(currentBody, nextType) }) }
+    catch (error) { if (tab.value) tabs.patch(tab.value.id, { error: normalizeError(error) }) }
+    return
+  }
   const content = 'content' in currentBody ? currentBody.content : ''
   let nextBody: Body
 
@@ -349,10 +364,6 @@ function setBodyType(nextType: BodyType) {
       content,
       contentType: currentBody.type === 'text' ? currentBody.contentType : 'text/plain',
     }
-  } else if (nextType === 'formData') {
-    nextBody = { type: 'formData', rows: currentBody.type === 'formData' ? currentBody.rows : [] }
-  } else if (nextType === 'urlEncoded') {
-    nextBody = { type: 'urlEncoded', rows: currentBody.type === 'urlEncoded' ? currentBody.rows : [] }
   } else if (nextType === 'binary') {
     nextBody = { type: 'binary', path: currentBody.type === 'binary' ? currentBody.path : '' }
   } else {
@@ -732,7 +743,7 @@ function patchVersion(value: string | number | null) {
   line-height: var(--a-lh-sm);
 }
 .section-head strong { font-weight: 600; }
-.body-type-head { justify-content: space-between; }
+.body-type-head { justify-content: space-between; flex-wrap: wrap; padding-top: 6px; padding-bottom: 6px; }
 .hint-title { cursor: help; border-bottom: 1px dotted var(--a-text-faint); }
 .app-data-table :deep(.n-data-table-th) { font-size: var(--a-fs-xs); color: var(--a-text-faint); }
 .app-data-table :deep(.n-data-table-td) { height: calc(var(--a-h-input-md) + 2px); padding: 0 6px; line-height: var(--a-lh-sm); }
@@ -766,7 +777,7 @@ function patchVersion(value: string | number | null) {
 .body-editor { display: flex; flex-direction: column; min-height: 100%; }
 .body-content { display: flex; flex: 1 1 auto; flex-direction: column; gap: 8px; min-height: 0; padding: 8px; }
 .body-parameter-table { min-width: 0; overflow-x: auto; }
-.body-types { display: flex; align-items: center; gap: 14px; flex: 0 0 auto; }
+.body-types { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; flex: 0 1 auto; min-width: 0; }
 .body-type { display: inline-flex; align-items: center; gap: 4px; color: var(--a-text-dim); font-size: var(--a-fs-sm); cursor: pointer; }
 .body-type:has(input:checked) { color: var(--a-text); }
 .payload {

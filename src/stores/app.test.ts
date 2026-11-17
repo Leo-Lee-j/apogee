@@ -75,6 +75,26 @@ describe('app workspace lifecycle', () => {
     expect(app.lastError?.message).toBe('close failed')
   })
 
+  it.each(['close', 'switch'] as const)('preserves the workspace and save error when %s cannot flush requests', async (action) => {
+    const app = useAppStore()
+    const workspace = (await import('./workspace')).useWorkspaceStore()
+    const tabs = (await import('./tabs')).useTabsStore()
+    app.shell = 'workspace'
+    workspace.workspaceId = 'workspace-a'
+    workspace.lastError = { kind: 'io', message: 'earlier error', hints: [] }
+    tabs.lastError = { kind: 'io', message: 'request is read only', hints: [{ label: '检查目录权限后重试' }] }
+    vi.spyOn(tabs, 'flushAll').mockResolvedValueOnce(false)
+
+    const result = action === 'close' ? await app.closeWorkspace() : await app.switchWorkspace('workspace-b')
+
+    expect(result).toBe(false)
+    expect(workspaceClose).not.toHaveBeenCalled()
+    expect(workspaceOpen).not.toHaveBeenCalled()
+    expect(app.shell).toBe('workspace')
+    expect(app.lastError?.message).toBe('request is read only')
+    expect(app.lastError?.hints).toHaveLength(1)
+  })
+
   it('installs the next workspace only after the old session closes', async () => {
     const app = useAppStore()
     const workspace = (await import('./workspace')).useWorkspaceStore()

@@ -30,13 +30,15 @@ describe('saved Auth optimistic concurrency', () => {
     const tabs = useTabsStore()
     const tab = tabs.open({ nodeId: 'request', auth: oldAuth })
     let finish!: () => void
-    saveRequest.mockImplementation(() => new Promise<void>(resolve => { finish = resolve }))
+    saveRequest.mockImplementationOnce(() => new Promise<void>(resolve => { finish = resolve }))
     const pending = tabs.save(tab.id)
     tabs.patch(tab.id, { auth: rotated, persistedAuth: rotated })
     finish()
     await pending
     expect(tabs.active?.persistedAuth).toBe(rotated)
     expect(tabs.active?.auth).toBe(rotated)
+    expect(saveRequest).toHaveBeenCalledTimes(2)
+    expect(saveRequest.mock.calls[1][3]).toBe(rotated)
   })
 
   it('keeps unsaved edits and baseline when the host rejects a stale save', async () => {

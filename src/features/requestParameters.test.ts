@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { KeyValue } from '@/ipc'
-import { createParameterRow, parameterRowsEqual, parseParameterRows, pathParameterNames, serializeParameterRows } from './requestParameters'
+import { convertFormBody, createParameterRow, parameterRowsEqual, parseParameterRows, pathParameterNames, serializeParameterRows } from './requestParameters'
 
 const row = (key: string, value: string, extra: Partial<KeyValue> = {}): KeyValue => ({
   enabled: true, key, value, description: '', kind: 'text', ...extra,
@@ -32,6 +32,19 @@ describe('parameter row submission', () => {
 })
 
 describe('bulk parameter editing', () => {
+  it('keeps duplicate metadata with its value across reorder and editing', () => {
+    const previous = [row('q', 'one', { description: 'first' }), row('q', 'two', { description: 'second', kind: 'secret' })]
+    expect(parseParameterRows('// q: two\nq: edited', previous).rows).toEqual([
+      row('q', 'two', { enabled: false, description: 'second', kind: 'secret' }),
+      row('q', 'edited', { description: 'first' }),
+    ])
+  })
+  it('retains secret flags when renamed rows move or change values', () => {
+    const previous = [row('token', 'private', { kind: 'secret' }), row('q', 'public')]
+    expect(parseParameterRows('q: public\nrenamed: private', previous).rows[1]?.kind).toBe('secret')
+    expect(parseParameterRows('q: public\nrenamed: changed', previous).rows[1]?.kind).toBe('secret')
+    expect(parseParameterRows('renamed: new', [previous[0]!]).rows[0]?.kind).toBe('secret')
+  })
   it('round-trips descriptions, disabled rows, secret/file metadata and duplicate names', () => {
     const rows = [row('id', '1', { description: 'first', kind: 'secret' }), row('id', '2', { enabled: false, kind: 'file' })]
     expect(parseParameterRows(serializeParameterRows(rows)).rows).toEqual(rows)
@@ -92,6 +105,10 @@ describe('bulk parameter editing', () => {
 })
 
 describe('Path parameter discovery', () => {
+  it('ignores malformed braces and colons within literal path segments', () => {
+    expect(pathParameterNames('/{{{bad}}}/{{good}}/{last}/literal:word?ignored=:id')).toEqual(['good', 'last'])
+    expect(pathParameterNames('http://[::1]:8080/:id/literal:word')).toEqual(['id'])
+  })
   it('supports all existing placeholder syntaxes and deduplicates in path order', () => {
     expect(pathParameterNames('https://api.test/:id/{name}/{{id}}/:identifier')).toEqual(['id', 'name', 'identifier'])
   })
@@ -104,5 +121,17 @@ describe('Path parameter discovery', () => {
     expect(pathParameterNames('/users/{id}?q=:query')).toEqual(['id'])
     expect(pathParameterNames('api.test/users/:id')).toEqual(['id'])
     expect(pathParameterNames('{{host}}/users/{id}')).toEqual(['id'])
+  })
+})
+
+describe('form body conversion', () => {
+  it('preserves text rows and metadata in both directions', () => {
+    const rows = [row('a', 'one'), row('a', 'private', { enabled: false, kind: 'secret', description: 'keep' })]
+    expect(convertFormBody({ type: 'urlEncoded', rows }, 'formData')).toEqual({ type: 'formData', rows })
+    expect(convertFormBody({ type: 'formData', rows }, 'urlEncoded')).toEqual({ type: 'urlEncoded', rows })
+  })
+  it('rejects conversion of file paths to urlencoded text', () => {
+    expect(() => convertFormBody({ type: 'formData', rows: [row('upload', 'C:\\private.txt', { kind: 'file' })] }, 'urlEncoded'))
+      .toThrow(expect.objectContaining({ message: '文件参数不能转换为 URL 编码表单' }))
   })
 })

@@ -87,7 +87,9 @@ function mount(initial: KeyValue[] = [], extra: Record<string, unknown> = {}) {
   const rows = shallowRef(initial)
   const owner = shallowRef('request-a')
   const appended = vi.fn((newRows: KeyValue[]) => { rows.value = [...rows.value, ...newRows] })
-  const updated = vi.fn()
+  const updated = vi.fn((index: number, field: string, value: string) => {
+    rows.value = rows.value.map((row, position) => position === index ? { ...row, [field]: value } : row)
+  })
   const app = renderer.createApp(defineComponent({ setup: () => () => h(ParameterEditor, {
     key: owner.value, rows: rows.value, allowCreate: true, ...extra,
     onAppendRows: appended, onUpdateField: updated,
@@ -101,86 +103,84 @@ function mount(initial: KeyValue[] = [], extra: Record<string, unknown> = {}) {
 async function fillDraft(draft: Node, key = 'name', value = 'value', description = 'description') {
   const inputs = find(draft, node => node.type === 'variable-input')
   trigger(inputs[0], 'onUpdate:value', key)
+  await nextTick()
   trigger(inputs[1], 'onUpdate:value', value)
+  await nextTick()
   trigger(find(draft, node => node.type === 'app-input')[0], 'onUpdate:value', description)
   await nextTick()
 }
-function enter(input: Node, composing = false) {
-  const preventDefault = vi.fn()
-  trigger(input, 'onKeydown', { key: 'Enter', isComposing: composing, keyCode: composing ? 229 : 13, preventDefault })
-  return preventDefault
-}
-
 beforeEach(() => { openDialog.mockReset(); openDialog.mockResolvedValue(null) })
 afterEach(() => { for (const app of mounted.splice(0)) app.unmount() })
 
 describe('ParameterEditor submission and ownership', () => {
-  it('submits all draft fields with one atomic append event', async () => {
+  it('commits the first input immediately and preserves the row DOM through editing', async () => {
     const editor = mount()
-    await fillDraft(editor.draft())
-    enter(find(editor.draft(), node => node.type === 'variable-input')[1])
+    const draft = editor.draft()
+    const input = find(draft, node => node.type === 'variable-input')[0]
+    trigger(input, 'onUpdate:value', 'name')
+    expect(editor.rows.value[0]?.key).toBe('name')
+    await nextTick()
+    expect(find(editor.root, node => node.type === 'variable-input')[0]).toBe(input)
+    trigger(find(draft, node => node.type === 'variable-input')[1], 'onUpdate:value', 'value')
+    await nextTick()
+    trigger(find(draft, node => node.type === 'app-input')[0], 'onUpdate:value', 'description')
     expect(editor.appended).toHaveBeenCalledTimes(1)
-    expect(editor.updated).not.toHaveBeenCalled()
     expect(editor.rows.value).toEqual([{ enabled: true, key: 'name', value: 'value', description: 'description', kind: 'text' }])
-    await nextTick()
-    expect(find(editor.draft(), node => node.type === 'variable-input')[0].props.value).toBe('')
   })
-  it('does not commit while moving focus within the draft row', async () => {
+  it('keeps a committed row when all fields are cleared', async () => {
     const editor = mount()
-    await fillDraft(editor.draft())
-    trigger(editor.draft(), 'onFocusout', { currentTarget: editor.draft(), relatedTarget: find(editor.draft(), node => node.type === 'app-input')[0] })
-    expect(editor.appended).not.toHaveBeenCalled()
-    trigger(editor.draft(), 'onFocusout', { currentTarget: editor.draft(), relatedTarget: null })
-    expect(editor.appended).toHaveBeenCalledTimes(1)
+    const draft = editor.draft()
+    await fillDraft(draft)
+    await fillDraft(draft, '', '', '')
+    expect(editor.rows.value).toHaveLength(1)
+    expect(editor.rows.value[0]).toMatchObject({ key: '', value: '', description: '' })
   })
-  it('does not treat IME confirmation as row submission', async () => {
+  it('leaves Enter and IME handling to the input', () => {
     const editor = mount()
-    await fillDraft(editor.draft())
-    expect(enter(find(editor.draft(), node => node.type === 'variable-input')[0], true)).not.toHaveBeenCalled()
+    const input = find(editor.draft(), node => node.type === 'variable-input')[0]
+    expect(input.props.onKeydown).toBeUndefined()
     expect(editor.appended).not.toHaveBeenCalled()
   })
-  it('keeps draft file kind local until the whole row is committed', async () => {
+  it('creates a file row immediately when its kind is selected', async () => {
     const editor = mount([], { showKind: true })
-    trigger(find(editor.draft(), node => node.type === 'app-select')[0], 'onUpdate:value', 'file')
+    const draft = editor.draft()
+    trigger(find(draft, node => node.type === 'app-select')[0], 'onUpdate:value', 'file')
+    expect(editor.rows.value[0]?.kind).toBe('file')
     await nextTick()
-    expect(editor.rows.value).toEqual([])
-    expect(editor.updated).not.toHaveBeenCalled()
-    await fillDraft(editor.draft(), 'upload', 'C:\\file.txt', 'Attachment')
-    enter(find(editor.draft(), node => node.type === 'variable-input')[0])
-    expect(editor.rows.value[0].kind).toBe('file')
+    await fillDraft(draft, 'upload', 'C:\\file.txt', 'Attachment')
+    expect(editor.appended).toHaveBeenCalledOnce()
+    expect(editor.rows.value[0]).toMatchObject({ key: 'upload', kind: 'file', description: 'Attachment' })
   })
-  it('does not commit the draft when a native file dialog takes focus', async () => {
+  it('updates the committed file row when a native dialog returns', async () => {
     let resolve: (value: string) => void = () => {}
     openDialog.mockImplementation(() => new Promise<string>(done => { resolve = done }))
     const editor = mount([], { showKind: true })
-    trigger(find(editor.draft(), node => node.type === 'app-select')[0], 'onUpdate:value', 'file')
-    await fillDraft(editor.draft(), 'upload', '', '')
-    const pending = trigger(find(editor.draft(), node => node.props['aria-label'] === '选择新参数文件')[0], 'onClick')
-    trigger(editor.draft(), 'onFocusout', { currentTarget: editor.draft(), relatedTarget: null })
-    expect(editor.appended).not.toHaveBeenCalled()
+    const draft = editor.draft()
+    trigger(find(draft, node => node.type === 'app-select')[0], 'onUpdate:value', 'file')
+    await nextTick()
+    await fillDraft(draft, 'upload', '', '')
+    const pending = trigger(find(draft, node => node.props['aria-label'] === '选择文件')[0], 'onClick')
     resolve('C:\\file.txt')
     await pending
-    await nextTick()
-    enter(find(editor.draft(), node => node.type === 'variable-input')[0])
+    expect(editor.appended).toHaveBeenCalledOnce()
     expect(editor.rows.value[0]).toMatchObject({ key: 'upload', value: 'C:\\file.txt', kind: 'file' })
   })
-  it('rejects late focusout after the active request changed but before DOM unmount', async () => {
+  it('rejects old input events after the owner changed but before unmount', () => {
     let active = true
     const editor = mount([], { canEdit: () => active })
-    await fillDraft(editor.draft())
     active = false
-    trigger(editor.draft(), 'onFocusout', { currentTarget: editor.draft(), relatedTarget: null })
+    trigger(find(editor.draft(), node => node.type === 'variable-input')[0], 'onUpdate:value', 'stale')
     expect(editor.appended).not.toHaveBeenCalled()
     expect(editor.rows.value).toEqual([])
   })
-  it('resets the draft when its request owner changes', async () => {
+  it('starts with an empty insertion row when its request owner changes', async () => {
     const editor = mount()
     await fillDraft(editor.draft())
     editor.owner.value = 'request-b'
+    editor.rows.value = []
     await nextTick()
     expect(find(editor.draft(), node => node.type === 'variable-input')[0].props.value).toBe('')
-    enter(find(editor.draft(), node => node.type === 'variable-input')[0])
-    expect(editor.appended).not.toHaveBeenCalled()
+    expect(editor.appended).toHaveBeenCalledOnce()
   })
   it('ignores a file dialog result after its request editor is unmounted', async () => {
     let resolve: (value: string) => void = () => {}

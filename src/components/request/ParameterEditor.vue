@@ -1,14 +1,15 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Sortable from 'sortablejs'
 import { open as openFileDialog } from '@tauri-apps/plugin-dialog'
 import { normalizeError, type AppError, type KeyValue } from '@/ipc'
+import { parseParameterRows, type ParameterFormat } from '@/features/requestParameters'
 import { AppButton, AppCheckbox, AppIcon, AppInput, AppSelect } from '@/components/ui'
 import { IconCloseCircle, IconDrag, IconFolderOpen, IconRemoveCircle } from '@/components/ui/icons'
-import { createParameterRow, parseParameterRows, type ParameterFormat } from '@/features/requestParameters'
 import VariableInput from './VariableInput.vue'
 
 type Field = 'key' | 'value' | 'description'
+
 const props = withDefaults(defineProps<{
   rows: KeyValue[]
   allowCreate?: boolean
@@ -20,31 +21,30 @@ const props = withDefaults(defineProps<{
 }>(), { allowRemove: true, pasteFormat: 'query' })
 
 const emit = defineEmits<{
+  appendRows: [rows: KeyValue[]]
   updateField: [index: number, field: Field, value: string]
   updateEnabled: [index: number, enabled: boolean]
   setAllEnabled: [enabled: boolean]
   remove: [index: number]
   reorder: [from: number, to: number]
   updateKind: [index: number, kind: 'text' | 'file']
-  appendRows: [rows: KeyValue[]]
 }>()
 
 const list = ref<HTMLElement | null>(null)
 const pendingDelete = ref<number | null>(null)
-const draft = reactive({ key: '', value: '', description: '', kind: 'text' as 'text' | 'file' })
-const pasteError = ref('')
 const fileError = ref<AppError | null>(null)
+const pasteError = ref('')
+const emptyRow: KeyValue = { enabled: true, key: '', value: '', description: '', kind: 'text' }
+// 新增行和提交后的行复用同一 DOM；首个输入即入 store，快捷键发送无需先失焦。
+const displayedRows = computed(() => props.allowCreate ? [...props.rows, emptyRow] : props.rows)
 let sortable: Sortable | null = null
 let mounted = true
-let choosingDraftFile = false
-let draftRevision = 0
+const canEdit = () => mounted && (props.canEdit?.() ?? true)
+
 const enabledCount = computed(() => props.rows.filter((row) => row.enabled).length)
 
-function canEdit() { return props.canEdit?.() ?? true }
-
 function reorder(from: number, to: number) {
-  if (!canEdit()) return
-  if (from < 0 || from >= props.rows.length || from === to || to < 0 || to >= props.rows.length) return
+  if (!canEdit() || from === to || to < 0 || to >= props.rows.length) return
   emit('reorder', from, to)
 }
 
@@ -55,42 +55,53 @@ function handleKeydown(index: number, event: KeyboardEvent) {
 }
 
 function confirmRemove(index: number) {
-  if (!canEdit()) return
+  if (!canEdit() || !props.allowRemove) return
   if (pendingDelete.value === index) {
     emit('remove', index)
     pendingDelete.value = null
-  } else pendingDelete.value = index
+  } else {
+    pendingDelete.value = index
+  }
 }
 
-function reportFileError(error: unknown) {
-  if (!mounted || !canEdit()) return
-  const normalized = normalizeError(error)
-  fileError.value = { ...normalized, hints: normalized.hints.length ? normalized.hints : [{ label: '请重试，或在参数值中手动填写本地文件路径。' }] }
-}
 async function chooseFile(index: number) {
   const row = props.rows[index]
+  if (!canEdit() || !row) return
   fileError.value = null
   try {
     const selected = await openFileDialog({ multiple: false })
-    // 标签切换、删除或排序期间晚到的选择结果不得写入另一行。
-    if (mounted && canEdit() && row && props.rows[index] === row && typeof selected === 'string') emit('updateField', index, 'value', selected)
+    // 对话框返回时可能已经切换请求、删除/编辑了原行或重新排序。
+    const currentIndex = props.rows.indexOf(row)
+    if (canEdit() && currentIndex >= 0 && typeof selected === 'string') {
+      emit('updateField', currentIndex, 'value', selected)
+    }
   } catch (error) {
-    reportFileError(error)
+    if (canEdit() && props.rows.includes(row)) fileError.value = {
+      ...normalizeError(error), hints: [{ label: '重试选择文件，或手动填写本地文件路径' }],
+    }
   }
 }
 
-async function chooseDraftFile() {
-  const revision = draftRevision
-  choosingDraftFile = true
-  fileError.value = null
-  try {
-    const selected = await openFileDialog({ multiple: false })
-    if (mounted && canEdit() && revision === draftRevision && draft.kind === 'file' && typeof selected === 'string') draft.value = selected
-  } catch (error) {
-    reportFileError(error)
-  } finally {
-    choosingDraftFile = false
-  }
+function updateField(index: number, field: Field, value: string) {
+  if (!canEdit() || (field === 'key' && props.readOnlyKey)) return
+  if (index < props.rows.length) emit('updateField', index, field, value)
+  else if (props.allowCreate && value) emit('appendRows', [{ ...emptyRow, [field]: value }])
+}
+
+function updateKind(index: number, kind: 'text' | 'file') {
+  if (!canEdit()) return
+  if (index < props.rows.length) emit('updateKind', index, kind)
+  else if (props.allowCreate) emit('appendRows', [{ ...emptyRow, kind }])
+}
+
+function handlePaste(index: number, event: ClipboardEvent) {
+  if (!canEdit() || !props.allowCreate || props.readOnlyKey || index !== props.rows.length) return
+  const text = event.clipboardData?.getData('text/plain') ?? ''
+  if (!/[\n\t=&]/.test(text) && !text.startsWith('?')) return
+  event.preventDefault()
+  const parsed = parseParameterRows(text, [], props.pasteFormat)
+  pasteError.value = parsed.errors.map(error => `第 ${error.line} 行：${error.message}`).join('；')
+  if (!parsed.errors.length && parsed.rows.length) emit('appendRows', parsed.rows)
 }
 
 onMounted(() => {
@@ -105,51 +116,20 @@ onMounted(() => {
     ghostClass: 'parameter-row--ghost',
     chosenClass: 'parameter-row--chosen',
     dragClass: 'parameter-row--dragging',
-    onEnd: ({ oldDraggableIndex, newDraggableIndex }) => {
+    onEnd: ({ item, oldDraggableIndex, newDraggableIndex }) => {
       if (oldDraggableIndex == null || newDraggableIndex == null) return
+      // Sortable 已移动 DOM，先恢复 Vue 看到的旧顺序，再让响应式渲染应用新顺序。
+      if (list.value) {
+        item.remove()
+        list.value.insertBefore(item, list.value.children[oldDraggableIndex] ?? null)
+      }
       reorder(oldDraggableIndex, newDraggableIndex)
     },
   })
 })
 
 onBeforeUnmount(() => { mounted = false; sortable?.destroy() })
-function resetDraft() {
-  draftRevision += 1
-  Object.assign(draft, { key: '', value: '', description: '', kind: 'text' })
-  pasteError.value = ''
-}
-function commitDraft() {
-  if (!canEdit()) { resetDraft(); return }
-  const row = createParameterRow(draft)
-  if (!row) return
-  emit('appendRows', [row])
-  resetDraft()
-}
-function handleDraftKeydown(event: KeyboardEvent) {
-  if (event.key !== 'Enter' || event.isComposing || event.keyCode === 229) return
-  event.preventDefault()
-  commitDraft()
-}
-function handleDraftPaste(event: ClipboardEvent) {
-  if (!canEdit()) return
-  if (draft.key || draft.value || draft.description) return
-  const text = event.clipboardData?.getData('text/plain') ?? ''
-  if (!/[\n\t=&]/.test(text) && !text.startsWith('?')) return
-  event.preventDefault()
-  const parsed = parseParameterRows(text, [], props.pasteFormat)
-  if (parsed.errors.length) {
-    pasteError.value = `第 ${parsed.errors[0].line} 行：${parsed.errors[0].message}`
-    return
-  }
-  if (parsed.rows.length) emit('appendRows', parsed.rows)
-  resetDraft()
-}
-function commitDraftOnFocusout(event: FocusEvent) {
-  if (choosingDraftFile) return
-  const row = event.currentTarget as HTMLElement
-  const next = event.relatedTarget as Node | null
-  if (!next || !row.contains(next)) commitDraft()
-}
+
 watch(() => props.rows, () => { pendingDelete.value = null })
 </script>
 
@@ -167,21 +147,22 @@ watch(() => props.rows, () => { pendingDelete.value = null })
       </div>
       <div role="columnheader">参数名</div>
       <div role="columnheader">参数值</div>
-      <div role="columnheader">说明</div>
       <div v-if="showKind" role="columnheader">类型</div>
+      <div role="columnheader">说明</div>
       <div aria-hidden="true" />
     </div>
 
     <div ref="list" class="parameter-rows" role="rowgroup">
       <div
-        v-for="(row, index) in rows"
+        v-for="(row, index) in displayedRows"
         :key="`row-${index}`"
         class="parameter-row parameter-grid"
-        :class="{ 'parameter-row--off': !row.enabled }"
+        :class="{ 'parameter-row--off': !row.enabled, 'parameter-row--draft': index === rows.length }"
         role="row"
       >
         <div class="parameter-enabled" role="cell">
           <button
+            v-if="index < rows.length"
             type="button"
             class="parameter-drag-handle"
             title="拖动调整顺序；Alt + 上下方向键也可排序"
@@ -191,6 +172,7 @@ watch(() => props.rows, () => { pendingDelete.value = null })
             <AppIcon :component="IconDrag" :size="15" />
           </button>
           <AppCheckbox
+            v-if="index < rows.length"
             :checked="row.enabled"
             :aria-label="`启用 ${row.key || '空行'}`"
             @update:checked="canEdit() && emit('updateEnabled', index, $event)"
@@ -201,10 +183,13 @@ watch(() => props.rows, () => { pendingDelete.value = null })
             :value="row.key"
             size="small"
             :bordered="true"
-            :input-props="{ spellcheck: false }"
             :readonly="readOnlyKey"
             :variables="!readOnlyKey"
-            @update:value="canEdit() && emit('updateField', index, 'key', $event)"
+            :title="readOnlyKey ? '参数名由 URL 生成，请在地址栏修改占位符' : undefined"
+            :input-props="{ spellcheck: false, 'aria-label': '参数名' }"
+            :placeholder="index === rows.length ? '输入参数名' : undefined"
+            @update:value="updateField(index, 'key', $event)"
+            @paste="handlePaste(index, $event)"
           />
         </div>
         <div role="cell">
@@ -212,9 +197,9 @@ watch(() => props.rows, () => { pendingDelete.value = null })
             :value="row.value"
             size="small"
             :bordered="true"
-            :input-props="{ spellcheck: false }"
+            :input-props="{ spellcheck: false, 'aria-label': '参数值' }"
             :placeholder="showKind && row.kind === 'file' ? '本地文件路径' : undefined"
-            @update:value="canEdit() && emit('updateField', index, 'value', $event)"
+            @update:value="updateField(index, 'value', $event)"
           />
           <AppButton
             v-if="showKind && row.kind === 'file'"
@@ -230,10 +215,10 @@ watch(() => props.rows, () => { pendingDelete.value = null })
         </div>
         <div v-if="showKind" role="cell">
           <AppSelect
-            :value="row.kind ?? 'text'"
+            :value="row.kind === 'file' ? 'file' : 'text'"
             size="small"
             :options="[{ label: '文本', value: 'text' }, { label: '文件', value: 'file' }]"
-            @update:value="canEdit() && emit('updateKind', index, $event as 'text' | 'file')"
+            @update:value="updateKind(index, $event as 'text' | 'file')"
           />
         </div>
         <div role="cell">
@@ -241,13 +226,13 @@ watch(() => props.rows, () => { pendingDelete.value = null })
             :value="row.description ?? ''"
             size="small"
             :bordered="true"
-            :input-props="{ spellcheck: false }"
-            @update:value="canEdit() && emit('updateField', index, 'description', $event)"
+            :input-props="{ spellcheck: false, 'aria-label': '参数说明' }"
+            @update:value="updateField(index, 'description', $event)"
           />
         </div>
         <div class="parameter-actions" role="cell">
           <AppButton
-            v-if="allowRemove"
+            v-if="index < rows.length && allowRemove"
             quaternary
             circle
             size="tiny"
@@ -263,69 +248,18 @@ watch(() => props.rows, () => { pendingDelete.value = null })
         </div>
       </div>
 
-      <div
-        v-if="allowCreate"
-        :key="'draft'"
-        class="parameter-row parameter-row--draft parameter-grid"
-        role="row"
-        @focusout="commitDraftOnFocusout"
-      >
-        <div role="cell" />
-        <div role="cell">
-          <VariableInput
-            size="small"
-            :bordered="true"
-            :input-props="{ spellcheck: false }"
-            placeholder="输入参数名"
-            :value="draft.key"
-            @update:value="draft.key = $event"
-            @paste="handleDraftPaste"
-            @keydown="handleDraftKeydown"
-          />
-        </div>
-        <div role="cell">
-          <VariableInput
-            size="small"
-            :bordered="true"
-            :input-props="{ spellcheck: false }"
-            :value="draft.value"
-            @update:value="draft.value = $event"
-            @keydown="handleDraftKeydown"
-          />
-          <AppButton v-if="showKind && draft.kind === 'file'" quaternary size="tiny" aria-label="选择新参数文件" @click="chooseDraftFile">
-            <template #icon><AppIcon :component="IconFolderOpen" :size="15" /></template>
-          </AppButton>
-        </div>
-        <div v-if="showKind" role="cell">
-          <AppSelect
-            :value="draft.kind"
-            size="small"
-            :options="[{ label: '文本', value: 'text' }, { label: '文件', value: 'file' }]"
-            @update:value="draft.kind = $event as 'text' | 'file'"
-          />
-        </div>
-        <div role="cell">
-          <AppInput
-            size="small"
-            :bordered="true"
-            :input-props="{ spellcheck: false }"
-            :value="draft.description"
-            @update:value="draft.description = $event"
-            @keydown="handleDraftKeydown"
-          />
-        </div>
-        <div role="cell" />
-      </div>
     </div>
-    <p v-if="pasteError" class="parameter-paste-error" role="alert">{{ pasteError }}</p>
-    <p v-if="fileError" class="parameter-paste-error" role="alert">
-      {{ fileError.message }} <span v-for="hint in fileError.hints" :key="hint.label">{{ hint.label }}</span>
-    </p>
+    <p v-if="pasteError" class="parameter-error" role="alert">{{ pasteError }}</p>
+    <div v-if="fileError" class="parameter-error" role="alert">
+      {{ fileError.message }}
+      <span v-for="hint in fileError.hints" :key="hint.label">{{ hint.label }}</span>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.parameter-paste-error { margin: 8px; color: var(--a-error); font-size: var(--a-fs-xs); }
+.parameter-error { color: var(--a-error); margin: 6px 0; font-size: var(--a-fs-xs); }
+.parameter-error span { display: block; }
 .parameter-editor { min-width: 630px; background: transparent; }
 .parameter-grid {
   display: grid;
@@ -335,8 +269,6 @@ watch(() => props.rows, () => { pendingDelete.value = null })
 .parameter-editor--with-kind .parameter-grid {
   grid-template-columns: 40px minmax(130px, 1fr) minmax(160px, 1.1fr) 100px minmax(150px, 1fr) 40px;
 }
-.parameter-editor--with-kind .parameter-header > :nth-child(4) { grid-column: 5; }
-.parameter-editor--with-kind .parameter-header > :nth-child(5) { grid-column: 4; }
 .parameter-header {
   min-height: max(34px, var(--a-h-control-sm));
   color: var(--a-text-faint);
@@ -363,7 +295,7 @@ watch(() => props.rows, () => { pendingDelete.value = null })
 .parameter-enabled { display: flex; align-items: center; justify-content: center; padding: 0 !important; }
 .parameter-drag-handle {
   position: absolute;
-  left: -16px;
+  left: -6px;
   top: calc((100% - var(--a-h-input-sm)) / 2);
   width: 16px;
   height: var(--a-h-input-sm);

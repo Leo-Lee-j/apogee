@@ -29,14 +29,15 @@ function Get-AppLogs {
 }
 
 function Wait-ForVite([System.Diagnostics.Process]$process) {
-  $deadline = [DateTime]::UtcNow.AddSeconds(30)
+  # 首次请求还会等待 Vite 的依赖预处理；冷缓存可能明显晚于控制台的 ready 提示。
+  $deadline = [DateTime]::UtcNow.AddSeconds(90)
   $lastError = $null
   do {
     if ($process.HasExited) {
       throw "Vite 提前退出（exit=$($process.ExitCode)）。日志：`n$(Get-ViteLog)"
     }
     try {
-      $response = Invoke-WebRequest -UseBasicParsing 'http://localhost:5183/' -TimeoutSec 2
+      $response = Invoke-WebRequest -NoProxy -UseBasicParsing 'http://localhost:5183/' -TimeoutSec 15
       if ($response.StatusCode -eq 200) { return }
       $lastError = "HTTP $($response.StatusCode)"
     } catch {
@@ -45,7 +46,7 @@ function Wait-ForVite([System.Diagnostics.Process]$process) {
     Start-Sleep -Milliseconds 250
   } while ([DateTime]::UtcNow -lt $deadline)
 
-  throw "Vite 未在 30 秒内就绪。最后错误：$lastError。日志：`n$(Get-ViteLog)"
+  throw "Vite 未在 90 秒内就绪。最后错误：$lastError。日志：`n$(Get-ViteLog)"
 }
 
 try {

@@ -12,7 +12,7 @@ import {
   type CancelledEvent,
   type WorkspaceSession,
 } from '@/ipc'
-import { useTabsStore } from '@/stores/tabs'
+import { useTabsStore, type Tab } from '@/stores/tabs'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { ref, watch, onMounted, onUnmounted } from 'vue'
 import { needsTokenRefresh, lifecycleError } from '@/features/oauth2Lifecycle'
@@ -71,6 +71,8 @@ export function useRequest() {
   const tabs = useTabsStore()
   const workspace = useWorkspaceStore()
   const sending = ref(false)
+  let attempt = 0
+  let disposed = false
   /** 当前在飞的请求：句柄 id → 它属于哪个标签。 */
   const active = ref<{
     handle: string
@@ -139,7 +141,6 @@ export function useRequest() {
         response: settlement.event.response,
         error: null,
         actualRequest: null,
-        dirty: false,
       })
       if (inTauri && spec) {
         void ipc.historyRecord(
@@ -225,6 +226,7 @@ export function useRequest() {
   })
 
   onUnmounted(() => {
+    disposed = true
     cancel()
     unlisten?.()
     clearPendingTimeout()
@@ -236,23 +238,43 @@ export function useRequest() {
     const tab = tabs.active
     // History opens a deliberately non-executable projection. Keep this guard at the execution
     // entry point so keyboard shortcuts or future callers cannot bypass a disabled UI control.
-    if (!tab || tab.historyPreview || !tab.url.trim() || sending.value) return
-
-    // 工作区是首屏之后异步加载的。发送必须等它完成，否则默认环境还没
-    // 选出来时会把带 {{variable}} 的请求误判成缺少变量。
-    if (workspace.available && !workspace.ready) {
-      await workspace.load()
-      if (!workspace.ready) {
-        const error: AppError = workspace.lastError ?? {
-          kind: 'io',
-          message: '工作区尚未加载，无法发送请求',
-          hints: [{ label: '检查工作区目录是否可读，并重试' }],
+    if (disposed || !tab || tab.kind !== 'request' || tab.historyPreview || !tab.url.trim() || sending.value) return
+    const requestSession = currentSession()
+    if (!requestSession) return
+    const run = ++attempt
+    const isCurrent = () => !disposed && run === attempt && isCurrentSession(requestSession)
+    sending.value = true
+    tabs.patch(tab.id, { error: null, actualRequest: null, preview: false })
+    armPendingTimeout()
+    try {
+      // 工作区是首屏之后异步加载的。发送必须等它完成，否则默认环境还没
+      // 选出来时会把带 {{variable}} 的请求误判成缺少变量。
+      if (workspace.available && !workspace.ready) {
+        await workspace.load()
+        if (!isCurrent()) return
+        if (!workspace.ready) {
+          const error: AppError = workspace.lastError ?? {
+            kind: 'io',
+            message: '工作区尚未加载，无法发送请求',
+            hints: [{ label: '检查工作区目录是否可读，并重试' }],
+          }
+          tabs.patch(tab.id, { response: null, error, actualRequest: null })
+          return
         }
-        tabs.patch(tab.id, { response: null, error, actualRequest: null })
-        return
+      }
+      if (!isCurrent()) return
+      await sendPrepared(tab, requestSession, run)
+    } catch (error) {
+      if (isCurrent()) tabs.patch(tab.id, { response: null, error: oauth2OperationError(normalizeError(error)), actualRequest: null })
+    } finally {
+      if (run === attempt && !active.value) {
+        sending.value = false
+        clearPendingTimeout()
       }
     }
+  }
 
+  async function sendPrepared(tab: Tab, requestSession: WorkspaceSession, run: number) {
     const spec: RequestSpec = {
       method: tab.method,
       url: tab.url,
@@ -263,13 +285,11 @@ export function useRequest() {
       auth: tab.auth,
       settings: tab.settings,
     }
-    const requestSession = currentSession()
-    if (!requestSession) return
     const controller = new AbortController()
     let expectedTabAuth = tab.auth
     let environment: unknown
     let environmentCaptured = false
-    const current = () => !controller.signal.aborted && isCurrentSession(requestSession)
+    const current = () => !disposed && run === attempt && !controller.signal.aborted && isCurrentSession(requestSession)
       && (workspace.activeEnvironmentId ?? undefined) === environmentId
       && (!environmentCaptured || workspace.activeEnvironment === environment)
       && tabs.tabs.some(item => item.id === tab.id && !item.historyPreview
@@ -408,9 +428,15 @@ export function useRequest() {
    * `orphans`，不会干扰下一个请求。
    */
   function cancel() {
+    const cancelledAttempt = ++attempt
     pendingSend?.controller.abort()
     pendingSend = null
-    if (active.value) void ipc.cancelRequest(active.value.handle)
+    const cancelled = active.value
+    if (cancelled) void ipc.cancelRequest(cancelled.handle).catch(error => {
+      if (!disposed && attempt === cancelledAttempt && isCurrentSession(cancelled.session)) {
+        tabs.patch(cancelled.tabId, { error: oauth2OperationError(normalizeError(error)) })
+      }
+    })
     sending.value = false
     active.value = null
     clearPendingTimeout()

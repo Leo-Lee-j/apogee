@@ -41,7 +41,7 @@ const S3Panel = defineAsyncComponent(() => import('@/spike/S3Panel.vue'))
 const ui = useUiStore()
 const tabs = useTabsStore()
 const workspace = useWorkspaceStore()
-const urlBar = ref<{ send: () => void } | null>(null)
+const urlBar = ref<{ send: () => void; cancel: () => boolean } | null>(null)
 const historyMounted = ref(false)
 const paletteMounted = ref(false)
 /** 仅影响当前工作区的展示，不写入请求配置或持久化数据。 */
@@ -315,6 +315,10 @@ watch(
 
 function onKeydown(e: KeyboardEvent) {
   if (e.defaultPrevented) return
+  if (e.key === 'Escape' && !ui.paletteOpen && !ui.historyOpen && !ui.saveAsOpen) {
+    if (urlBar.value?.cancel()) e.preventDefault()
+    return
+  }
   const mod = e.ctrlKey || e.metaKey
   if (!mod) return
   const k = e.key.toLowerCase()
