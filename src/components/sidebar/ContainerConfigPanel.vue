@@ -5,6 +5,7 @@ import { AppAlert, AppButton, AppIcon, AppInputNumber, AppSelect } from '@/compo
 import { ipc, normalizeError, type AuthConfig, type RequestSettings, type WorkspaceContainer } from '@/ipc'
 import { useTabsStore } from '@/stores/tabs'
 import { useWorkspaceStore } from '@/stores/workspace'
+import { useEditorRecoveryStore } from '@/stores/editorRecovery'
 import AuthEditor from '@/components/request/AuthEditor.vue'
 import { authSummary } from '@/features/requestAuth'
 import WorkspaceContent from '@/components/layout/WorkspaceContent.vue'
@@ -18,13 +19,17 @@ const props = defineProps<{ nodeId: string | null }>()
 const tokenFetcher = useOAuth2TokenActions()
 const tabs = useTabsStore()
 const workspace = useWorkspaceStore()
+const editors = useEditorRecoveryStore()
 const selectedNodeId = ref(props.nodeId)
 const reloadSequence = ref(0)
 const loading = ref(false)
 const saving = ref(false)
 const error = ref('')
-const container = ref<WorkspaceContainer | null>(null)
-const persistedAuth = ref<AuthConfig | undefined>()
+const container = computed(() => selectedNodeId.value ? editors.containers[selectedNodeId.value]?.value ?? null : null)
+const persistedAuth = computed<AuthConfig | undefined>({
+  get: () => selectedNodeId.value ? editors.containers[selectedNodeId.value]?.expectedAuth : undefined,
+  set: value => { if (value && selectedNodeId.value) editors.baseline(selectedNodeId.value, value) },
+})
 const chainConfigs = ref(new Map<string, WorkspaceContainer>())
 
 const currentNode = computed(() => workspace.nodes?.find((node) => node.id === selectedNodeId.value) ?? null)
@@ -46,8 +51,6 @@ watch([() => selectedNodeId.value, () => workspace.nodes, () => reloadSequence.v
   () => workspace.workspaceId, () => workspace.sessionId] as const, async ([id], _previous, onCleanup) => {
   let current = true
   onCleanup(() => { current = false })
-  container.value = null
-  persistedAuth.value = undefined
   chainConfigs.value = new Map()
   error.value = ''
   loading.value = false
@@ -57,10 +60,9 @@ watch([() => selectedNodeId.value, () => workspace.nodes, () => reloadSequence.v
     const loaded = await Promise.all(chain.value.map(async (node) => [node.id, await ipc.workspaceReadContainer(node.id)] as const))
     if (!current) return
     chainConfigs.value = new Map(loaded)
-    container.value = chainConfigs.value.get(id) ?? null
-    persistedAuth.value = container.value?.auth
+    for (const [, value] of loaded) editors.put(value)
   }
-  catch { if (current) error.value = '读取配置失败，请检查工作区后重新加载。' }
+  catch (cause) { if (current) error.value = normalizeError(cause).message }
   finally { if (current) loading.value = false }
 }, { immediate: true })
 
@@ -123,13 +125,13 @@ function booleanSelectValue(value: boolean | null | undefined, fallback: boolean
   if (typeof value === 'boolean') return String(value)
   return hasParentLayer.value ? 'inherit' : String(fallback)
 }
-function patchAuth(next: AuthConfig) { if (container.value) container.value = { ...container.value, auth: next } }
+function patchAuth(next: AuthConfig) { if (container.value) editors.edit({ ...container.value, auth: next }) }
 function authGuard(id: string) { return () => !saving.value && selectedNodeId.value === id && container.value?.id === id }
-function patchSettings(delta: Partial<RequestSettings>) { if (container.value) container.value = { ...container.value, settings: { ...settings.value, ...delta } } }
+function patchSettings(delta: Partial<RequestSettings>) { if (container.value) editors.edit({ ...container.value, settings: { ...settings.value, ...delta } }) }
 function patchBooleanSetting(field: 'followRedirects' | 'verifyTls', value: string | number | null) {
   patchSettings({ [field]: value === 'inherit' ? undefined : value === 'true' } as Partial<RequestSettings>)
 }
-function layerConfig(id: string) { return chainConfigs.value.get(id) }
+function layerConfig(id: string) { return editors.containers[id]?.value ?? chainConfigs.value.get(id) }
 function settingsSummary(value: RequestSettings | undefined) {
   if (!value) return '正在读取...'
   const parts = []
@@ -146,23 +148,28 @@ async function save() {
     && workspace.workspaceId === workspaceId && workspace.sessionId === sessionId
   saving.value = true; error.value = ''
   try {
-    const saved = await ipc.workspaceSaveContainer(target, persistedAuth.value)
+    const saved = await editors.saveContainer(target.id)
     if (!current()) return
-    container.value = saved
-    persistedAuth.value = saved.auth
-    await workspace.load()
+    if (saved) await workspace.load()
+    else error.value = editors.lastError?.message ?? '保存配置失败，请重试。'
   } catch (cause) {
     if (current()) error.value = normalizeError(cause).message === 'AUTH_CONFIG_STALE' ? '认证来源已更新，请重新加载配置后再保存；未覆盖新凭据。' : '保存配置失败，请检查工作区或重新加载配置。'
   }
   finally { saving.value = false }
+}
+async function reload() {
+  const id = selectedNodeId.value
+  if (!id || !(await editors.settleContainers([id]))) return
+  editors.forgetContainer(id)
+  reloadSequence.value++
 }
 </script>
 
 <template>
   <main class="container-config">
     <WorkspaceToolbar class="config-toolbar">
-      <div class="toolbar-title"><strong>{{ currentNode?.name ?? '容器配置' }}</strong><span>继承链配置</span></div>
-      <AppButton quaternary :disabled="loading || saving" title="放弃本页未保存修改并重新读取磁盘配置" @click="reloadSequence++">重新加载</AppButton>
+      <div class="toolbar-title"><strong>{{ currentNode?.name ?? '容器配置' }}</strong><span>{{ selectedNodeId && editors.containers[selectedNodeId]?.dirty ? '未保存修改' : '继承链配置' }}</span></div>
+      <AppButton quaternary :disabled="loading || saving" title="重新读取磁盘配置" @click="reload">重新加载</AppButton>
       <AppButton quaternary type="primary" :loading="saving" :disabled="loading || !container" @click="save"><template #icon><AppIcon :component="IconSave" :size="15" /></template>保存</AppButton>
     </WorkspaceToolbar>
     <div class="config-body">

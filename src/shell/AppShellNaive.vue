@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { NConfigProvider, NMessageProvider, NDialogProvider, darkTheme, lightTheme, zhCN, enUS } from 'naive-ui'
+import { NConfigProvider, darkTheme, lightTheme, zhCN, enUS } from 'naive-ui'
 import RootShell from './RootShell.vue'
 import { useUiStore } from '@/stores/ui'
 import { darkThemeOverrides, lightThemeOverrides } from '@/theme'
@@ -28,10 +28,7 @@ const locale = computed(() => app.settings.language === 'en-US' ? enUS : zhCN)
 
 <template>
   <NConfigProvider :theme="theme" :theme-overrides="overrides" :locale="locale" abstract>
-    <NDialogProvider>
-      <NMessageProvider>
-        <RootShell />
-      </NMessageProvider>
-    </NDialogProvider>
+    <!-- Feedback uses discrete APIs loaded on demand; only theme context belongs here. -->
+    <RootShell />
   </NConfigProvider>
 </template>

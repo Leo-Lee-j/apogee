@@ -1,130 +1,93 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
-import { ipc, normalizeError, type TreeNode } from '@/ipc'
-
-/**
- * JSON 树视图。
- *
- * # 关键约束（03 文档 §2.2 / §4.4）
- *
- * 前端拿不到完整 JSON 对象，只拿视口内那一页扁平节点。
- * 展开一个节点 = 向 Rust 再要一页 `children(path, offset, limit)`，
- * 而不是在前端递归遍历一棵已经在内存里的树。
- *
- * 数据结构是**扁平数组**：`TreeNode` 没有 `children` 字段。
- * 展开/折叠只改 visible 计算，不重建数组。
- */
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { createJsonTree, TREE_PAGE_SIZE } from '@/features/jsonTree'
+import type { TreeNode } from '@/ipc'
 
 const props = defineProps<{ responseId: string }>()
-
-const PAGE = 200
-
-/** 已加载的子节点，按父路径缓存 */
-const children = ref<Record<string, TreeNode[]>>({})
-const expanded = ref<Set<string>>(new Set(['']))
-const loading = ref(true)
-const err = ref<string | null>(null)
-
-async function loadChildren(path: string) {
-  if (children.value[path]) return
-  const nodes = await ipc.getResponseTree(props.responseId, path, 0, PAGE)
-  children.value = { ...children.value, [path]: nodes }
-}
-
-/** 把已展开的部分摊平成可渲染的一维列表。虚拟滚动就架在这个数组上。 */
-const flat = computed(() => {
-  const out: TreeNode[] = []
-  const walk = (path: string) => {
-    for (const n of children.value[path] ?? []) {
-      out.push(n)
-      if (expanded.value.has(n.path)) walk(n.path)
-    }
-  }
-  walk('')
-  return out
+const tree = createJsonTree()
+const { rows, expanded, rootPath } = tree
+const viewport = ref<HTMLElement | null>(null)
+const scrollTop = ref(0), height = ref(400), message = ref('')
+// Fixed rows keep virtual scroll stable through loading and error states.
+const ROW_HEIGHT = 32, OVERSCAN = 5
+const start = computed(() => Math.max(0, Math.min(rows.value.length - 1, Math.floor(scrollTop.value / ROW_HEIGHT)) - OVERSCAN))
+const visible = computed(() => rows.value.slice(start.value, start.value + Math.ceil(height.value / ROW_HEIGHT) + OVERSCAN * 2))
+let observer: ResizeObserver | undefined
+watch(() => props.responseId, id => {
+  message.value = ''; scrollTop.value = 0
+  if (viewport.value) viewport.value.scrollTop = 0
+  void tree.reset(id)
+}, { immediate: true })
+onMounted(() => {
+  observer = new ResizeObserver(entries => { height.value = entries[0]?.contentRect.height ?? 400 })
+  if (viewport.value) observer.observe(viewport.value)
 })
-
-async function toggle(n: TreeNode) {
-  if (n.childCount === 0) return
-  const next = new Set(expanded.value)
-  if (next.has(n.path)) {
-    next.delete(n.path)
-  } else {
-    next.add(n.path)
-    await loadChildren(n.path)
-  }
-  expanded.value = next
+onBeforeUnmount(() => { observer?.disconnect(); tree.dispose() })
+async function toggle(node: TreeNode) { message.value = await tree.toggle(node) ?? '' }
+function focus(path: string) {
+  message.value = ''; scrollTop.value = 0
+  if (viewport.value) viewport.value.scrollTop = 0
+  void tree.focus(path)
 }
-
-onMounted(async () => {
-  try {
-    await loadChildren('')
-  } catch (e) {
-    // ipc facade 抛的是 AppError（普通对象，不是 Error），
-    // `String(e)` 会得到 "[object Object]"。非 JSON 响应走这条路很常见
-    // （HTML/纯文本没建索引），错误文案必须能读。
-    err.value = normalizeError(e).message
-  } finally {
-    loading.value = false
-  }
-})
-
-const kindColor: Record<string, string> = {
-  string: 'var(--a-get)',
-  number: 'var(--a-patch)',
-  bool: 'var(--a-put)',
-  null: 'var(--a-text-faint)',
+function jump(path: string, event: Event) {
+  const page = Number((event.target as HTMLInputElement).value)
+  const total = Math.ceil((tree.pages.value[path]?.total ?? 0) / TREE_PAGE_SIZE)
+  if (Number.isInteger(page) && page >= 1 && page <= total) void tree.load(path, (page - 1) * TREE_PAGE_SIZE)
 }
+const kindColor: Record<string, string> = { string: 'var(--a-get)', number: 'var(--a-patch)', bool: 'var(--a-put)', null: 'var(--a-text-faint)' }
 </script>
 
 <template>
-  <div class="tree">
-    <div v-if="loading" class="state">解析中…</div>
-    <div v-else-if="err" class="state err">
-      树视图加载失败：{{ err }}
-      <p class="dim">大响应体需要先显式点「解析」，这是 2MB 以上分级的设计行为。</p>
-    </div>
-    <div v-else class="rows">
-      <div
-        v-for="n in flat"
-        :key="n.path"
-        class="row"
-        :style="{ paddingLeft: `${6 + (n.depth - 1) * 14}px` }"
-        @click="toggle(n)"
-      >
-        <span class="caret" :class="{ has: n.childCount > 0 }">
-          {{ n.childCount > 0 ? (expanded.has(n.path) ? '▾' : '▸') : '' }}
-        </span>
-        <span class="key">{{ n.key }}</span>
-        <span class="colon">:</span>
-        <span v-if="n.childCount > 0" class="count">
-          {{ n.kind === 'array' ? `[ ${n.childCount} items ]` : `{ ${n.childCount} keys }` }}
-        </span>
-        <span v-else class="val" :style="{ color: kindColor[n.kind] ?? 'var(--a-text)' }">
-          {{ n.preview }}
-        </span>
+  <div class="tree-view">
+    <div v-if="rootPath" class="tree-navigation"><button @click="focus('')">返回根节点</button><button @click="focus(rootPath.slice(0, rootPath.lastIndexOf('/')))">返回上级</button><span :title="rootPath">{{ rootPath }}</span></div>
+    <div v-if="message" class="message" role="status">{{ message }}</div>
+    <div ref="viewport" class="tree" aria-label="JSON 树" @scroll="scrollTop = ($event.target as HTMLElement).scrollTop">
+      <div class="rows" :style="{ height: `${rows.length * ROW_HEIGHT}px` }">
+        <div class="window" :style="{ transform: `translateY(${start * ROW_HEIGHT}px)` }">
+          <div v-for="row in visible" :key="row.key" class="row" :style="{ paddingLeft: `${6 + row.depth * 14}px` }">
+            <template v-if="row.type === 'page'">
+              <span class="range">{{ row.page.total ? `${row.page.offset + 1}–${row.page.offset + row.page.nodes.length} / ${row.page.total} 项` : (row.page.loading ? '加载中…' : '无子项') }}</span>
+              <button v-if="row.page.total > TREE_PAGE_SIZE" :disabled="row.page.loading || row.page.offset === 0" @click="tree.load(row.path, row.page.offset - TREE_PAGE_SIZE)">上一页</button>
+              <button v-if="row.page.total > TREE_PAGE_SIZE" :disabled="row.page.loading || row.page.offset + TREE_PAGE_SIZE >= row.page.total" @click="tree.load(row.path, row.page.offset + TREE_PAGE_SIZE)">下一页</button>
+              <label v-if="row.page.total > TREE_PAGE_SIZE">页 <input type="number" aria-label="跳转页码" :min="1" :max="Math.ceil(row.page.total / TREE_PAGE_SIZE)" :value="row.page.offset / TREE_PAGE_SIZE + 1" :disabled="row.page.loading" @change="jump(row.path, $event)" @keydown.enter="jump(row.path, $event)" /></label>
+              <span v-if="row.page.error" class="error" role="alert" :title="row.page.error">{{ row.page.error }}</span>
+              <button v-if="row.page.error" @click="tree.load(row.path, row.page.retryOffset ?? row.page.offset)">重试</button>
+              <span v-else-if="row.page.loading && row.page.nodes.length" class="range">加载中…</span>
+            </template>
+            <template v-else>
+              <button v-if="row.node.childCount > 0" class="caret" :aria-label="`${expanded.has(row.node.path) ? '折叠' : '展开'} ${row.node.key}`" :aria-expanded="expanded.has(row.node.path)" @click="toggle(row.node)">{{ expanded.has(row.node.path) ? '▾' : '▸' }}</button>
+              <span v-else class="caret"></span>
+              <span class="key">{{ row.node.key }}</span><span class="colon">:</span>
+              <span v-if="row.node.childCount > 0" class="range">{{ row.node.kind === 'array' ? `[ ${row.node.childCount} items ]` : `{ ${row.node.childCount} keys }` }}</span>
+              <span v-else class="val" :style="{ color: kindColor[row.node.kind] ?? 'var(--a-text)' }">{{ row.node.preview }}</span>
+              <button v-if="row.node.childCount > 0" class="focus-node" :aria-label="`仅查看 ${row.node.key}`" @click="focus(row.node.path)">仅查看</button>
+            </template>
+          </div>
+        </div>
       </div>
-      <p class="note">
-        已渲染 {{ flat.length }} 个节点。每次展开只向 Rust 取一页（{{ PAGE }} 个），
-        前端不持有完整 JSON。
-      </p>
     </div>
   </div>
 </template>
 
 <style scoped>
-.tree { flex: 1 1 auto; min-height: 0; overflow: auto; }
-.rows { font: var(--a-fs-result)/var(--a-lh-result) var(--a-font-mono); }
-.row { display: flex; gap: 4px; height: var(--a-lh-result); align-items: center; cursor: default; white-space: nowrap; }
+.tree-view { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.tree { flex: 1 1 auto; min-height: 0; overflow: auto; overflow-anchor: none; }
+.rows { position: relative; font: var(--a-fs-result)/var(--a-lh-result) var(--a-font-mono); }
+.window { position: absolute; left: 0; right: 0; top: 0; }
+.row { display: flex; gap: 4px; height: 32px; box-sizing: border-box; align-items: center; white-space: nowrap; }
 .row:hover { background: var(--a-hover); }
-.caret { width: 12px; color: var(--a-text-faint); }
-.caret.has { cursor: pointer; }
+button, input { color: var(--a-text); background: var(--a-bg-2); border: 1px solid var(--a-border); border-radius: 3px; font: inherit; }
+button { cursor: pointer; padding: 1px 5px; }
+button:disabled { opacity: 0.5; cursor: default; }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--a-focus); outline-offset: 1px; }
+input { width: 58px; }
+.caret { width: 18px; flex-shrink: 0; color: var(--a-text-dim); padding: 0; background: transparent; border: none; }
 .key { color: var(--a-text); }
-.colon { color: var(--a-text-faint); }
-.count { color: var(--a-text-faint); }
-.val { overflow: hidden; text-overflow: ellipsis; }
-.state { padding: 12px; font-size: var(--a-fs-sm); color: var(--a-text-dim); }
-.state.err { color: var(--a-error); }
-.dim { color: var(--a-text-faint); }
-.note { padding: 8px; font: var(--a-fs-xs)/var(--a-lh-xs) var(--a-font-ui); color: var(--a-text-faint); }
+.colon, .range { color: var(--a-text-faint); }
+.val, .error { overflow: hidden; text-overflow: ellipsis; }
+.error { color: var(--a-error); max-width: 360px; }
+.message { padding: 6px; color: var(--a-text-dim); }
+.tree-navigation { display: flex; gap: 8px; align-items: center; padding: 4px 6px; color: var(--a-text-dim); }
+.tree-navigation span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.focus-node { margin-left: 6px; font-size: var(--a-fs-xs); }
 </style>

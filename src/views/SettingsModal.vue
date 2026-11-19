@@ -301,7 +301,7 @@ async function flushProxyUrl() {
 }
 
 async function restartApp() {
-  await ipc.appRestart()
+  if (!(await app.restart())) settingsError.value = app.lastError?.message ?? ''
 }
 </script>
 

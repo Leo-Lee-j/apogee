@@ -5,6 +5,7 @@ const workspaceClose = vi.fn()
 const workspaceOpen = vi.fn()
 const workspaceList = vi.fn()
 const appSettingsLoad = vi.fn()
+const appRestart = vi.fn()
 
 vi.mock('@/ipc', () => ({
   inTauri: true,
@@ -14,6 +15,8 @@ vi.mock('@/ipc', () => ({
       if (key === 'workspaceOpen') return workspaceOpen
       if (key === 'workspaceList') return workspaceList
       if (key === 'appSettingsLoad') return appSettingsLoad
+      if (key === 'appRestart') return appRestart
+      if (key === 'workspaceReadRecovery') return vi.fn().mockResolvedValue({ requests: [], containers: [] })
       return vi.fn()
     },
   }),
@@ -34,6 +37,7 @@ describe('app workspace lifecycle', () => {
     workspaceList.mockReset()
     workspaceList.mockResolvedValue([])
     appSettingsLoad.mockReset()
+    appRestart.mockReset().mockResolvedValue(undefined)
     appSettingsLoad.mockResolvedValue({
       settingsVersion: 1,
       defaultWorkspaceRoot: 'C:/workspaces',
@@ -62,6 +66,20 @@ describe('app workspace lifecycle', () => {
     expect(workspaceClose).toHaveBeenCalledTimes(1)
     expect(app.shell).toBe('launcher')
     expect(app.busyWorkspaceId).toBeNull()
+  })
+
+  it('cancels restart when editors cannot be saved and restores the UI on restart failure', async () => {
+    const app = useAppStore()
+    app.shell = 'workspace'
+    const tabs = (await import('./tabs')).useTabsStore()
+    vi.spyOn(tabs, 'flushAll').mockResolvedValueOnce(false)
+    expect(await app.restart()).toBe(false)
+    expect(appRestart).not.toHaveBeenCalled()
+    expect(app.shell).toBe('workspace')
+    appRestart.mockRejectedValueOnce(new Error('restart failed'))
+    expect(await app.restart()).toBe(false)
+    expect(app.shell).toBe('workspace')
+    expect(app.lastError?.message).toBe('restart failed')
   })
 
   it('keeps the workspace open when Rust rejects close', async () => {

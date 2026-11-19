@@ -285,6 +285,7 @@ export interface HistoryRecord {
 }
 
 export type NodeKind = 'object' | 'array' | 'string' | 'number' | 'bool' | 'null'
+export interface TreePage { nodes: TreeNode[]; total: number }
 
 /** 扁平树节点。**没有 children 字段** —— 前端不做递归构造（03 文档 §4.4）。 */
 export interface TreeNode {
@@ -481,6 +482,10 @@ export const ipc = {
     return call('get_response_tree', { ...sessionArgs(), responseId, path, offset, limit })
   },
 
+  getResponseTreePage(responseId: string, path: string, offset = 0, limit = 200): Promise<TreePage> {
+    return call('get_response_tree_page', { ...sessionArgs(), responseId, path, offset, limit })
+  },
+
   /** 让 Rust 侧解析 JSON 并建索引。大 body 下这一步是显式的、可跳过的。 */
   indexResponse(responseId: string): Promise<ResponseSummary> {
     return call('index_response', { ...sessionArgs(), responseId })
@@ -594,6 +599,14 @@ export const ipc = {
     })
   },
 
+  workspaceReadRecovery(): Promise<RecoverySnapshot> {
+    return call('workspace_read_recovery', { ...sessionArgs() })
+  },
+
+  workspaceSaveRecovery(snapshot: RecoverySnapshot): Promise<void> {
+    return call('workspace_save_recovery', { ...sessionArgs(), snapshot })
+  },
+
   /** 读取一个请求的完整编辑模型。 */
   workspaceReadRequest(requestId: string): Promise<WorkspaceRequest> {
     return call('workspace_read_request', { ...sessionArgs(), requestId })
@@ -641,6 +654,10 @@ export const ipc = {
 
   workspaceDeleteNode(nodeId: string): Promise<WorkspaceSnapshot> {
     return call('workspace_delete_node', { ...sessionArgs(), nodeId })
+  },
+
+  workspaceDuplicateNode(nodeId: string): Promise<WorkspaceSnapshot> {
+    return call('workspace_duplicate_node', { ...sessionArgs(), nodeId })
   },
 
   // ── 请求执行（03 文档 §3.2 / §4.5）─────────────────────────────────
@@ -955,6 +972,19 @@ export interface WorkspaceContainer {
   auth: AuthConfig
   settings: RequestSettings
 }
+
+export interface RequestDraft {
+  id: string
+  title: string
+  spec: RequestSpec
+  nodeId?: string | null
+  expectedAuth?: AuthConfig | null
+  sourceRequestId?: string | null
+  debugCaseId?: string | null
+  debugCaseEditor: boolean
+}
+export interface ContainerDraft { value: WorkspaceContainer; expectedAuth: AuthConfig }
+export interface RecoverySnapshot { requests: RequestDraft[]; containers: ContainerDraft[] }
 
 export interface ExecHandle {
   id: string
@@ -1347,6 +1377,28 @@ export const windowControls = {
 
   async close(): Promise<void> {
     await appWindow?.close()
+  },
+
+  async installCloseGuard(prepare: () => Promise<boolean>, failed: (error: unknown) => void): Promise<Unlisten> {
+    const w = appWindow
+    if (!w) return () => {}
+    let allowed = false
+    let pending = false
+    return w.onCloseRequested((event) => {
+      if (allowed) return
+      event.preventDefault()
+      if (pending) return
+      pending = true
+      void (async () => {
+        try {
+          if (await prepare()) {
+            allowed = true
+            await w.close()
+          }
+        } catch (error) { allowed = false; failed(error) }
+        finally { pending = false }
+      })()
+    })
   },
 
   async isMaximized(): Promise<boolean> {

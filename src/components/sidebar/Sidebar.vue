@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { postmanAuth } from '@/features/requestAuth'
+import { postmanRequest } from '@/features/postmanExport'
 import { h, ref, computed, shallowRef, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useTabsStore } from '@/stores/tabs'
 import { useUiStore } from '@/stores/ui'
@@ -17,7 +17,7 @@ import {
 import { IconAdd, IconChevronDownOutline, IconChevronForwardOutline, IconCloseCircle, IconCopy, IconDelete, IconDownload, IconEdit, IconLocate, IconMore, IconRemoveCircle, IconSort, IconFolder, IconFolderOpen, IconStats } from '@/components/ui/icons'
 import NaiveThemeScope from '@/components/NaiveThemeScope.vue'
 import { toast } from '@/features/feedback'
-import { ipc, type DebugCase, type DebugCaseType, type KeyValue, type RequestSpec, type WorkspaceNode } from '@/ipc'
+import { ipc, type DebugCase, type DebugCaseType, type WorkspaceNode } from '@/ipc'
 import {
   OVERSCAN,
   sidebarRowHeightForUiSize,
@@ -484,51 +484,6 @@ type PostmanItem = {
   name: string
   item?: PostmanItem[]
   request?: Record<string, unknown>
-}
-
-function postmanRows(rows: KeyValue[] = []) {
-  return rows.map((row) => ({
-    key: row.key,
-    value: row.value,
-    disabled: !row.enabled,
-    ...(row.description ? { description: row.description } : {}),
-  }))
-}
-
-function postmanBody(body: RequestSpec['body']): Record<string, unknown> | undefined {
-  if (!body || body.type === 'none') return undefined
-  if (body.type === 'json') {
-    return { mode: 'raw', raw: body.content, options: { raw: { language: 'json' } } }
-  }
-  if (body.type === 'text') {
-    return { mode: 'raw', raw: body.content, options: { raw: { language: 'text' } } }
-  }
-  if (body.type === 'formData') return { mode: 'formdata', formdata: postmanRows(body.rows) }
-  if (body.type === 'urlEncoded') return { mode: 'urlencoded', urlencoded: postmanRows(body.rows) }
-  if (body.type === 'binary') return { mode: 'file', file: { src: body.path } }
-  return {
-    mode: 'graphql',
-    graphql: {
-      query: body.query,
-      variables: body.variables,
-      ...(body.operationName ? { operationName: body.operationName } : {}),
-    },
-  }
-}
-
-function postmanRequest(spec: RequestSpec): Record<string, unknown> {
-  const body = postmanBody(spec.body)
-  const auth = postmanAuth(spec.auth)
-  return {
-    method: spec.method,
-    header: postmanRows(spec.headers),
-    url: {
-      raw: spec.url,
-      ...(spec.params?.length ? { query: postmanRows(spec.params) } : {}),
-    },
-    ...(body ? { body } : {}),
-    ...(auth ? { auth } : {}),
-  }
 }
 
 async function exportNode(node: FlatNode) {

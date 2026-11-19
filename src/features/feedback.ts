@@ -1,4 +1,5 @@
-import { createDiscreteApi, darkTheme, lightTheme } from 'naive-ui'
+import { h } from 'vue'
+import { createDiscreteApi, darkTheme, lightTheme, NButton, NSpace } from 'naive-ui'
 import { darkThemeOverrides, lightThemeOverrides } from '@/theme'
 import { useUiStore } from '@/stores/ui'
 
@@ -26,4 +27,31 @@ export function toast() {
 export function errorText(message: string, hints: { label: string }[] = []): string {
   if (hints.length === 0) return message
   return `${message}（${hints.map((hint) => hint.label).join('；')}）`
+}
+
+export type LeaveChoice = 'save' | 'discard' | 'cancel'
+export function confirmUnsaved(content: string, saveLabel = '保存'): Promise<LeaveChoice> {
+  const ui = useUiStore()
+  const api = createDiscreteApi(['dialog'], { configProviderProps: {
+    theme: ui.isDark ? darkTheme : lightTheme,
+    themeOverrides: ui.isDark ? darkThemeOverrides : lightThemeOverrides,
+  } })
+  return new Promise((resolve) => {
+    let settled = false
+    const finish = (choice: LeaveChoice) => {
+      if (settled) return
+      settled = true
+      resolve(choice)
+      api.unmount()
+    }
+    api.dialog.warning({
+      title: '有未保存的编辑', content, maskClosable: false,
+      onClose: () => finish('cancel'), onEsc: () => finish('cancel'),
+      action: () => h(NSpace, {}, { default: () => [
+        h(NButton, { onClick: () => finish('cancel') }, { default: () => '取消' }),
+        h(NButton, { onClick: () => finish('discard') }, { default: () => '放弃修改' }),
+        h(NButton, { type: 'primary', onClick: () => finish('save') }, { default: () => saveLabel }),
+      ] }),
+    })
+  })
 }

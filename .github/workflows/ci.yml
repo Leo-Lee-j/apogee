@@ -70,6 +70,9 @@ jobs:
       - name: Build frontend
         run: pnpm build
 
+      - name: Enforce initial gzip budget
+        run: pnpm check:bundle
+
       - name: Check visual contrast and token drift
         run: pnpm check:contrast
 

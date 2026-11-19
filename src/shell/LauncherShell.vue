@@ -4,7 +4,7 @@ import type { DropdownOption } from 'naive-ui'
 import { useAppStore } from '@/stores/app'
 import { useUiStore } from '@/stores/ui'
 import { useUpdateStore } from '@/stores/update'
-import { AppDropdown, AppIcon } from '@/components/ui'
+import AppIcon from '@/components/ui/AppIcon.vue'
 import { IconAdd, IconFolderOpen, IconMore, IconMoon, IconSun } from '@/components/ui/icons'
 import { inTauri, windowControls, type Unlisten } from '@/ipc'
 import logoUrl from '../../src-tauri/icons/128x128.png'
@@ -14,6 +14,8 @@ const ui = useUiStore()
 const updates = useUpdateStore()
 const updateOpen = ref(false)
 const UpdatePanel = defineAsyncComponent(() => import('@/components/settings/UpdatePanel.vue'))
+const AppDropdown = defineAsyncComponent(() => import('@/components/ui/AppDropdown.vue'))
+const menuWorkspaceId = ref<string | null>(null)
 const focused = ref(0)
 const maximized = ref(false)
 let stopWatching: Unlisten | undefined
@@ -68,6 +70,7 @@ function workspaceMenu(workspace: { id: string; status: string }): DropdownOptio
 }
 
 async function selectWorkspaceAction(workspace: { id: string }, key: string | number) {
+  menuWorkspaceId.value = null
   if (key === 'reveal') await app.revealWorkspace(workspace.id)
   else if (key === 'relocate') await relocate(workspace.id)
   else if (key === 'remove') removeWorkspace(workspace.id)
@@ -138,16 +141,22 @@ function statusText(status: string) {
             <span v-if="app.busyWorkspaceId === row.workspace.id" class="spinner" aria-label="正在打开" />
             <span v-else-if="statusText(row.workspace.status)" class="status">{{ statusText(row.workspace.status) }}</span>
             <AppDropdown
-              v-if="app.shell !== 'opening' && app.busyWorkspaceId !== row.workspace.id"
+              v-if="menuWorkspaceId === row.workspace.id"
               trigger="click"
+              :show="true"
+              @update:show="(value: boolean) => { if (!value) menuWorkspaceId = null }"
+              @clickoutside="menuWorkspaceId = null"
               placement="bottom-end"
               :options="workspaceMenu(row.workspace)"
               @select="selectWorkspaceAction(row.workspace, $event)"
             >
-              <button class="row-action remove-action" type="button" aria-label="更多工作区操作" title="更多工作区操作" @click.stop>
+              <button class="row-action remove-action" type="button" aria-label="更多工作区操作" title="更多工作区操作" @click.stop @keydown.stop>
                 <AppIcon :component="IconMore" :size="16" />
               </button>
             </AppDropdown>
+            <button v-else-if="app.shell !== 'opening' && app.busyWorkspaceId !== row.workspace.id" class="row-action remove-action" type="button" aria-label="更多工作区操作" title="更多工作区操作" aria-haspopup="menu" @click.stop="menuWorkspaceId = row.workspace.id" @keydown.stop>
+              <AppIcon :component="IconMore" :size="16" />
+            </button>
           </template>
           <template v-else>
             <AppIcon :component="row.kind === 'create' ? IconAdd : IconFolderOpen" :size="17" />

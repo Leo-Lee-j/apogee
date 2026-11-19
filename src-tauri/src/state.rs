@@ -1407,6 +1407,30 @@ impl AppState {
         })
     }
 
+    pub fn response_tree_window(
+        &self,
+        workspace_id: Uuid,
+        session_id: Uuid,
+        response_id: Uuid,
+        path: &str,
+        offset: usize,
+        limit: usize,
+    ) -> Result<apogee_core::response::TreePage> {
+        let access = Self::response_access(workspace_id, session_id);
+        self.with_response(access, response_id, |spool| {
+            let index = self
+                .store
+                .index(response_id)
+                .context("该响应尚未建索引，请先解析响应")?;
+            let total = index
+                .child_count(path)
+                .context("该 JSON 路径不存在，请重新加载")?;
+            let nodes =
+                self.tree_page_in_spool(spool, response_id, path, offset, limit.clamp(1, 200))?;
+            Ok(apogee_core::response::TreePage { nodes, total })
+        })
+    }
+
     pub fn synthetic_tree_page(
         &self,
         response_id: Uuid,

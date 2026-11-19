@@ -271,6 +271,7 @@ defineExpose({
           </AppDropdown>
         </div>
         <VariableInput
+          url-variables
           ref="inputEl"
           class="url a-selectable"
           size="medium"

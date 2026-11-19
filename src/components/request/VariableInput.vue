@@ -10,6 +10,7 @@ const props = withDefaults(defineProps<{
   value: string
   multiline?: boolean
   variables?: boolean
+  urlVariables?: boolean
   size?: 'small' | 'medium' | 'large'
 }>(), {
   multiline: false,
@@ -97,7 +98,7 @@ function refresh(value = currentValue.value, caretOverride?: number) {
 
   tokenStart.value = start
   tokenEnd.value = caret
-  query.value = fragment
+  query.value = props.urlVariables && fragment.startsWith('env:') ? fragment.slice(4) : fragment
   activeIndex.value = 0
   open.value = variables.value.length > 0
 }
@@ -112,7 +113,7 @@ function update(value: string) {
 
 function select(key: string) {
   if (tokenStart.value < 0) return
-  const replacement = `{{${key}}}`
+  const replacement = props.urlVariables ? `{{env:${key}}}` : `{{${key}}}`
   const value = currentValue.value.slice(0, tokenStart.value) + replacement + currentValue.value.slice(tokenEnd.value)
   const caret = tokenStart.value + replacement.length
   currentValue.value = value

@@ -4,6 +4,7 @@ import { ipc, normalizeError, type AppError, type AppSettings, type WorkspaceDes
 import { useTabsStore } from '@/stores/tabs'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useUiStore } from '@/stores/ui'
+import { useEditorRecoveryStore } from '@/stores/editorRecovery'
 
 export type AppShellKind = 'launcher' | 'opening' | 'workspace' | 'closing'
 
@@ -54,6 +55,7 @@ export const useAppStore = defineStore('app', () => {
     const tabs = useTabsStore()
     tabs.resetWorkspace()
     await useWorkspaceStore().enter(result)
+    await useEditorRecoveryStore().start()
     if (tabs.tabs.length === 0) tabs.open({ title: '新建请求' })
     shell.value = 'workspace'
     busyWorkspaceId.value = null
@@ -66,6 +68,7 @@ export const useAppStore = defineStore('app', () => {
    * 也会自愈替换孤儿会话，这里是第一道防线）。
    */
   async function rollbackSession() {
+    useEditorRecoveryStore().stop()
     try {
       await ipc.workspaceClose()
     } catch {
@@ -74,6 +77,7 @@ export const useAppStore = defineStore('app', () => {
   }
 
   async function openWorkspace(input: { workspaceId?: string; path?: string }, busyId = input.workspaceId ?? 'path') {
+    if (shell.value === 'workspace' && !(await closeWorkspace())) return false
     shell.value = 'opening'
     busyWorkspaceId.value = busyId
     lastError.value = null
@@ -100,6 +104,7 @@ export const useAppStore = defineStore('app', () => {
   }
 
   async function createWorkspace(path: string | undefined, name: string) {
+    if (shell.value === 'workspace' && !(await closeWorkspace())) return false
     shell.value = 'opening'
     busyWorkspaceId.value = 'create'
     lastError.value = null
@@ -137,21 +142,46 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
+  async function prepareExit(): Promise<boolean> {
+    if (shell.value === 'launcher') return true
+    if (shell.value !== 'workspace') return false
+    shell.value = 'closing'
+    const workspace = useWorkspaceStore(), tabs = useTabsStore(), recovery = useEditorRecoveryStore()
+    lastError.value = null
+    if (!(await workspace.flushWorkspaceState()) || !(await workspace.saveDirtyEnvironments())) {
+      lastError.value = workspace.lastError ?? normalizeError(new Error('保存工作区失败，请重试'))
+      shell.value = 'workspace'
+      return false
+    }
+    if (!(await tabs.flushAll())) {
+      lastError.value = tabs.lastError ?? normalizeError(new Error('保存请求失败，请重试'))
+      shell.value = 'workspace'
+      return false
+    }
+    if (!(await recovery.prepareLeave())) {
+      lastError.value = recovery.lastError
+      shell.value = 'workspace'
+      return false
+    }
+    return true
+  }
+
+  async function restart() {
+    const previous = shell.value
+    if (!(await prepareExit())) return false
+    try { await ipc.appRestart(); return true }
+    catch (error) { shell.value = previous; lastError.value = normalizeError(error); return false }
+  }
+
   async function closeWorkspace() {
     if (shell.value !== 'workspace') return false
+    if (!(await prepareExit())) return false
     shell.value = 'closing'
     const tabs = useTabsStore()
     const workspace = useWorkspaceStore()
-    const stateSaved = await workspace.flushWorkspaceState()
-    const environmentsSaved = stateSaved && await workspace.saveDirtyEnvironments()
-    if (!environmentsSaved || !(await tabs.flushAll())) {
-      shell.value = 'workspace'
-      lastError.value = (environmentsSaved ? tabs.lastError : workspace.lastError)
-        ?? normalizeError(new Error('保存工作区失败，已取消返回'))
-      return false
-    }
     try {
       await ipc.workspaceClose()
+      useEditorRecoveryStore().stop()
       tabs.resetWorkspace()
       workspace.reset()
       shell.value = 'launcher'
@@ -167,19 +197,11 @@ export const useAppStore = defineStore('app', () => {
   async function switchWorkspace(workspaceId: string) {
     const workspace = useWorkspaceStore()
     if (shell.value !== 'workspace' || workspace.workspaceId === workspaceId) return false
+    if (!(await prepareExit())) return false
     const tabs = useTabsStore()
     busyWorkspaceId.value = workspaceId
     lastError.value = null
     shell.value = 'closing'
-    const stateSaved = await workspace.flushWorkspaceState()
-    const environmentsSaved = stateSaved && await workspace.saveDirtyEnvironments()
-    if (!environmentsSaved || !(await tabs.flushAll())) {
-      shell.value = 'workspace'
-      lastError.value = (environmentsSaved ? tabs.lastError : workspace.lastError)
-        ?? normalizeError(new Error('保存当前工作区失败，已取消切换'))
-      busyWorkspaceId.value = null
-      return false
-    }
     try {
       await ipc.workspaceClose()
     } catch (error) {
@@ -191,6 +213,7 @@ export const useAppStore = defineStore('app', () => {
 
     // The old session is invalid before any state belonging to the next
     // workspace can be installed in the frontend.
+    useEditorRecoveryStore().stop()
     tabs.resetWorkspace()
     workspace.reset()
     shell.value = 'opening'
@@ -249,6 +272,6 @@ export const useAppStore = defineStore('app', () => {
 
   return {
     shell, workspaces, busyWorkspaceId, lastError, createDialogOpen, settings,
-    initialize, refresh, openWorkspace, createWorkspace, closeWorkspace, switchWorkspace, forgetWorkspace, relocateWorkspace, revealWorkspace, saveSettings,
+    initialize, refresh, openWorkspace, createWorkspace, closeWorkspace, switchWorkspace, forgetWorkspace, relocateWorkspace, revealWorkspace, saveSettings, prepareExit, restart,
   }
 })

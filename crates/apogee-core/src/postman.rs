@@ -109,13 +109,16 @@ pub fn import_json(input: &str) -> Result<PostmanImportResult, crate::error::App
         .to_string();
     let mut requests = Vec::new();
     let mut warnings = Vec::new();
-    let inherited_auth = import_auth(root.get("auth"), &AuthConfig::None, &mut warnings);
+    let mut scope_warnings = Vec::new();
+    migration_gaps(&root, &mut scope_warnings);
+    let inherited_auth = import_auth(root.get("auth"), &AuthConfig::None, &mut scope_warnings);
     walk_items(
         root.get("item").and_then(|v| v.as_array()),
         &mut Vec::new(),
         &mut requests,
         &mut warnings,
         &inherited_auth,
+        &scope_warnings,
     );
     if requests.is_empty() {
         warnings.push("集合中没有可导入的请求".into());
@@ -133,14 +136,24 @@ fn walk_items(
     out: &mut Vec<ImportedRequest>,
     warnings: &mut Vec<String>,
     inherited_auth: &AuthConfig,
+    inherited_warnings: &[String],
 ) {
     for item in items.into_iter().flatten() {
+        let mut local_warnings = inherited_warnings.to_vec();
+        migration_gaps(item, &mut local_warnings);
         if let Some(children) = item.get("item").and_then(|v| v.as_array()) {
             if let Some(name) = item.get("name").and_then(|v| v.as_str()) {
                 folder.push(name.into());
             }
-            let folder_auth = import_auth(item.get("auth"), inherited_auth, warnings);
-            walk_items(Some(children), folder, out, warnings, &folder_auth);
+            let folder_auth = import_auth(item.get("auth"), inherited_auth, &mut local_warnings);
+            walk_items(
+                Some(children),
+                folder,
+                out,
+                warnings,
+                &folder_auth,
+                &local_warnings,
+            );
             if item.get("name").is_some() {
                 folder.pop();
             }
@@ -154,7 +167,9 @@ fn walk_items(
             .and_then(|v| v.as_str())
             .unwrap_or("GET")
             .to_string();
-        let url_value = request.get("url");
+        let url_value = request
+            .get("url")
+            .or_else(|| request.as_str().map(|_| request));
         let url = url_value
             .and_then(|value| value.as_str())
             .or_else(|| {
@@ -182,8 +197,9 @@ fn walk_items(
             .and_then(|value| value.get("variable"))
             .map(rows_value)
             .unwrap_or_default();
-        let body = import_body(request.get("body"));
-        let auth = import_auth(request.get("auth"), inherited_auth, warnings);
+        migration_gaps(request, &mut local_warnings);
+        let body = import_body(request.get("body"), &headers, &mut local_warnings);
+        let auth = import_auth(request.get("auth"), inherited_auth, &mut local_warnings);
         out.push(ImportedRequest {
             name: item
                 .get("name")
@@ -196,23 +212,28 @@ fn walk_items(
                 // Apifox exports its service URL as `{{baseUrl}}` in the Postman
                 // collection, but not its value. Apogee represents that scope as the
                 // active environment host, so keep only the relative request path.
-                url: normalize_apifox_base_url(&if url_value
-                    .and_then(|v| v.get("query"))
-                    .is_some_and(|v| v.is_array() || v.is_object())
-                {
-                    // Object query rows are authoritative, including disabled rows. Keeping
-                    // raw query as well would duplicate parameters and change OAuth signatures.
-                    let (base, fragment) = url
-                        .split_once('#')
-                        .map_or((url.as_str(), None), |(base, fragment)| {
-                            (base, Some(fragment))
-                        });
-                    let base = base.split_once('?').map_or(base, |(base, _)| base);
-                    fragment
-                        .map_or_else(|| base.to_string(), |fragment| format!("{base}#{fragment}"))
-                } else {
-                    url.clone()
-                }),
+                url: import_url(
+                    &if url_value
+                        .and_then(|v| v.get("query"))
+                        .is_some_and(|v| v.is_array() || v.is_object())
+                    {
+                        // Object query rows are authoritative, including disabled rows. Keeping
+                        // raw query as well would duplicate parameters and change OAuth signatures.
+                        let (base, fragment) = url
+                            .split_once('#')
+                            .map_or((url.as_str(), None), |(base, fragment)| {
+                                (base, Some(fragment))
+                            });
+                        let base = base.split_once('?').map_or(base, |(base, _)| base);
+                        fragment.map_or_else(
+                            || base.to_string(),
+                            |fragment| format!("{base}#{fragment}"),
+                        )
+                    } else {
+                        url.clone()
+                    },
+                    &mut local_warnings,
+                ),
                 params,
                 path_params,
                 headers,
@@ -221,6 +242,42 @@ fn walk_items(
                 settings: Default::default(),
             },
         });
+        let label = folder
+            .iter()
+            .map(String::as_str)
+            .chain(std::iter::once(
+                item.get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Imported Request"),
+            ))
+            .collect::<Vec<_>>()
+            .join(" / ");
+        for warning in local_warnings {
+            warnings.push(format!("请求「{label}」：{warning}"));
+        }
+    }
+}
+
+fn migration_gaps(value: &serde_json::Value, warnings: &mut Vec<String>) {
+    if value
+        .get("event")
+        .and_then(|v| v.as_array())
+        .is_some_and(|events| {
+            events
+                .iter()
+                .any(|event| event.get("disabled").and_then(|v| v.as_bool()) != Some(true))
+        })
+    {
+        warnings.push("该请求或上级的预请求/测试脚本未迁移，请手动检查脚本依赖".into());
+    }
+    if value
+        .get("variable")
+        .and_then(|v| v.as_array())
+        .is_some_and(|variables| !variables.is_empty())
+    {
+        warnings.push(
+            "上级变量作用域未迁移，请将集合/文件夹变量配置到环境；变量值未写入迁移报告".into(),
+        );
     }
 }
 /// Postman v2.0 uses an object; v2.1 uses an array of { key, value, type }.
@@ -390,18 +447,110 @@ fn parse_auth(auth: &serde_json::Value) -> Result<AuthConfig, &'static str> {
     })
 }
 
-fn import_body(value: Option<&serde_json::Value>) -> Body {
+fn import_body(
+    value: Option<&serde_json::Value>,
+    headers: &[KeyValue],
+    warnings: &mut Vec<String>,
+) -> Body {
     let Some(value) = value else {
         return Body::None;
     };
+    if value.get("disabled").and_then(|v| v.as_bool()) == Some(true) {
+        return Body::None;
+    }
     match value.get("mode").and_then(|v| v.as_str()) {
+        Some("formdata") => {
+            let mut result = Vec::new();
+            for item in value
+                .get("formdata")
+                .and_then(|v| v.as_array())
+                .into_iter()
+                .flatten()
+            {
+                let mut row = rows_value(item);
+                let Some(mut row) = row.pop() else {
+                    warnings.push("form-data 中缺少名称的行未导入".into());
+                    continue;
+                };
+                if item
+                    .get("contentType")
+                    .and_then(|v| v.as_str())
+                    .is_some_and(|v| !v.is_empty())
+                {
+                    warnings
+                        .push("form-data 的逐字段 Content-Type 未迁移，请检查服务端要求".into());
+                }
+                if item.get("type").and_then(|v| v.as_str()) == Some("file") {
+                    row.kind = crate::model::ValueKind::File;
+                    let sources: Vec<String> = match item.get("src") {
+                        Some(serde_json::Value::Array(items)) => items
+                            .iter()
+                            .filter_map(|v| v.as_str().map(str::to_owned))
+                            .collect(),
+                        Some(serde_json::Value::String(source)) => vec![source.clone()],
+                        _ => Vec::new(),
+                    };
+                    warnings.push(
+                        "form-data 文件引用已保留为本机路径，请重新选择或确认文件存在".into(),
+                    );
+                    if sources.is_empty() {
+                        row.value.clear();
+                        result.push(row);
+                    } else {
+                        for source in sources {
+                            let mut file = row.clone();
+                            file.value = source;
+                            result.push(file);
+                        }
+                    }
+                } else {
+                    result.push(row);
+                }
+            }
+            Body::FormData { rows: result }
+        }
+        Some("file") => {
+            warnings.push("二进制文件引用已保留为本机路径，请重新选择或确认文件存在".into());
+            Body::Binary {
+                path: value
+                    .pointer("/file/src")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .into(),
+            }
+        }
+        Some("graphql") => {
+            let graphql = value.get("graphql").unwrap_or(&serde_json::Value::Null);
+            Body::GraphQl {
+                query: value_text(graphql.get("query")),
+                variables: value_text(graphql.get("variables")),
+                operation_name: graphql
+                    .get("operationName")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_owned),
+            }
+        }
         Some("urlencoded") => Body::UrlEncoded {
             rows: rows(value.get("urlencoded")),
         },
         Some("raw") | None => {
             let Some(raw) = value.get("raw").and_then(|v| v.as_str()) else {
+                if value.get("mode").is_some() {
+                    warnings.push("原文 Body 缺少 raw 内容，请手动补充".into());
+                }
                 return Body::None;
             };
+            if let Some(content_type) = headers
+                .iter()
+                .find(|row| row.enabled && row.key.eq_ignore_ascii_case("content-type"))
+            {
+                if !content_type.value.to_ascii_lowercase().contains("json") {
+                    return Body::Text {
+                        content: raw.into(),
+                        content_type: content_type.value.clone(),
+                    };
+                }
+            }
             match value
                 .pointer("/options/raw/language")
                 .and_then(|v| v.as_str())
@@ -424,7 +573,10 @@ fn import_body(value: Option<&serde_json::Value>) -> Body {
                 },
             }
         }
-        _ => Body::None,
+        _ => {
+            warnings.push("Body 模式不受支持，未导入请求体，请手动重建".into());
+            Body::None
+        }
     }
 }
 
@@ -479,9 +631,110 @@ fn normalize_apifox_base_url(url: &str) -> String {
     }
 }
 
+fn import_url(url: &str, warnings: &mut Vec<String>) -> String {
+    let normalized = normalize_apifox_base_url(url);
+    if normalized != url.trim() {
+        warnings.push("baseUrl/baseURL 已映射为环境 Host，请先配置活动环境的 Host".into());
+    }
+    let mut result = String::new();
+    let mut remaining = normalized.as_str();
+    while let Some(start) = remaining.find("{{") {
+        result.push_str(&remaining[..start]);
+        let Some(end) = remaining[start + 2..].find("}}") else {
+            result.push_str(&remaining[start..]);
+            return result;
+        };
+        let name = &remaining[start + 2..start + 2 + end];
+        // A dedicated prefix preserves legacy {{id}} Path semantics in existing workspaces.
+        result.push_str(&format!("{{{{env:{name}}}}}"));
+        remaining = &remaining[start + 2 + end + 2..];
+    }
+    result.push_str(remaining);
+    if result != normalized {
+        warnings.push("URL 变量已转换为 {{env:变量名}}，请在活动环境中配置对应变量".into());
+    }
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn imports_every_supported_body_and_warns_per_request_without_secret_values() {
+        let imported = import_json(&serde_json::json!({
+            "event": [{"listen":"prerequest", "script":{"exec":["private-script"]}}],
+            "variable":[{"key":"apiBase","value":"private-variable"}],
+            "item":[
+              {"name":"multipart","request":{"method":"POST","url":"{{apiBase}}/upload/:id","body":{"mode":"formdata","formdata":[
+                {"key":"text","value":"hello","description":"keep"},
+                {"key":"upload","type":"file","src":["first.txt","second.txt"],"disabled":true}]}}},
+              {"name":"binary","request":{"url":"https://api.test/upload","body":{"mode":"file","file":{"src":"fixture.bin"}}}},
+              {"name":"graphql","request":{"url":"https://api.test/graphql","body":{"mode":"graphql","graphql":{"query":"query Q { ok }","variables":"{}","operationName":"Q"}}}},
+              {"name":"xml","request":{"url":"https://api.test","header":[{"key":"Content-Type","value":"application/custom+xml"}],"body":{"mode":"raw","raw":"<fixture/>"}}},
+              {"name":"unsupported","request":{"url":"https://api.test","body":{"mode":"future"}}}
+            ]
+        }).to_string()).unwrap();
+        assert_eq!(imported.requests[0].spec.url, "{{env:apiBase}}/upload/:id");
+        assert!(
+            matches!(&imported.requests[0].spec.body, Body::FormData { rows } if rows.len() == 3 && rows[0].description.as_deref() == Some("keep") && rows[1].kind == crate::model::ValueKind::File && !rows[1].enabled && rows[2].value == "second.txt")
+        );
+        assert!(
+            matches!(&imported.requests[1].spec.body, Body::Binary { path } if path.to_str() == Some("fixture.bin"))
+        );
+        assert!(
+            matches!(&imported.requests[2].spec.body, Body::GraphQl { operation_name, .. } if operation_name.as_deref() == Some("Q"))
+        );
+        assert!(
+            matches!(&imported.requests[3].spec.body, Body::Text { content_type, .. } if content_type == "application/custom+xml")
+        );
+        for request in &imported.requests {
+            assert!(imported.warnings.iter().any(|warning| warning
+                .contains(&format!("请求「{}」", request.name))
+                && warning.contains("脚本")));
+        }
+        let report = imported.warnings.join(";");
+        assert!(!report.contains("private-script"));
+        assert!(!report.contains("private-variable"));
+        assert!(report.contains("Body 模式不受支持"));
+    }
+
+    #[test]
+    fn url_environment_templates_preserve_legacy_path_and_missing_values_fail() {
+        let imported = import_json(r#"{"item":[{"request":{"url":{"raw":"{{apiBase}}/users/:id?x={{search}}","variable":[{"key":"id","value":"42"}]}}}]}"#).unwrap();
+        let environment = Environment {
+            id: Uuid::new_v4(),
+            name: "test".into(),
+            host: String::new(),
+            variables: vec![
+                EnvironmentVariable {
+                    key: "apiBase".into(),
+                    value: "https://api.test".into(),
+                    enabled: true,
+                },
+                EnvironmentVariable {
+                    key: "search".into(),
+                    value: "ok".into(),
+                    enabled: true,
+                },
+            ],
+        };
+        let resolved =
+            crate::vars::resolve_request(&imported.requests[0].spec, Some(&environment)).unwrap();
+        assert_eq!(
+            crate::http::build_url(&resolved).unwrap(),
+            "https://api.test/users/42?x=ok"
+        );
+        assert!(crate::vars::resolve_request(&imported.requests[0].spec, None).is_err());
+        let mut legacy = imported.requests[0].spec.clone();
+        legacy.url = "https://api.test/{{id}}".into();
+        let resolved = crate::vars::resolve_request(&legacy, Some(&environment)).unwrap();
+        assert_eq!(resolved.url, legacy.url);
+        assert_eq!(
+            crate::http::build_url(&resolved).unwrap(),
+            "https://api.test/42"
+        );
+    }
 
     #[test]
     fn imports_pkce_configuration_without_ever_importing_ephemeral_codes() {

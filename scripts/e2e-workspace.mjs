@@ -54,7 +54,9 @@ const slowServer = createServer((request, response) => {
     request.on('end', () => {
       echoedRequests.push({ url: request.url, headers: request.headers, body: Buffer.concat(chunks).toString() })
       response.setHeader('Content-Type', 'application/json')
-      response.end('{"ok":true}')
+      response.end(request.url?.startsWith('/tree')
+        ? JSON.stringify([...Array.from({ length: 200 }, (_, i) => i), { nested: Array.from({ length: 401 }, (_, i) => i) }])
+        : '{"ok":true}')
     })
     return
   }
@@ -98,8 +100,13 @@ try {
     if (!page) await new Promise(resolvePromise => setTimeout(resolvePromise, 100))
   }
   if (!page) throw new Error(`Tauri main WebView page did not become ready${externalAppStatus()}`)
+  page.on('pageerror', error => console.error(`WebView error: ${error.message}`))
 
   await page.waitForSelector('.launcher', { timeout: 30_000 })
+  await page.getByRole('button', { name: '更多工作区操作', exact: true }).first().click()
+  await page.getByText('在文件管理器中显示', { exact: true }).waitFor()
+  await page.keyboard.press('Escape')
+  await page.getByText('在文件管理器中显示', { exact: true }).waitFor({ state: 'hidden' })
   await page.getByText('示例工作区', { exact: true }).click()
   await page.waitForSelector('.titlebar', { timeout: 30_000 })
 
@@ -234,7 +241,135 @@ try {
   await waitForCount(() => echoedRequests.length, 5)
   assert.equal(echoedRequests[4].url, '/42/hello%20world?copy=:ignored&again=second&again=updated', 'drag order must match the transmitted data')
 
-  console.log('E2E PASS: workspace lifecycle; cancellation; immediate Query/Header/form edits; blank rows; bulk metadata and duplicate/disabled params; form conversion and multipart upload; Path constraints; keyboard and drag ordering')
+  // Native close must be intercepted before WebView destruction. Cancel retains the editor.
+  await page.getByRole('button', { name: '关闭', exact: true }).click()
+  await page.getByText('有未保存的编辑', { exact: true }).waitFor()
+  await page.getByRole('button', { name: '取消', exact: true }).click()
+  assert.equal(await page.getByRole('textbox', { name: '请求地址', exact: true }).inputValue(), `http://127.0.0.1:${address.port}/:id/{name}?copy=:ignored`)
+  // Keep the draft when switching away; restore it from the workspace-local recovery file.
+  await page.getByRole('button', { name: '切换工作区' }).click()
+  await page.getByText('E2E 第二工作区', { exact: true }).click()
+  await page.getByRole('button', { name: '保存配置与草稿', exact: true }).click()
+  await page.waitForFunction(() => document.querySelector('.titlebar')?.textContent?.includes('E2E 第二工作区'))
+  await page.getByRole('button', { name: '切换工作区' }).click()
+  await page.getByText('示例工作区', { exact: true }).click()
+  await page.waitForFunction(() => document.querySelector('input[aria-label="请求地址"]')?.value.includes('/:id/{name}'))
+  assert.equal(await page.getByRole('textbox', { name: '请求地址', exact: true }).inputValue(), `http://127.0.0.1:${address.port}/:id/{name}?copy=:ignored`)
+
+  await page.keyboard.press('Control+t')
+  await page.getByRole('textbox', { name: '请求地址', exact: true }).fill(`http://127.0.0.1:${address.port}/tree`)
+  await page.getByRole('button', { name: '发送请求', exact: true }).click()
+  await page.getByRole('tab', { name: '树形', exact: true }).click()
+  const tree = page.getByLabel('JSON 树', { exact: true })
+  await tree.getByText('1–200 / 201 项', { exact: true }).waitFor()
+  assert.ok(await tree.locator('.row').count() < 60, 'JSON tree must mount only viewport rows')
+  await tree.getByRole('button', { name: '下一页', exact: true }).click()
+  await tree.getByRole('button', { name: '展开 200', exact: true }).click()
+  await tree.getByRole('button', { name: '展开 nested', exact: true }).click()
+  await tree.getByText('1–200 / 401 项', { exact: true }).waitFor()
+  await tree.getByLabel('跳转页码').last().fill('3')
+  await tree.getByLabel('跳转页码').last().press('Enter')
+  await tree.getByText('401–401 / 401 项', { exact: true }).waitFor({ timeout: 5000 }).catch(async error => {
+    throw new Error(`${error.message}; tree: ${await tree.innerText()}`)
+  })
+  await tree.locator('.key').getByText('400', { exact: true }).waitFor()
+
+  const postmanPath = join(root, 'body-fixtures.postman_collection.json')
+  writeFileSync(postmanPath, JSON.stringify({ info: { name: 'Body fidelity' }, item: [
+    { name: 'Multipart', request: { method: 'POST', url: `http://127.0.0.1:${address.port}/import-form`, body: { mode: 'formdata', formdata: [
+      { key: 'text', value: '中文 + &' }, { key: 'upload', type: 'file', src: uploadPath }, { key: 'ignored', value: 'omit', disabled: true },
+    ] } } },
+    { name: 'Binary', request: { method: 'POST', url: `http://127.0.0.1:${address.port}/import-binary`, body: { mode: 'file', file: { src: uploadPath } } } },
+    { name: 'GraphQL', request: { method: 'POST', url: `http://127.0.0.1:${address.port}/import-graphql`, body: { mode: 'graphql', graphql: { query: 'query Q { ok }', variables: '{"id":42}', operationName: 'Q' } } } },
+  ] }))
+  const importedEchoStart = echoedRequests.length
+  const migration = await page.evaluate(async path => {
+    const { ipc } = await import('/src/ipc/index.ts')
+    const { useWorkspaceStore } = await import('/src/stores/workspace.ts')
+    const { postmanRequest } = await import('/src/features/postmanExport.ts')
+    const result = await ipc.postmanImportWorkspace(path, crypto.randomUUID())
+    const workspace = useWorkspaceStore()
+    await workspace.load()
+    const ids = workspace.nodes.filter(node => node.parentId === result.collectionId && node.kind === 'request').map(node => node.id)
+    const exported = []
+    for (const id of ids) {
+      const request = await ipc.workspaceReadRequest(id)
+      exported.push({ name: request.name, request: postmanRequest(request.spec) })
+    }
+    return { result, ids, exported }
+  }, postmanPath)
+  assert.equal(migration.result.importedRequests, 3)
+  assert.ok(migration.result.warnings.some(warning => warning.includes('Multipart') && warning.includes('文件')))
+  assert.ok(migration.result.warnings.some(warning => warning.includes('Binary') && warning.includes('文件')))
+  const exportedPath = join(root, 'body-roundtrip.postman_collection.json')
+  writeFileSync(exportedPath, JSON.stringify({ info: { name: 'Body roundtrip' }, item: migration.exported }))
+  const roundtrip = await page.evaluate(async path => {
+    const { ipc } = await import('/src/ipc/index.ts')
+    const result = await ipc.postmanImportWorkspace(path, crypto.randomUUID())
+    const snapshot = await ipc.workspaceLoad()
+    return Promise.all(snapshot.nodes.filter(node => node.parentId === result.collectionId && node.kind === 'request').map(async node => {
+      const request = await ipc.workspaceReadRequest(node.id)
+      return { id: node.id, name: request.name, spec: request.spec }
+    }))
+  }, exportedPath)
+  for (const id of [...migration.ids, ...roundtrip.map(request => request.id)]) {
+    await page.evaluate(async requestId => {
+      const { useWorkspaceStore } = await import('/src/stores/workspace.ts')
+      await useWorkspaceStore().openRequest({ id: requestId, kind: 'request' }, false)
+    }, id)
+    await page.getByRole('button', { name: '发送请求', exact: true }).click()
+    await page.getByRole('button', { name: '发送请求', exact: true }).waitFor()
+  }
+  await waitForCount(() => echoedRequests.length, importedEchoStart + 6)
+  const transmissions = echoedRequests.slice(importedEchoStart)
+  for (const suffix of ['form', 'binary', 'graphql']) {
+    const matches = transmissions.filter(request => request.url === `/import-${suffix}`)
+    assert.equal(matches.length, 2, 'import and export/reimport must both reach the receiver')
+    if (suffix === 'form') {
+      for (const request of matches) { assert.ok(request.body.includes('e2e file content')); assert.ok(request.body.includes('中文 + &')); assert.ok(!request.body.includes('omit')) }
+    } else if (suffix === 'binary') {
+      for (const request of matches) assert.equal(request.body, 'e2e file content')
+    } else {
+      for (const request of matches) assert.deepEqual(JSON.parse(request.body), { query: 'query Q { ok }', variables: { id: 42 }, operationName: 'Q' })
+    }
+  }
+  const duplication = await page.evaluate(async collectionId => {
+    const { ipc } = await import('/src/ipc/index.ts')
+    const { useWorkspaceStore } = await import('/src/stores/workspace.ts')
+    const workspace = useWorkspaceStore()
+    const original = await ipc.workspaceReadContainer(collectionId)
+    await ipc.workspaceSaveContainer({ ...original, auth: { type: 'bearer', token: 'copy-fixture' }, settings: { timeoutMs: 4321 } }, original.auth)
+    const source = workspace.nodes.find(node => node.parentId === collectionId && node.kind === 'request')
+    const request = await ipc.workspaceReadRequest(source.id)
+    await ipc.workspaceSaveRequest(request.id, request.name, { ...request.spec, auth: { type: 'inherit' } }, request.spec.auth)
+    const sourceCase = await ipc.workspaceCreateDebugCase(request.id, 'copy case', 'success', request.spec)
+    await workspace.duplicateNode(workspace.nodes.find(node => node.id === collectionId))
+    const copied = workspace.nodes.find(node => node.name === 'Body fidelity 副本')
+    const copiedRequest = workspace.nodes.find(node => node.parentId === copied.id && node.name === request.name)
+    const config = await ipc.workspaceReadContainer(copied.id)
+    const cases = await ipc.workspaceListDebugCases(copiedRequest.id)
+    return { config, copiedRequest, cases, sourceCase }
+  }, migration.result.collectionId)
+  assert.equal(duplication.config.auth.token, 'copy-fixture')
+  assert.equal(duplication.config.settings.timeoutMs, 4321)
+  assert.equal(duplication.cases.length, 1)
+  assert.notEqual(duplication.cases[0].id, duplication.sourceCase.id)
+  assert.equal(duplication.cases[0].requestId, duplication.copiedRequest.id)
+  await page.evaluate(async container => {
+    const { useTabsStore } = await import('/src/stores/tabs.ts')
+    useTabsStore().openContainerConfig(container)
+  }, duplication.config)
+  const timeout = page.locator('.container-config .workspace-field').filter({ hasText: '超时（ms）' }).locator('input').first()
+  await timeout.fill('9876')
+  await timeout.press('Tab')
+  await page.getByText('未保存修改', { exact: true }).waitFor()
+  await page.keyboard.press('Control+t')
+  await page.getByRole('tab', { name: `配置 · ${duplication.config.name}`, exact: false }).click()
+  assert.equal(await timeout.inputValue(), '9876', 'container edits must survive page unmount and remount')
+  await page.locator('.container-config').getByRole('button', { name: '保存', exact: true }).click()
+  await page.getByText('未保存修改', { exact: true }).waitFor({ state: 'hidden' })
+
+  console.log('E2E PASS: workspace lifecycle and draft recovery; native close cancellation; container editor retention; atomic copy via IPC; virtual JSON tree and nested paging; Postman body transmission and export/reimport; cancellation; immediate Query/Header/form edits; blank rows; bulk metadata and duplicate/disabled params; form conversion and multipart upload; Path constraints; keyboard and drag ordering')
 } catch (error) {
   console.error(`E2E FAIL: ${error instanceof Error ? error.stack ?? error.message : String(error)}`)
   process.exitCode = 1

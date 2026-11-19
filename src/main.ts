@@ -1,10 +1,10 @@
-import { createApp } from 'vue'
+import { createApp, nextTick } from 'vue'
 import { createPinia } from 'pinia'
 import './styles/tokens.css'
 import AppShell from '@app-shell'
 import { useUiStore } from './stores/ui'
 import { useAppStore } from './stores/app'
-import { ipc, inTauri, type BootMetrics } from './ipc'
+import { ipc, inTauri, normalizeError, windowControls, type BootMetrics } from './ipc'
 
 /**
  * 分阶段启动（03 文档 §4.1）。
@@ -49,8 +49,27 @@ ui.applyFontSizes(13, 13)
 ;(window as unknown as { __apogeeBoot: unknown }).__apogeeBoot = bootMarks
 
 async function completeBoot() {
+  if (inTauri) await windowControls.installCloseGuard(async () => {
+    const store = useAppStore()
+    const ready = await store.prepareExit()
+    if (!ready && store.lastError) {
+      const { toast, errorText } = await import('./features/feedback')
+      toast().error(errorText(store.lastError.message, store.lastError.hints))
+    }
+    return ready
+  }, async error => {
+    if (useAppStore().shell === 'closing') useAppStore().shell = 'workspace'
+    const { toast, errorText } = await import('./features/feedback')
+    const failure = normalizeError(error)
+    toast().error(errorText(failure.message, failure.hints))
+  })
   // 持久化的字体、字号和主题必须在 appReady 前恢复；Rust 在 appReady 后才显示窗口。
   if (inTauri) await useAppStore().initialize()
+  // Opening the last workspace also loads the editor before reporting a usable first frame.
+  if (useAppStore().shell === 'workspace') {
+    await import('./shell/AppBody.vue')
+    await nextTick()
+  }
   bootMarks.readyMs = performance.now() - t0
 
   // 首帧真正画完之后再让 Rust 显示窗口（03 文档 §4.1）。

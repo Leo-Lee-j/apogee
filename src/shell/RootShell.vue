@@ -1,10 +1,15 @@
 <script setup lang="ts">
-import { defineAsyncComponent } from 'vue'
+import { defineAsyncComponent, h } from 'vue'
 import LauncherShell from './LauncherShell.vue'
-import AppBody from './AppBody.vue'
 import { useAppStore } from '@/stores/app'
 
 const WorkspaceDialog = defineAsyncComponent(() => import('@/views/WorkspaceCreateDialog.vue'))
+const AppBody = defineAsyncComponent({
+  loader: () => import('./AppBody.vue'), delay: 0,
+  loadingComponent: { render: () => h('div', { class: 'opening-screen', role: 'status' }, [
+    h('span', { class: 'opening-spinner', 'aria-hidden': true }), h('span', { class: 'opening-text' }, '正在打开工作区…'),
+  ]) },
+})
 const app = useAppStore()
 </script>
 
@@ -20,7 +25,7 @@ const app = useAppStore()
     name="app-fade"
     appear
   >
-    <AppBody />
+    <AppBody :inert="app.shell === 'closing'" :aria-busy="app.shell === 'closing'" />
   </Transition>
   <div v-else class="opening-screen" role="status" aria-live="polite">
     <span class="opening-spinner" aria-hidden="true" />

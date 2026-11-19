@@ -60,6 +60,7 @@ enum WorkspaceTransactionOperation {
     EnvironmentDelete { environment_id: Uuid },
     CollectionDelete { collection_id: Uuid },
     CollectionRename { collection_id: Uuid },
+    Duplicate { copy_id: Uuid },
 }
 
 impl WorkspaceTransactionOperation {
@@ -77,6 +78,7 @@ impl WorkspaceTransactionOperation {
             Self::CollectionRename { collection_id } => {
                 format!("collection-rename-{collection_id}.json")
             }
+            Self::Duplicate { copy_id } => format!("duplicate-{copy_id}.json"),
         }
     }
 }
@@ -374,6 +376,9 @@ impl WorkspaceRepository {
                 }
                 WorkspaceTransactionOperation::CollectionRename { collection_id } => {
                     self.recover_collection_rename(&manifest, collection_id, &path)?;
+                }
+                WorkspaceTransactionOperation::Duplicate { copy_id } => {
+                    self.recover_duplicate(&manifest, copy_id, &path)?;
                 }
             }
         }
@@ -1695,6 +1700,180 @@ impl WorkspaceRepository {
         })
     }
 
+    fn recover_duplicate(
+        &self,
+        manifest: &WorkspaceManifest,
+        copy_id: Uuid,
+        journal: &Path,
+    ) -> Result<()> {
+        let staging = self
+            .transaction_directory()
+            .join(format!("duplicate-{copy_id}"));
+        if staging.exists() {
+            fs::remove_dir_all(&staging)?;
+        }
+        // Folder/request publication is one rename, hence already complete if visible.
+        // Collections commit at the manifest; remove an unpublished orphan after a crash.
+        let target = self.root.join("collections").join(copy_id.to_string());
+        if target.exists() && !manifest.collections.iter().any(|entry| entry.id == copy_id) {
+            let marker: ContainerDocument = read_yaml(&target.join(COLLECTION_MARKER))?;
+            if marker.id != copy_id || fs::symlink_metadata(&target)?.file_type().is_symlink() {
+                bail!("复制事务的集合标识或目录无效");
+            }
+            fs::remove_dir_all(target)?;
+        }
+        self.finish_transaction(journal)
+    }
+
+    pub fn duplicate_node(&self, node_id: Uuid) -> Result<WorkspaceSnapshot> {
+        self.duplicate_node_with_commit(node_id, write_yaml)
+    }
+
+    fn duplicate_node_with_commit(
+        &self,
+        node_id: Uuid,
+        commit: impl FnOnce(&Path, &WorkspaceManifest) -> Result<()>,
+    ) -> Result<WorkspaceSnapshot> {
+        use std::collections::HashMap;
+        let nodes = self.scan()?;
+        let source = nodes
+            .iter()
+            .find(|item| item.node.id == node_id)
+            .context("找不到复制来源")?;
+        let copy_id = Uuid::new_v4();
+        let name = required_name(&format!(
+            "{} 副本",
+            source.node.name.chars().take(117).collect::<String>()
+        ))?;
+        let mut manifest = self.read_manifest()?;
+        let collection = matches!(source.node.kind, WorkspaceNodeKind::Collection);
+        let target = if collection {
+            self.root.join("collections").join(copy_id.to_string())
+        } else {
+            source
+                .path
+                .parent()
+                .context("复制来源没有父目录")?
+                .join(if source.node.is_folder {
+                    copy_id.to_string()
+                } else {
+                    format!("{copy_id}.yaml")
+                })
+        };
+        if !target
+            .parent()
+            .context("复制目标缺少父目录")?
+            .canonicalize()?
+            .starts_with(self.root.canonicalize()?)
+        {
+            bail!("复制目标超出工作区目录");
+        }
+        let journal =
+            self.begin_transaction(WorkspaceTransactionOperation::Duplicate { copy_id })?;
+        let staging = self
+            .transaction_directory()
+            .join(format!("duplicate-{copy_id}"));
+        let staged_root = staging.join(if source.node.is_folder {
+            "tree"
+        } else {
+            "request.yaml"
+        });
+        let mut published = false;
+        let result = (|| -> Result<()> {
+            fs::create_dir_all(&staging)?;
+            let mut paths = HashMap::new();
+            paths.insert(source.path.clone(), staged_root.clone());
+            for item in nodes.iter().filter(|item| {
+                item.path == source.path
+                    || (source.node.is_folder && item.path.starts_with(&source.path))
+            }) {
+                let is_root = item.node.id == node_id;
+                let id = if is_root { copy_id } else { Uuid::new_v4() };
+                let path = if is_root {
+                    staged_root.clone()
+                } else {
+                    let parent = paths
+                        .get(item.path.parent().context("复制节点缺少父级")?)
+                        .context("复制节点顺序无效")?;
+                    parent.join(if item.node.is_folder {
+                        id.to_string()
+                    } else {
+                        format!("{id}.yaml")
+                    })
+                };
+                if item.node.is_folder {
+                    let marker = if matches!(item.node.kind, WorkspaceNodeKind::Collection) {
+                        COLLECTION_MARKER
+                    } else {
+                        FOLDER_MARKER
+                    };
+                    let mut document: ContainerDocument = read_yaml(&item.path.join(marker))?;
+                    if document.id != item.node.id {
+                        bail!("复制来源的容器标识不一致");
+                    }
+                    document.id = id;
+                    if is_root {
+                        document.name = name.clone();
+                    }
+                    fs::create_dir_all(&path)?;
+                    write_yaml(&path.join(marker), &document)?;
+                    let _: ContainerDocument = read_yaml(&path.join(marker))?;
+                    paths.insert(item.path.clone(), path);
+                } else {
+                    let mut document: PersistedRequest = read_yaml(&item.path)?;
+                    if document.id != item.node.id {
+                        bail!("复制来源的请求标识不一致");
+                    }
+                    document.id = id;
+                    if is_root {
+                        document.name = name.clone();
+                    }
+                    for case in &mut document.debug_cases {
+                        case.id = Uuid::new_v4();
+                        case.request_id = id;
+                    }
+                    write_yaml(&path, &document)?;
+                    let _: PersistedRequest = read_yaml(&path)?;
+                }
+            }
+            fs::rename(&staged_root, &target).context("发布复制内容失败")?;
+            published = true;
+            if collection {
+                manifest.collections.push(CollectionEntry {
+                    id: copy_id,
+                    name,
+                    directory: format!("collections/{copy_id}"),
+                });
+                commit(&self.manifest_path(), &manifest)?;
+            }
+            Ok(())
+        })();
+        if let Err(error) = result {
+            if collection
+                && self
+                    .read_manifest()?
+                    .collections
+                    .iter()
+                    .any(|entry| entry.id == copy_id)
+            {
+                self.recover_duplicate(&self.read_manifest()?, copy_id, &journal)?;
+                return Err(error.context("副本已完整提交，但后续清理失败，请刷新工作区"));
+            }
+            if published {
+                if source.node.is_folder {
+                    fs::remove_dir_all(&target)?;
+                } else {
+                    fs::remove_file(&target)?;
+                }
+            }
+            self.recover_duplicate(&self.read_manifest()?, copy_id, &journal)?;
+            return Err(error.context("复制失败，已回滚副本"));
+        }
+        fs::remove_dir_all(&staging)?;
+        self.finish_transaction(&journal)?;
+        self.snapshot()
+    }
+
     pub fn create_folder(&self, parent_id: Uuid, name: String) -> Result<WorkspaceSnapshot> {
         let name = required_name(&name)?;
         let parent = self.locate(parent_id)?;
@@ -2363,6 +2542,111 @@ mod tests {
             let directory = self.repository.transaction_directory();
             assert!(!directory.exists() || fs::read_dir(directory).unwrap().next().is_none());
         }
+    }
+
+    #[test]
+    fn duplicate_preserves_inheritance_and_cases_with_new_identities() {
+        let fixture = CollectionTransactionFixture::new();
+        let repository = &fixture.repository;
+        let mut container = repository.read_container(fixture.id).unwrap();
+        container.auth = AuthConfig::Bearer {
+            token: "copy-fixture".into(),
+        };
+        container.settings.timeout_ms = Some(1234);
+        repository.save_container(container).unwrap();
+        let request = repository.read_request(fixture.request_id).unwrap();
+        let source_case = repository
+            .create_debug_case(
+                fixture.request_id,
+                "case".into(),
+                Default::default(),
+                request.spec.clone(),
+            )
+            .unwrap();
+        let snapshot = repository.duplicate_node(fixture.id).unwrap();
+        let copy = snapshot
+            .nodes
+            .iter()
+            .find(|node| node.name.ends_with(" 副本"))
+            .unwrap();
+        let copied_request = snapshot
+            .nodes
+            .iter()
+            .find(|node| !node.is_folder && node.id != fixture.request_id)
+            .unwrap();
+        let copied_cases = repository.list_debug_cases(copied_request.id).unwrap();
+        assert_ne!(copy.id, fixture.id);
+        assert_eq!(copied_cases.len(), 1);
+        assert_ne!(copied_cases[0].id, source_case.id);
+        assert_eq!(copied_cases[0].request_id, copied_request.id);
+        let original = repository
+            .resolve_request_inheritance(fixture.request_id, request.spec.clone())
+            .unwrap();
+        let copied = repository
+            .resolve_request_inheritance(copied_request.id, request.spec)
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(original).unwrap(),
+            serde_json::to_value(copied).unwrap()
+        );
+        // Folder and request copies publish at their original sibling location.
+        let folder = snapshot
+            .nodes
+            .iter()
+            .find(|node| node.parent_id == Some(fixture.id))
+            .unwrap();
+        repository.duplicate_node(folder.id).unwrap();
+        repository.duplicate_node(fixture.request_id).unwrap();
+        assert_eq!(repository.snapshot().unwrap().nodes.len(), 9);
+    }
+
+    #[test]
+    fn duplicate_rolls_back_failed_manifest_and_recovers_crash_staging() {
+        let fixture = CollectionTransactionFixture::new();
+        let repository = &fixture.repository;
+        let before = fs::read(repository.manifest_path()).unwrap();
+        let error = repository
+            .duplicate_node_with_commit(fixture.id, |_, _| bail!("injected manifest failure"))
+            .unwrap_err();
+        assert!(error.to_string().contains("已回滚"));
+        assert_eq!(fs::read(repository.manifest_path()).unwrap(), before);
+        assert_eq!(repository.snapshot().unwrap().nodes.len(), 3);
+        assert_eq!(
+            fs::read_dir(repository.root.join("collections"))
+                .unwrap()
+                .count(),
+            1
+        );
+        assert_eq!(
+            fs::read_dir(repository.transaction_directory())
+                .unwrap()
+                .count(),
+            0
+        );
+        let id = Uuid::new_v4();
+        let journal = repository
+            .begin_transaction(WorkspaceTransactionOperation::Duplicate { copy_id: id })
+            .unwrap();
+        let staging = repository
+            .transaction_directory()
+            .join(format!("duplicate-{id}"));
+        fs::create_dir_all(&staging).unwrap();
+        let target = repository.root.join("collections").join(id.to_string());
+        fs::create_dir_all(&target).unwrap();
+        let mut document: ContainerDocument = read_yaml(
+            &repository
+                .locate(fixture.id)
+                .unwrap()
+                .path
+                .join(COLLECTION_MARKER),
+        )
+        .unwrap();
+        document.id = id;
+        write_yaml(&target.join(COLLECTION_MARKER), &document).unwrap();
+        repository.recover_pending_transactions().unwrap();
+        assert!(!staging.exists());
+        assert!(!target.exists());
+        assert!(!journal.exists());
     }
 
     impl Drop for CollectionTransactionFixture {

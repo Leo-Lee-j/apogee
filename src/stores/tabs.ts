@@ -1,5 +1,6 @@
 import { pathParameterNames } from '@/features/requestParameters'
 import { defineStore } from 'pinia'
+import { useEditorRecoveryStore } from './editorRecovery'
 import { ref, shallowRef, computed, markRaw } from 'vue'
 import type {
   ActualRequest,
@@ -33,6 +34,7 @@ export type RequestViewMode = 'edit' | 'documentation'
 export type TabKind = 'request' | 'settings' | 'workspace-stats' | 'container-config'
 
 export interface Tab {
+  recoveryId: string
   id: string
   /** 决定标签下方挂载哪一种工作区内容；后续可继续扩展 history 等通用页面。 */
   kind: TabKind
@@ -252,6 +254,7 @@ export const useTabsStore = defineStore('tabs', () => {
           ...init,
           persistedAuth: init.nodeId ? init.auth ?? { type: 'inherit' } : undefined,
           id: existing.id,
+          recoveryId: crypto.randomUUID(),
           preview: true,
           dirty: false,
           error: null,
@@ -269,6 +272,7 @@ export const useTabsStore = defineStore('tabs', () => {
     }
     const tab: Tab = markRaw({
       id: nextId(),
+      recoveryId: crypto.randomUUID(),
       kind: 'request',
       title: '新建请求',
       method: 'GET',
@@ -287,7 +291,7 @@ export const useTabsStore = defineStore('tabs', () => {
       historyPreview: false,
       newPanel: false,
       ...init,
-      persistedAuth: init?.nodeId ? init.auth ?? { type: 'inherit' } : undefined,
+      persistedAuth: init?.nodeId ? init.persistedAuth ?? init.auth ?? { type: 'inherit' } : undefined,
     })
     tabs.value = [...tabs.value, tab]
     activate(tab.id)
@@ -367,6 +371,15 @@ export const useTabsStore = defineStore('tabs', () => {
 
   async function close(id: string) {
     const current = tabs.value.find((tab) => tab.id === id)
+    if (!current) return
+    const recovery = useEditorRecoveryStore()
+    if (current.kind === 'request' && !current.nodeId && current.dirty && !current.historyPreview) {
+      if (!(await recovery.closeDraft(current))) {
+        if (recovery.lastError) await showSaveError(recovery.lastError, workspaceGeneration)
+        return
+      }
+    }
+    if (current.kind === 'container-config' && !(await recovery.settleContainers())) return
     if (current?.nodeId) {
       const generation = workspaceGeneration
       const result = await save(id)
@@ -386,6 +399,7 @@ export const useTabsStore = defineStore('tabs', () => {
       activeId.value = next?.id ?? null
       if (next) touch(next.id)
     }
+    if (!(await recovery.flush()) && recovery.lastError) await showSaveError(recovery.lastError, workspaceGeneration)
   }
 
   function patch(id: string, delta: Partial<Tab>) {

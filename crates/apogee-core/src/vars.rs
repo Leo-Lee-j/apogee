@@ -52,9 +52,9 @@ pub fn resolve_request(
     let resolver = Resolver::from_environment(environment)?;
     let mut resolved = spec.clone();
 
-    // URL 中的 {{name}} 是路径参数语法，不是环境变量；其值由 path_params
-    // 在 HTTP 构造阶段替换。环境变量仍继续解析 Query/Header/Body/Auth。
-    resolved.url = spec.url.clone();
+    // Legacy {{name}} remains Path syntax. Explicit {{env:name}} resolves URL variables
+    // without changing existing request files or allowing Path substitution in the authority.
+    resolved.url = resolver.resolve_url(&spec.url)?;
     if let Some(environment) = environment {
         resolved.url = with_environment_host(&resolved.url, &environment.host);
     }
@@ -77,6 +77,24 @@ struct Resolver {
 }
 
 impl Resolver {
+    fn resolve_url(&self, url: &str) -> Result<String, AppError> {
+        let mut result = String::new();
+        let mut remaining = url;
+        while let Some(start) = remaining.find("{{env:") {
+            result.push_str(&remaining[..start]);
+            let name_start = start + 6;
+            let end = remaining[name_start..].find("}}").ok_or_else(|| {
+                AppError::new(ErrorKind::Var, "URL 环境变量没有闭合")
+                    .hint(Hint::new("使用 {{env:变量名}} 格式"))
+            })?;
+            let name = remaining[name_start..name_start + end].trim();
+            result.push_str(&self.resolve_variable(name, &mut Vec::new(), 0)?);
+            remaining = &remaining[name_start + end + 2..];
+        }
+        result.push_str(remaining);
+        Ok(result)
+    }
+
     fn from_environment(environment: Option<&Environment>) -> Result<Self, AppError> {
         let mut values = HashMap::new();
         if let Some(environment) = environment {

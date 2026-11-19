@@ -399,7 +399,13 @@ pub struct TreeNode {
     pub depth: usize,
 }
 
-/// 索引返回的节点元数据。标量的 `value_span` 由调用方从 spool 按需读取。
+/// 有界子节点页及父节点的完整子项数。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TreePage {
+    pub nodes: Vec<TreeNode>,
+    pub total: usize,
+}
+
 #[derive(Debug, Clone)]
 pub struct IndexedTreeNode {
     pub node: TreeNode,
@@ -525,6 +531,11 @@ impl SpanIndex {
 
     pub fn total_nodes(&self) -> usize {
         self.nodes.len()
+    }
+
+    pub fn child_count(&self, path: &str) -> Option<usize> {
+        self.resolve_id(path)
+            .map(|id| self.nodes[id as usize].child_count())
     }
 
     /// 索引实际持有的近似堆内存，用于预算和 Spike；不含 Arc/HashMap 缓存壳的少量开销。
@@ -1694,6 +1705,9 @@ mod tests {
     fn span_index_pages_children_without_value_tree() {
         let raw = br#"{"code":0,"data":{"list":[{"a":1},{"a":2},{"a":3}],"n":null}}"#;
         let index = SpanIndex::parse(raw).unwrap();
+        assert_eq!(index.child_count(""), Some(2));
+        assert_eq!(index.child_count("/data/list"), Some(3));
+        assert_eq!(index.child_count("/missing"), None);
 
         let root = page(&index, raw, "", 0, 10);
         assert_eq!(root.len(), 2);
@@ -1709,6 +1723,17 @@ mod tests {
         assert_eq!(list[0].path, "/data/list/1");
         assert_eq!(list[0].kind, NodeKind::Object);
         assert!(page(&index, raw, "/data/n", 0, 10).is_empty());
+    }
+
+    #[test]
+    fn span_index_reaches_the_last_child_of_large_nested_arrays() {
+        let raw = serde_json::to_vec(&serde_json::json!({"items": (0..401).collect::<Vec<_>>() }))
+            .unwrap();
+        let index = SpanIndex::parse(&raw).unwrap();
+        assert_eq!(index.child_count("/items"), Some(401));
+        let last = page(&index, &raw, "/items", 400, 200);
+        assert_eq!(last.len(), 1);
+        assert_eq!(last[0].preview.as_deref(), Some("400"));
     }
 
     #[test]

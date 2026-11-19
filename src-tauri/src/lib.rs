@@ -16,6 +16,7 @@ mod mem;
 mod oauth2;
 mod persistence;
 mod protocol;
+mod recovery;
 mod request_preparation;
 mod state;
 mod update;
@@ -86,6 +87,7 @@ pub fn run() {
             commands::save_response,
             commands::index_response,
             commands::get_response_tree,
+            commands::get_response_tree_page,
             commands::process_memory,
             commands::app_memory,
             commands::spike_report,
@@ -115,10 +117,13 @@ pub fn run() {
             commands::workspace_create_request,
             commands::workspace_rename_node,
             commands::workspace_delete_node,
+            commands::workspace_duplicate_node,
             commands::workspace_create_environment,
             commands::workspace_save_environment,
             commands::workspace_delete_environment,
             commands::workspace_save_state,
+            commands::workspace_read_recovery,
+            commands::workspace_save_recovery,
             commands::history_record,
             commands::history_record_error,
             commands::history_list,
@@ -668,6 +673,23 @@ mod commands {
         let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
         state
             .response_tree_page(workspace_id, session_id, id, &path, offset, limit)
+            .map_err(|error| error.to_string())
+    }
+
+    #[tauri::command]
+    pub fn get_response_tree_page(
+        state: State<'_, Arc<AppState>>,
+        workspace_id: String,
+        session_id: String,
+        response_id: String,
+        path: String,
+        offset: usize,
+        limit: usize,
+    ) -> Result<apogee_core::response::TreePage, String> {
+        let id = parse_id(&response_id)?;
+        let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
+        state
+            .response_tree_window(workspace_id, session_id, id, &path, offset, limit)
             .map_err(|error| error.to_string())
     }
 
@@ -1777,6 +1799,37 @@ mod commands {
             .map_err(|error| error.to_string())
     }
 
+    #[tauri::command]
+    pub fn workspace_read_recovery(
+        app: tauri::AppHandle,
+        state: State<'_, Arc<AppState>>,
+        workspace_id: String,
+        session_id: String,
+    ) -> Result<crate::recovery::RecoverySnapshot, String> {
+        let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
+        let repository = crate::recovery::RecoveryRepository::new(&super::app_data_dir(&app)?);
+        state
+            .with_workspace(workspace_id, session_id, |_| repository.load(workspace_id))
+            .map_err(|error| error.to_string())
+    }
+
+    #[tauri::command]
+    pub fn workspace_save_recovery(
+        app: tauri::AppHandle,
+        state: State<'_, Arc<AppState>>,
+        workspace_id: String,
+        session_id: String,
+        snapshot: crate::recovery::RecoverySnapshot,
+    ) -> Result<(), String> {
+        let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
+        let repository = crate::recovery::RecoveryRepository::new(&super::app_data_dir(&app)?);
+        state
+            .with_workspace_mutation(workspace_id, session_id, |_| {
+                repository.save(workspace_id, &snapshot)
+            })
+            .map_err(|error| error.to_string())
+    }
+
     /// 创建集合并返回刷新后的扁平树。
     #[tauri::command]
     pub fn workspace_create_collection(
@@ -1789,6 +1842,22 @@ mod commands {
         state
             .with_workspace_mutation(workspace_id, session_id, |repository| {
                 repository.create_collection(name)
+            })
+            .map_err(|error| error.to_string())
+    }
+
+    #[tauri::command]
+    pub fn workspace_duplicate_node(
+        state: State<'_, Arc<AppState>>,
+        workspace_id: String,
+        session_id: String,
+        node_id: String,
+    ) -> Result<WorkspaceSnapshot, String> {
+        let id = parse_id(&node_id)?;
+        let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
+        state
+            .with_workspace_mutation(workspace_id, session_id, |repository| {
+                repository.duplicate_node(id)
             })
             .map_err(|error| error.to_string())
     }

@@ -29,6 +29,7 @@
     "spike:s3:nobuild": "pwsh -NoProfile -File scripts/measure-s3-windows.ps1 -SkipBuild",
     "spike:s5": "vite build --mode production && node scripts/measure-bundle.mjs",
     "check:contrast": "node scripts/check-contrast.mjs",
+    "check:bundle": "node scripts/check-bundle-budget.mjs",
     "licenses:rust": "cargo about generate about.hbs -o THIRD-PARTY-NOTICES.txt",
     "licenses:npm": "node scripts/check-npm-licenses.mjs --notices",
     "licenses:check": "cargo deny check && node scripts/check-npm-licenses.mjs",
