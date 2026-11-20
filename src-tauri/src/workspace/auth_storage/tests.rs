@@ -202,7 +202,7 @@ fn failed_collection_copy_cleans_vault_but_keeps_source_credentials() {
     assert!(repo
         .duplicate_node_with_commit(collection, |_, manifest| {
             let copy = manifest.collections.last().unwrap();
-            staged_refs = repo.auth_references(&root.join(&copy.directory))?;
+            staged_refs = WorkspaceRepository::auth_references(&root.join(&copy.directory))?;
             bail!("injected copy manifest failure")
         })
         .is_err());

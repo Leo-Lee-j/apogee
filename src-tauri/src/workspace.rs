@@ -713,8 +713,8 @@ impl WorkspaceRepository {
         } else {
             self.ensure_collection_delete_paths_unreferenced(manifest, id, &target, &tombstone)?;
             let refs = [
-                self.auth_references(&tombstone)?,
-                self.auth_references(&target)?,
+                Self::auth_references(&tombstone)?,
+                Self::auth_references(&target)?,
             ]
             .concat();
             remove_directory_if_exists(&tombstone)?;
@@ -2163,7 +2163,7 @@ impl WorkspaceRepository {
         let (imported_folders, environments) = match prepare {
             Ok(value) => value,
             Err(error) => {
-                let refs = self.auth_references(&staging_collection)?;
+                let refs = Self::auth_references(&staging_collection)?;
                 let _ = fs::remove_dir_all(&staging_collection);
                 if !staging_collection.exists() {
                     self.delete_auth_references(refs);
@@ -2204,8 +2204,8 @@ impl WorkspaceRepository {
         let _ = fs::remove_dir_all(&staging_environments);
         if let Err(error) = publish {
             let refs = [
-                self.auth_references(&final_collection)?,
-                self.auth_references(&staging_collection)?,
+                Self::auth_references(&final_collection)?,
+                Self::auth_references(&staging_collection)?,
             ]
             .concat();
             let _ = fs::remove_dir_all(&final_collection);
@@ -2240,7 +2240,7 @@ impl WorkspaceRepository {
             .transaction_directory()
             .join(format!("duplicate-{copy_id}"));
         if staging.exists() {
-            let refs = self.auth_references(&staging)?;
+            let refs = Self::auth_references(&staging)?;
             fs::remove_dir_all(&staging)?;
             self.delete_auth_references(refs);
         }
@@ -2252,7 +2252,7 @@ impl WorkspaceRepository {
             if marker.id != copy_id || fs::symlink_metadata(&target)?.file_type().is_symlink() {
                 bail!("复制事务的集合标识或目录无效");
             }
-            let refs = self.auth_references(&target)?;
+            let refs = Self::auth_references(&target)?;
             fs::remove_dir_all(target)?;
             self.delete_auth_references(refs);
         }
@@ -2395,7 +2395,7 @@ impl WorkspaceRepository {
                 return Err(error.context("副本已完整提交，但后续清理失败，请刷新工作区"));
             }
             if published {
-                let refs = self.auth_references(&target)?;
+                let refs = Self::auth_references(&target)?;
                 if source.node.is_folder {
                     fs::remove_dir_all(&target)?;
                 } else {
@@ -2406,7 +2406,7 @@ impl WorkspaceRepository {
             self.recover_duplicate(&self.read_manifest()?, copy_id, &journal)?;
             return Err(error.context("复制失败，已回滚副本"));
         }
-        let refs = self.auth_references(&staging)?;
+        let refs = Self::auth_references(&staging)?;
         fs::remove_dir_all(&staging)?;
         self.delete_auth_references(refs);
         self.finish_transaction(&journal)?;
@@ -2498,13 +2498,13 @@ impl WorkspaceRepository {
                 });
             }
             WorkspaceNodeKind::Folder => {
-                let refs = self.auth_references(&location.path)?;
+                let refs = Self::auth_references(&location.path)?;
                 fs::remove_dir_all(&location.path)
                     .with_context(|| format!("删除文件夹目录失败：{}", location.path.display()))?;
                 self.delete_auth_references(refs);
             }
             WorkspaceNodeKind::Request => {
-                let refs = self.auth_references(&location.path)?;
+                let refs = Self::auth_references(&location.path)?;
                 fs::remove_file(&location.path)
                     .with_context(|| format!("删除请求文件失败：{}", location.path.display()))?;
                 self.delete_auth_references(refs);
@@ -3005,10 +3005,11 @@ mod tests {
             .find(|item| item.key == "importedToken")
             .unwrap();
         assert!(imported_value.secret && imported_value.has_value);
-        assert!(fs::read_to_string(repository.environment_path(imported.id))
-            .unwrap()
-            .find("synthetic-postman-secret")
-            .is_none());
+        assert!(
+            !fs::read_to_string(repository.environment_path(imported.id))
+                .unwrap()
+                .contains("synthetic-postman-secret")
+        );
         assert_eq!(
             repository
                 .read_environment(imported.id)

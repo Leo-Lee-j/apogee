@@ -180,7 +180,7 @@ impl WorkspaceRepository {
     }
 
     /// Capture references before deletion; metadata reads never require a working vault.
-    pub(super) fn auth_references(&self, path: &Path) -> Result<Vec<(Uuid, Vec<Uuid>)>> {
+    pub(super) fn auth_references(path: &Path) -> Result<Vec<(Uuid, Vec<Uuid>)>> {
         let mut refs = Vec::new();
         if !path.exists() {
             return Ok(refs);
@@ -191,7 +191,7 @@ impl WorkspaceRepository {
         }
         if metadata.is_dir() {
             for entry in fs::read_dir(path)? {
-                refs.extend(self.auth_references(&entry?.path())?);
+                refs.extend(Self::auth_references(&entry?.path())?);
             }
         } else if path.extension().is_some_and(|ext| ext == "yaml") {
             let stored: StoredDocument = read_yaml(path)?;

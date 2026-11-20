@@ -273,7 +273,7 @@ impl WorkspaceRepository {
         journal: &Path,
     ) -> Result<()> {
         let staging = self.transaction_directory().join(format!("import-{id}"));
-        let refs = self.auth_references(&staging)?;
+        let refs = Self::auth_references(&staging)?;
         remove_directory_if_exists(&staging)?;
         self.delete_auth_references(refs);
         let target = self.root.join("collections").join(id.to_string());
@@ -282,7 +282,7 @@ impl WorkspaceRepository {
             if marker.id != id || fs::symlink_metadata(&target)?.file_type().is_symlink() {
                 bail!("导入事务的集合标识或目录无效");
             }
-            let refs = self.auth_references(&target)?;
+            let refs = Self::auth_references(&target)?;
             fs::remove_dir_all(target)?;
             self.delete_auth_references(refs);
         }
