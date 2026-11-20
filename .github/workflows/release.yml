@@ -224,19 +224,23 @@ jobs:
             'Unsigned installer: Windows may show a SmartScreen or unverified publisher warning. Windows code signing is optional.'
           }
           $notesFile = Join-Path $env:RUNNER_TEMP 'apogee-release-verification.md'
+          $changelog = Get-Content -LiteralPath CHANGELOG.md -Raw
+          $sectionPattern = '(?ms)^## \[' + [regex]::Escape($env:RELEASE_VERSION) + '\][^\r\n]*\r?\n(?<notes>.*?)(?=^## \[|\z)'
+          $section = [regex]::Match($changelog, $sectionPattern)
+          if (-not $section.Success -or [string]::IsNullOrWhiteSpace($section.Groups['notes'].Value)) {
+            throw "CHANGELOG.md has no release notes for $env:RELEASE_VERSION."
+          }
           $notes = @(
+            $section.Groups['notes'].Value.Trim(),
+            '',
             '## Verification',
             '',
             "- Windows installer: $signingState",
             '- Verify the installer against `SHA256SUMS.txt` before installation.',
-            '- Inspect `apogee-rust.spdx.json`, `apogee-npm.spdx.json`, and both third-party notice files for dependency provenance and attribution.',
-            '',
-            '## Release notes',
-            '',
-            'See `CHANGELOG.md` in this tagged source revision for user-visible changes.'
+            '- Inspect `apogee-rust.spdx.json`, `apogee-npm.spdx.json`, and both third-party notice files for dependency provenance and attribution.'
           ) -join "`n"
           if ($env:E2E_VERIFICATION_REF) {
-            $notes += "E2E verification used the corrected test harness from commit $env:E2E_VERIFICATION_REF. Application source is unchanged from the release tag."
+            $notes += "`n`nE2E verification used the corrected test harness from commit $env:E2E_VERIFICATION_REF. Application source is unchanged from the release tag."
           }
           Set-Content -LiteralPath $notesFile -Value $notes
           "RELEASE_ASSET_DIR=$assetDir" | Add-Content -LiteralPath $env:GITHUB_ENV

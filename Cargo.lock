@@ -97,7 +97,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "apogee-core"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -123,7 +123,7 @@ dependencies = [
 
 [[package]]
 name = "apogee-desktop"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "apogee-core",
@@ -3622,7 +3622,7 @@ checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
 
 [[package]]
 name = "s6-postman-schema"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "jsonschema",

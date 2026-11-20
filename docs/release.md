@@ -2,17 +2,19 @@
 
 本文定义 Apogee 官方发布的范围、验证步骤和产物要求。它是发布者的操作标准，不代表未列出平台已经受支持。
 
-## 最简单的发布方式
+## 标签发布
 
 仓库公开后，无需额外 Token、Windows 证书或更新签名密钥。将已审阅代码提交并推送，确保版本号一致，再推送对应的版本 tag：
 
 ```powershell
-# 示例：三处版本号均为 0.1.0，当前提交已包含发布工作流
-git tag v0.1.0
-git push origin v0.1.0
+# 示例：已完成检查，提交包含 0.1.2 的版本与变更记录
+git tag -a v0.1.2 -m "Apogee 0.1.2"
+git push --atomic origin HEAD:master v0.1.2
 ```
 
-GitHub Actions 会自动检查、构建安装包、生成校验和等附件并创建 Release，不用手工上传。正式版与预发布都可以不签名；应用直接检查公开的 Releases 并下载更新。已发布的 tag 不要重用。以下是详细说明，证书和平台安全开关均不是额外的必配项。
+推送前先拉取远程状态，确认当前提交可以快进更新 `master`；不要强制推送。GitHub Actions 使用仓库自带的 `github.token` 和工作流声明的 `contents: write` 权限，在检查通过后构建安装包、生成附件并创建 Release，无需个人访问令牌或手工上传。正式版与预发布都可不签名；证书和可选安全开关不是发布前提。
+
+发布成功后确认 Release 页面、安装包和校验材料均可公开下载。推送 tag 仅表示启动发布，不能据此宣称安装包已经可用；工作流结果和附件才是发布完成的依据。
 
 若标签推送后发现仅 E2E 测试脚本存在环境适配问题，先在 master 修复并验证脚本，再从 master 手动运行 Release，tag 仍使用原标签，`e2e_ref` 填修复提交的完整 SHA。工作流只替换 `scripts/e2e-workspace.mjs`，验证该提交属于 master，并在 Release Notes 中记录测试脚本来源；应用源码、版本和依赖继续来自不可变标签，所有发布检查仍执行。应用代码有问题时必须使用新版本标签。
 
@@ -29,8 +31,8 @@ GitHub Actions 会自动检查、构建安装包、生成校验和等附件并�
 
 ## 发布前准备
 
-1. 确认工作树干净，版本在 `package.json`、根 `Cargo.toml`（workspace package）和 `src-tauri/tauri.conf.json` 中一致。
-2. 更新 `CHANGELOG.md`，将已发布的改动从 `Unreleased` 移入带日期的版本段。
+1. 在 `package.json`、根 `Cargo.toml`（workspace package）和 `src-tauri/tauri.conf.json` 同步版本；`Cargo.lock` 的三个 workspace 包也应对应新版本，外部依赖保持锁定。确认工作树仅包含本次发布改动。
+2. 更新 `CHANGELOG.md`，将自上个发布标签以来的改动从 `Unreleased` 移入带日期的版本段，并同步中英 README。发布工作流将该版本段直接写入 Release Notes。
 3. 从干净依赖状态运行以下检查：
 
    ```powershell
@@ -39,6 +41,7 @@ GitHub Actions 会自动检查、构建安装包、生成校验和等附件并�
    pnpm typecheck
    pnpm test
    pnpm build
+   pnpm check:bundle
    pnpm check:contrast
    pnpm licenses:check
 
@@ -55,7 +58,7 @@ GitHub Actions 会自动检查、构建安装包、生成校验和等附件并�
    ```
 
 4. 审阅 `git diff --check` 和依赖变更。任何新的许可证例外、RustSec 忽略、网络权限或 Tauri capability 都需要单独解释。
-5. 使用形如 `v0.1.0`（稳定版）或 `v0.1.0-rc.1`（预发布）的已审阅 Git tag 触发发布工作流。不要通过移动或重用旧 tag 覆盖已发布产物。
+5. 提交并推送检查通过的代码，使用与版本匹配的 `v<major>.<minor>.<patch>`（稳定版）或 `v<major>.<minor>.<patch>-rc.1`（预发布）标签触发工作流。不要移动或重用已发布标签。完整门禁以 [CI](../.github/workflows/ci.yml) 和[发布工作流](../.github/workflows/release.yml)为准。
 
 ## 工作流产物
 
@@ -68,7 +71,7 @@ GitHub Actions 会自动检查、构建安装包、生成校验和等附件并�
 - `THIRD-PARTY-NOTICES-NPM.txt`，由 pnpm 生产依赖清单和包内许可证材料生成的 npm 归属声明；
 - `apogee-rust.spdx.json`：Cargo workspace 解析依赖的 SPDX 2.3 源码/构建输入 SBOM；
 - `apogee-npm.spdx.json`：pnpm production dependencies 的 SPDX 2.3 SBOM；
-- 一个可回溯至该 workflow run 的 Actions artifact，以及包含签名状态的 Release Notes。
+- 一个可回溯至该 workflow run 的 Actions artifact，以及包含该版本更新记录和签名状态的 Release Notes。
 
 两类 notices 和两份 SBOM 都是归属与供应链材料，不是本项目许可证的替代品；MIT 正文始终以仓库和发布资产中的 `LICENSE` 为准。SBOM 描述锁定的源码/构建输入，`SHA256SUMS.txt` 才用于确认下载的具体安装程序。依赖的许可白名单、来源和已知公告例外由 `deny.toml` 管理，新增例外必须有可审阅的具体理由。
 
@@ -99,11 +102,12 @@ Get-AuthenticodeSignature .\Apogee_<version>_x64-setup.exe
 
 ## 安全与回滚
 
-- 建议按需启用 GitHub Private Vulnerability Reporting、Dependabot alerts 和 Secret Scanning；这些平台开关不阻塞标签发布。见 [GitHub 发布与可选配置](github-admin-checklist.md)。
+- 可按需启用 GitHub Private Vulnerability Reporting、Dependabot alerts、Secret Scanning 和可用的 Push Protection；这些平台开关不阻塞标签发布。
 - 发现高危漏洞时，先与维护者私下协调修复和披露，再发布新的不可变版本及完整校验材料。
 - 已发现错误的发布不要悄悄替换附件。应标记或撤回受影响 Release、在说明中给出受影响版本和替代版本，并保留足够的审计线索。
 - 代码签名或 SBOM 不能证明产品无漏洞；它们只帮助确认发布来源、内容和依赖构成。
-## 应用内检查更新与下载
+
+## 应用内检查更新、安装与重启
 
 - 启动页“软件更新”、“设置 → 关于 → 软件更新”及底部状态栏提供手动检查；当前版本读取桌面宿主版本，不硬编码在 UI。
 - 更新源固定为 `Leo-Lee-j/apogee` 的 GitHub Releases。检查最近 100 个已发布 Release 的 `v<semver>` 标签，按语义版本比较而非按名称或发布时间排序；忽略草稿、非版本标签和构建元数据标签。默认稳定渠道，用户可包含预发布版。没有 Release 的空列表与网络失败分开显示。
@@ -112,5 +116,13 @@ Get-AuthenticodeSignature .\Apogee_<version>_x64-setup.exe
 - Rust 网络层仅允许 GitHub / 官方资产 CDN 的 HTTPS 重定向，始终验证 TLS；元数据上限 1 MiB、安装包上限 512 MiB、连接及读取超时、磁盘空间检查。不会沿用接口的“不验证 TLS”等设置。
 - 安装包流式写入系统应用缓存目录的 `updates` 子目录，使用独占 `.part` 文件；校验字节数及 SHA-256 后才发布为 `.exe`。取消覆盖连接、首字节等待和读取；失败/正常取消清理本次临时文件。进程被强制终止或断电可能留下 `.part`，可在退出应用后手动清理此缓存目录。
 - 同一应用只允许一个更新操作；下载进度按操作 ID 隔离。关闭设置页或切换工作区不取消下载。完整且有效的同版本缓存可复用；不清理用户选择的目录或 Cargo 缓存。
-- 下载完成后，用户可“在文件夹中显示”或确认“打开安装包”。后台在打开前重新校验同一缓存文件；前端不能传入任意可执行路径。安装程序可能请求 UAC，应用不会自动退出或自动安装，请先保存请求并手动退出后完成安装。
-- 这条更新链使用官方 GitHub Release 的 SHA-256 作为传输完整性校验，**不是 conduit 的独立签名 manifest 更新协议**，也不在应用内宣称已验证 Authenticode 发布者。Windows 代码签名为可选，稳定版和预发布包都可能未签名；以 Release Notes 的签名状态为准。
+- 下载完成后，用户可确认“安装并重启”：先走与退出应用相同的工作区、请求、环境及草稿保存保护；取消保存或保存失败时不启动安装。后台再次校验同一缓存文件后，以 `/P /UPDATE /R` 启动官方 NSIS 安装包，成功启动后退出当前应用；安装完成后由安装程序重新打开新版，避免直接重启旧程序。安装程序启动失败（包括取消 UAC）会恢复当前界面并显示错误，可重试。退出后的安装失败由安装程序报告，可从缓存重新运行安装包。
+- 同时保留“在文件夹中显示”和“打开安装包”用于手动安装；后者只启动安装程序，不自动退出。前端的安装入口仅传入后台持有的发布标签，不能指定任意可执行路径、命令行参数或下载来源。
+- 这条更新链使用官方 GitHub Release 的 SHA-256 作为传输完整性校验，没有独立签名的更新清单，也不在应用内宣称已验证 Authenticode 发布者。Windows 代码签名为可选，稳定版和预发布包都可能未签名；以 Release Notes 的签名状态为准。
+
+## 发布后验收
+
+1. 确认标签指向发布提交，Release 非草稿，Windows 安装包、许可证、两份 notices、两份 SBOM 与 `SHA256SUMS.txt` 共七个附件齐全。
+2. 对下载的安装包计算 SHA-256，与同一 Release 的校验文件比对；仅在 Release Notes 标明已签名时要求有效的 Authenticode 签名。
+3. 从旧版本实际检查、下载并校验新安装包。0.1.1 的原有入口只打开安装包，需手动退出完成安装；0.1.2 起提供“安装并重启”。
+4. 在具备“安装并重启”的版本验证保存、取消、启动失败及升级成功后打开新版；确认工作区数据保留。单元测试和构建通过不替代真实覆盖安装验收。

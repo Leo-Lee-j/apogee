@@ -21,6 +21,7 @@
 
 <p align="center">
   <a href="https://github.com/Leo-Lee-j/apogee/releases"><strong>Download for Windows</strong></a> ·
+  <a href="docs/README.md">Documentation</a> ·
   <a href="CHANGELOG.md">Changelog</a> ·
   <a href="https://github.com/Leo-Lee-j/apogee/issues">Report an issue</a>
 </p>
@@ -36,7 +37,7 @@ The project is under active development and currently targets **Windows 10/11 x6
 - **Configure authentication.** Use Basic, Bearer, API Key, OAuth 1.0, OAuth 2.0, or JWT authentication, or inherit it from a collection or folder. OAuth 2.0 supports token acquisition, refresh, and authorization code flows with PKCE.
 - **Inspect responses.** View status codes, headers, timing, and response content, and save responses to files. Rust streams large response bodies to local files and reads them on demand, rather than sending the entire body to the frontend.
 - **Bring your existing APIs.** Paste cURL commands to import requests, import Postman collections and environments, export Postman collections, or preview and import YApi projects.
-- **Make it your own.** Customize themes, fonts, and keyboard shortcuts, use request history and the command palette, and check for and download updates within the app.
+- **Make it your own.** Customize themes, fonts, and keyboard shortcuts, use request history and the command palette, and check for, download, and install updates within the app.
 
 ## Getting started
 
@@ -52,7 +53,7 @@ Available installers are listed on the release page. If no installer is availabl
 
 Workspaces, collections, and environments are stored in a local directory you choose. Requests connect to the endpoints you configure, and update checks connect to GitHub; local storage does not mean every feature works offline. Remove tokens, passwords, and other private information before sharing collections, logs, or screenshots.
 
-Check for updates from the startup page's update section, **Settings → About**, or the bottom status bar. By default, only stable releases are checked; you can also include prereleases. Downloads can be canceled and are verified against their size and SHA-256 checksum. The installer opens only after your confirmation, and the app does not quit automatically. Windows code signing is optional, so unsigned installers may trigger system security warnings.
+Check for updates from the startup page's update section, **Settings → About**, or the bottom status bar. By default, only stable releases are checked; you can also include prereleases. Downloads can be canceled and are verified against their size and SHA-256 checksum. After downloading, choose **Install and restart**: Apogee saves workspace state, prompts you to handle unsaved drafts and configuration, then exits after the installer starts. The installer opens the new version when installation succeeds. Canceling the save prompt or failing to start the installer keeps the current app open. You can also open the installer manually. Windows code signing is optional, so unsigned installers may trigger system security warnings.
 
 ## Running from source
 
@@ -88,7 +89,7 @@ Version tags trigger GitHub Actions to generate installers and verification file
 
 ## Documentation
 
-The following documents are currently available in Chinese.
+Start with the [documentation index](docs/README.md) for current usage, design references, and archived assessment reports. The documents below are currently available in Chinese; design and planning documents include future work.
 
 | Document | Contents |
 | --- | --- |
