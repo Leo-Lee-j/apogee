@@ -12,6 +12,8 @@
 
 首轮修复及桌面回归已完成。随后对组合操作进行 [第二轮复评](./feature-completeness-assessment-round2.md)，六项问题均已修复并完成桌面回归。第三轮复评发现并修复了环境密钥明文处理风险、多作用域缺口及 Host 补全不一致；实现、回归结果和剩余平台验收项见[第三轮复评](./feature-completeness-assessment-round3.md)。当前产物的启动与内存性能仍需实测；现有测试通过不代表未覆盖的功能已经交付。
 
+第四轮复评的三项认证与变量问题已处理：Auth 凭据与 OAuth2 轮换结果进入系统凭据存储，Token 操作统一全部变量作用域，环境配置合并全局保存状态。安全导出会移除直接凭据并保留变量引用；实现与回归边界见[第四轮复评与修复](./feature-completeness-assessment-round4.md)。
+
 ## 功能矩阵
 
 | 功能域 | 当前状态 | 尚需完善 |
@@ -19,11 +21,11 @@
 | HTTP 请求与参数 | 已交付；Query、Path、Header、批量编辑、JSON/raw/表单/文件/GraphQL；各 Body 类型草稿可独立恢复 | URL 与 Query 表格未双向同步；类型草稿受本机恢复容量与防抖边界限制 |
 | 请求保存与取消 | 已交付；顺序保存、失败保留、取消、关闭/切换/退出/设置重启保护、本机草稿恢复 | 恢复写入有 300ms 防抖；不是完整标签会话恢复，也不包含响应快照 |
 | 工作区与集合 | 已交付；创建、打开、切换、隔离、节点 CRUD、本地 YAML；Rust 事务复制保留容器配置与调试用例 | 干净标签、滚动位置等完整会话状态未恢复 |
-| 认证 | 已交付；Basic、Bearer、API Key、OAuth1、OAuth2、JWT 及继承 | OAuth2 主要支持 Client Credentials、Authorization Code + PKCE 与刷新；JWT 为 HMAC 算法，不能等同于完整认证协议覆盖 |
+| 认证 | 已交付；Basic、Bearer、API Key、OAuth1、OAuth2、JWT 及继承；工作区 Auth 凭据安全存储，OAuth2 全作用域快照 | OAuth2 主要支持 Client Credentials、Authorization Code + PKCE 与刷新；JWT 为 HMAC 算法，不能等同于完整认证协议覆盖 |
 | 环境与变量 | 已交付环境/全局/集合/文件夹/运行时作用域、系统凭据密钥存储、来源脱敏、解析预算与 host 一致预览；Windows 桌面回归通过 | 旧版普通变量不会自动推断为密钥；Linux/macOS 凭据提供器未实测；自动化仍缺完整桌面 UI，变量来源链尚无完整展示 |
 | 响应查看 | 部分交付；流式落盘、按需读取、原文/JSON 树、Header/Cookie、文件保存；JSON 树分页、跳页、重试及虚拟列表 | 全局响应搜索、Diff、表格视图和完整分阶段网络计时未交付 |
 | 历史与调试用例 | 已交付安全历史预览、用例快照和最近结果 | 用例类型只用于分类，尚无桌面断言、链路提取或跑批入口；脱敏历史预览不能等同于完整请求重放 |
-| 导入导出 | 部分交付；cURL 导入、Postman 集合/环境导入与集合导出、YApi 预览导入；普通集合/文件夹变量映射，Environment secret 安全保存，认证/Query/Body 往返与事务导入 | 脚本不执行；容器 secret 显式跳过并警告；OpenAPI 和完整 cURL 导出未闭环 |
+| 导入导出 | 部分交付；cURL 导入、Postman 集合/环境导入与集合导出、YApi 预览导入；普通集合/文件夹变量映射，Environment secret 安全保存，认证配置/Query/Body 往返与事务导入；安全导出移除直接 Auth 凭据、保留变量引用 | 脚本不执行；容器 secret 显式跳过并警告；OpenAPI 和完整 cURL 导出未闭环 |
 | 网络与企业环境 | 部分交付；代理、超时、重定向、HTTP 版本、TLS 校验设置及工作区 Cookie 会话管理 | Cookie 仅当前工作区会话有效；自定义 CA/mTLS 为占位；PAC、Host 覆写等未形成产品流程 |
 | 自动化 | 核心库基础 | 脚本、断言、提取器、顺序 Runner 有代码，但无完整桌面 IPC/UI；无 CLI、数据驱动和报告出口 |
 | 界面与语言 | 主题、字体、快捷键、基础命令面板已交付 | 语言设置主要控制组件内置文案；业务文案仍以中文硬编码为主；命令面板不是全局内容搜索 |

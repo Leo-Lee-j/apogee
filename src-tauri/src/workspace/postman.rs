@@ -44,7 +44,10 @@ impl WorkspaceRepository {
         let mut contexts = HashMap::<Uuid, (AuthConfig, RequestSettings)>::new();
         let mut children = HashMap::<Uuid, Vec<Value>>::new();
         let mut items = HashMap::<Uuid, Value>::new();
-        let mut warnings = Vec::new();
+        let mut warnings = vec![
+            "安全导出不包含 Auth 中直接填写的凭据，仅保留变量引用；请按需在目标客户端配置凭据"
+                .to_string(),
+        ];
         for item in &nodes {
             let (mut auth, mut settings) = item
                 .node
@@ -80,6 +83,9 @@ impl WorkspaceRepository {
                 }
                 merge_settings(&mut settings, &spec.settings);
                 spec.settings = settings;
+                let mut safe = serde_json::to_value(&spec)?;
+                auth_storage::strip_credentials(&mut safe);
+                spec = serde_json::from_value(safe)?;
                 if serde_json::to_value(&spec.settings)?
                     .as_object()
                     .unwrap()
@@ -182,7 +188,7 @@ impl WorkspaceRepository {
         let target = self.root.join("collections").join(id.to_string());
         let result = (|| -> Result<()> {
             fs::create_dir_all(&staging)?;
-            write_yaml(
+            self.write_document(
                 &staging.join(COLLECTION_MARKER),
                 &ContainerDocument {
                     apogee: WORKSPACE_FORMAT_VERSION,
@@ -202,7 +208,7 @@ impl WorkspaceRepository {
                 let id = Uuid::new_v4();
                 let path = parent.join(id.to_string());
                 fs::create_dir_all(&path)?;
-                write_yaml(
+                self.write_document(
                     &path.join(FOLDER_MARKER),
                     &ContainerDocument {
                         apogee: WORKSPACE_FORMAT_VERSION,
@@ -219,7 +225,7 @@ impl WorkspaceRepository {
                 let parent = paths.get(&request.folder_ids).context("导入请求目录无效")?;
                 let id = Uuid::new_v4();
                 stage_write(parent)?;
-                write_yaml(
+                self.write_document(
                     &parent.join(format!("{id}.yaml")),
                     &PersistedRequest {
                         apogee: WORKSPACE_FORMAT_VERSION,
@@ -267,14 +273,18 @@ impl WorkspaceRepository {
         journal: &Path,
     ) -> Result<()> {
         let staging = self.transaction_directory().join(format!("import-{id}"));
+        let refs = self.auth_references(&staging)?;
         remove_directory_if_exists(&staging)?;
+        self.delete_auth_references(refs);
         let target = self.root.join("collections").join(id.to_string());
         if target.exists() && !manifest.collections.iter().any(|entry| entry.id == id) {
             let marker: ContainerDocument = read_yaml(&target.join(COLLECTION_MARKER))?;
             if marker.id != id || fs::symlink_metadata(&target)?.file_type().is_symlink() {
                 bail!("导入事务的集合标识或目录无效");
             }
+            let refs = self.auth_references(&target)?;
             fs::remove_dir_all(target)?;
+            self.delete_auth_references(refs);
         }
         self.finish_transaction(journal)
     }
@@ -450,9 +460,7 @@ mod tests {
                 .iter()
                 .find(|request| request.name == "first")
                 .unwrap();
-            assert!(
-                matches!(&first.spec.auth,AuthConfig::Bearer {token} if token == "fixture-token")
-            );
+            assert!(matches!(&first.spec.auth,AuthConfig::Bearer {token} if token.is_empty()));
             if id == imported.collection_id {
                 assert!(matches!(
                     roundtrip

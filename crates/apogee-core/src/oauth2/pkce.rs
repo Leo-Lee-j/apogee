@@ -247,6 +247,29 @@ pub async fn authorize<F>(
     input: &OAuth2TokenRequest,
     environment: Option<&Environment>,
     settings: &ResolvedSettings,
+    cancel: tokio::sync::oneshot::Receiver<()>,
+    open_browser: F,
+) -> Result<Option<OAuth2TokenResponse>, AppError>
+where
+    F: FnOnce(url::Url) -> Result<(), AppError>,
+{
+    authorize_with_scopes(
+        input,
+        crate::vars::VariableContext {
+            environment,
+            scopes: &Default::default(),
+        },
+        settings,
+        cancel,
+        open_browser,
+    )
+    .await
+}
+
+pub async fn authorize_with_scopes<F>(
+    input: &OAuth2TokenRequest,
+    context: crate::vars::VariableContext<'_>,
+    settings: &ResolvedSettings,
     mut cancel: tokio::sync::oneshot::Receiver<()>,
     open_browser: F,
 ) -> Result<Option<OAuth2TokenResponse>, AppError>
@@ -259,7 +282,7 @@ where
     ) {
         return Ok(None);
     }
-    let input = resolve(input, OAuth2Grant::AuthorizationCode, environment)?;
+    let input = resolve_with_scopes(input, OAuth2Grant::AuthorizationCode, context)?;
     let redirect = redirect(&input.redirect_uri)?;
     let verifier = random_value()?;
     let state = random_value()?;
@@ -613,23 +636,48 @@ mod tests {
         });
         let (tx, rx) = tokio::sync::oneshot::channel();
         let (browser_tx, browser_rx) = tokio::sync::oneshot::channel();
-        let result = authorize(&input, None, &settings(), rx, |url| {
-            let values = browser_values(&url);
-            let expected = values["code_challenge"].clone();
-            tokio::spawn(async move {
-                let wrong =
-                    callback(callback_uri.clone(), "wrong", Some("fixture-private-code")).await;
-                assert!(wrong.starts_with("HTTP/1.1 400"));
-                assert!(!wrong.contains("private"));
-                let reply =
-                    callback(callback_uri, &values["state"], Some("fixture-code +/中文")).await;
-                assert!(reply.starts_with("HTTP/1.1 200"));
-                assert!(!reply.contains(&values["state"]));
-                assert!(!reply.contains("fixture-code"));
-                browser_tx.send(expected).unwrap();
-            });
-            Ok(())
-        })
+        let scopes = crate::vars::VariableScopes {
+            runtime: [
+                ("endpoint".into(), input.token_url.clone()),
+                ("callback".into(), input.redirect_uri.clone()),
+                ("client".into(), input.client_id.clone()),
+                ("authorization".into(), input.authorization_url.clone()),
+                ("scope".into(), input.scope.clone()),
+            ]
+            .into(),
+            ..Default::default()
+        };
+        input.token_url = "{{endpoint}}".into();
+        input.redirect_uri = "{{callback}}".into();
+        input.client_id = "{{client}}".into();
+        input.authorization_url = "{{authorization}}".into();
+        input.scope = "{{scope}}".into();
+        let result = authorize_with_scopes(
+            &input,
+            crate::vars::VariableContext {
+                environment: None,
+                scopes: &scopes,
+            },
+            &settings(),
+            rx,
+            |url| {
+                let values = browser_values(&url);
+                let expected = values["code_challenge"].clone();
+                tokio::spawn(async move {
+                    let wrong =
+                        callback(callback_uri.clone(), "wrong", Some("fixture-private-code")).await;
+                    assert!(wrong.starts_with("HTTP/1.1 400"));
+                    assert!(!wrong.contains("private"));
+                    let reply =
+                        callback(callback_uri, &values["state"], Some("fixture-code +/中文")).await;
+                    assert!(reply.starts_with("HTTP/1.1 200"));
+                    assert!(!reply.contains(&values["state"]));
+                    assert!(!reply.contains("fixture-code"));
+                    browser_tx.send(expected).unwrap();
+                });
+                Ok(())
+            },
+        )
         .await
         .unwrap()
         .unwrap();

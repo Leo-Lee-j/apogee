@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { round2 } from './e2e-round2.mjs'
 import { round3 } from './e2e-round3.mjs'
+import { round4 } from './e2e-round4.mjs'
 /**
  * Desktop smoke test for the workspace lifecycle.
  *
@@ -44,6 +45,7 @@ function externalAppStatus() {
 }
 
 let browser
+let workspacePage
 let lastCdpError = ''
 let receivedRequests = 0
 let closedResponses = 0
@@ -57,6 +59,7 @@ const slowServer = createServer((request, response) => {
       echoedRequests.push({ url: request.url, headers: request.headers, body: Buffer.concat(chunks).toString() })
       if (request.url === '/round2/set-cookie') response.setHeader('Set-Cookie', 'round2_session=fixture; Path=/; HttpOnly')
       if (request.url === '/round2/redirect') { response.statusCode = 302; response.setHeader('Set-Cookie', 'redirected=fixture; Path=/'); response.setHeader('Location', '/round2/needs-cookie') }
+      if (request.url === '/round4/token') { response.setHeader('Content-Type', 'application/json'); response.end(JSON.stringify({ access_token: 'round4-synthetic-access', refresh_token: 'round4-synthetic-refresh', token_type: 'Bearer', expires_in: 3600 })); return }
       response.setHeader('Content-Type', 'application/json')
       response.end(request.url?.startsWith('/tree')
         ? JSON.stringify([...Array.from({ length: 200 }, (_, i) => i), { nested: Array.from({ length: 401 }, (_, i) => i) }])
@@ -104,6 +107,7 @@ try {
     if (!page) await new Promise(resolvePromise => setTimeout(resolvePromise, 100))
   }
   if (!page) throw new Error(`Tauri main WebView page did not become ready${externalAppStatus()}`)
+  workspacePage = page
   page.on('pageerror', error => console.error(`WebView error: ${error.message}`))
 
   await page.waitForSelector('.launcher', { timeout: 30_000 })
@@ -373,11 +377,24 @@ try {
 
   await round2(page, root, 'http://127.0.0.1:' + address.port, echoedRequests)
   await round3(page, root, 'http://127.0.0.1:' + address.port, echoedRequests)
+  await round4(page, root, 'http://127.0.0.1:' + address.port, echoedRequests)
   console.log('E2E PASS: workspace lifecycle and draft recovery; native close cancellation; container editor retention; atomic copy via IPC; virtual JSON tree and nested paging; Postman body transmission and export/reimport; cancellation; immediate Query/Header/form edits; blank rows; bulk metadata and duplicate/disabled params; form conversion and multipart upload; Path constraints; keyboard and drag ordering')
 } catch (error) {
   console.error(`E2E FAIL: ${error instanceof Error ? error.stack ?? error.message : String(error)}`)
   process.exitCode = 1
 } finally {
+  // Remove vault references through the real repository before the test directory is removed.
+  if (workspacePage) {
+    try {
+      await workspacePage.evaluate(async () => {
+        const { ipc } = await import('/src/ipc/index.ts')
+        const snapshot = await ipc.workspaceLoad()
+        for (const node of snapshot.nodes.filter(n => n.kind === 'collection')) await ipc.workspaceDeleteNode(node.id)
+        for (const environment of snapshot.environments) await ipc.workspaceDeleteEnvironment(environment.id)
+        await ipc.workspaceSaveGlobalVariables([])
+      })
+    } catch (error) { console.error('E2E vault cleanup failed:', error); process.exitCode = 1 }
+  }
   slowServer.closeAllConnections()
   slowServer.close()
   await browser?.close().catch(() => {})

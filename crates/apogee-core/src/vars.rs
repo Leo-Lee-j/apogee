@@ -153,7 +153,7 @@ pub struct ResolvedRequest {
     pub sensitive_values: Vec<String>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct VariableScopes {
     pub global: Vec<EnvironmentVariable>,
     pub collection: Vec<EnvironmentVariable>,
@@ -165,6 +165,23 @@ pub struct VariableScopes {
 pub struct VariableContext<'a> {
     pub environment: Option<&'a Environment>,
     pub scopes: &'a VariableScopes,
+}
+
+/// Resolve a bounded group of fields with one expansion budget and one scope snapshot.
+pub fn resolve_texts_with_scopes(
+    texts: &[&str],
+    context: VariableContext<'_>,
+) -> Result<Vec<String>, AppError> {
+    let mut resolver = Resolver::from_environment(None)?;
+    resolver.add_scope(&context.scopes.global, "全局")?;
+    resolver.add_scope(&context.scopes.collection, "集合")?;
+    resolver.add_scope(&context.scopes.folder, "文件夹")?;
+    resolver.add_environment(context.environment)?;
+    resolver.add_runtime(&context.scopes.runtime)?;
+    texts
+        .iter()
+        .map(|text| resolver.resolve_text(text))
+        .collect()
 }
 
 /// 对单段文本做变量解析，供未来的预览命令复用。

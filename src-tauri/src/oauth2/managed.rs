@@ -18,6 +18,8 @@ use uuid::Uuid;
 #[serde(rename_all = "camelCase")]
 pub struct Input {
     pub operation_id: Uuid,
+    #[serde(default)]
+    pub runtime_variables: std::collections::BTreeMap<String, String>,
     pub node_id: Option<Uuid>,
     /// Only for non-persistent draft/case Auth. Never a path or credential key.
     pub owner_id: String,
@@ -43,6 +45,8 @@ pub struct Output {
     pub environment: Option<Environment>,
     #[serde(skip)]
     pub settings: RequestSettings,
+    #[serde(skip)]
+    pub variables: apogee_core::vars::VariableScopes,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub token: Option<OAuth2TokenResponse>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -62,6 +66,7 @@ struct Snapshot {
     owner_settings: Option<RequestSettings>,
     settings: RequestSettings,
     environment: Option<Environment>,
+    variables: apogee_core::vars::VariableScopes,
 }
 fn snapshot_in(
     repo: &crate::workspace::WorkspaceRepository,
@@ -111,6 +116,18 @@ fn snapshot_in(
         .environment_id
         .map(|id| repo.read_environment(id))
         .transpose()?;
+    let global = repo.global_variables_for_execution()?;
+    let (collection, folder) = input
+        .node_id
+        .map(|id| repo.token_variable_scopes(id))
+        .transpose()?
+        .unwrap_or_default();
+    let variables = apogee_core::vars::VariableScopes {
+        global,
+        collection,
+        folder,
+        runtime: input.runtime_variables.clone(),
+    };
     apply_network_defaults(&mut settings, app);
     Ok(Snapshot {
         auth,
@@ -120,6 +137,7 @@ fn snapshot_in(
         owner_settings,
         settings,
         environment,
+        variables,
     })
 }
 fn snapshot(
@@ -267,11 +285,12 @@ pub async fn run(
     if !credentials_match(&before.auth, &before.baseline) {
         return Err(stale());
     }
-    let context = apogee_core::oauth2::issuance_context(
+    let context = apogee_core::oauth2::issuance_context_with_scopes(
         &before.auth,
         before.environment.as_ref(),
         &before.settings,
         input.environment_id,
+        &before.variables,
     )
     .map_err(|_| stale())?;
     let context_changed = matches!(&before.auth, AuthConfig::OAuth2 { token_context: Some(value), auto_refresh: true, .. } if value != &context);
@@ -284,6 +303,7 @@ pub async fn run(
             source_id: before.source,
             environment: before.environment,
             settings: before.settings,
+            variables: before.variables,
             token: None,
             error: None,
         }));
@@ -317,19 +337,24 @@ pub async fn run(
     };
     let _advance_revision = AdvanceRevision(&lock.revision);
     let transport_id = Uuid::new_v4();
-    let transport = super::fetch(
+    let transport = super::fetch_frozen(
         state.clone(),
         workspace,
         session,
         TokenOperationInput {
             operation_id: transport_id,
+            runtime_variables: input.runtime_variables.clone(),
             node_id: input.node_id,
             environment_id: input.environment_id,
             request: (**config).clone(),
             grant,
             settings: input.settings.clone(),
         },
-        app,
+        super::FrozenTokenContext {
+            settings: before.settings.clone(),
+            environment: before.environment.clone(),
+            variables: before.variables.clone(),
+        },
     );
     let response = tokio::select! { biased;
         _ = &mut cancel => { state.cancel_token_operation(transport_id); return Ok(None); },
@@ -350,11 +375,12 @@ pub async fn run(
     let committed = state.with_workspace_mutation(workspace, session, |repo| {
         let after =
             snapshot_in(repo, &input, app).map_err(|_| anyhow::anyhow!("OAUTH2_SOURCE_STALE"))?;
-        let after_context = apogee_core::oauth2::issuance_context(
+        let after_context = apogee_core::oauth2::issuance_context_with_scopes(
             &after.auth,
             after.environment.as_ref(),
             &after.settings,
             input.environment_id,
+            &after.variables,
         )
         .map_err(|_| anyhow::anyhow!("OAUTH2_SOURCE_STALE"))?;
         if after.source != before.source
@@ -397,6 +423,7 @@ pub async fn run(
         source_id: before.source,
         environment: before.environment,
         settings: before.settings,
+        variables: before.variables,
         token: Some(response),
         error,
     }))
@@ -404,6 +431,7 @@ pub async fn run(
 
 #[cfg(test)]
 mod tests {
+    mod scopes_tests;
     use super::*;
     use crate::workspace::WorkspaceRepository;
     use apogee_core::{
@@ -479,6 +507,7 @@ mod tests {
         }
         fn input(&self, index: usize) -> Input {
             Input {
+                runtime_variables: Default::default(),
                 operation_id: Uuid::new_v4(),
                 node_id: Some(self.requests[index]),
                 owner_id: self.requests[index].to_string(),
@@ -1324,6 +1353,14 @@ mod tests {
             ..Default::default()
         };
         let output = Output {
+            variables: apogee_core::vars::VariableScopes {
+                runtime: [(
+                    "private-scope-secret".into(),
+                    "private-runtime-secret".into(),
+                )]
+                .into(),
+                ..Default::default()
+            },
             auth: f.auth(),
             source_id: Some(f.folder),
             token: None,
@@ -1341,6 +1378,8 @@ mod tests {
             !json.contains("private-proxy-secret") && !json.contains("private-environment-secret")
         );
         assert!(!json.contains("\"environment\"") && !json.contains("\"settings\""));
+        assert!(!json.contains("private-scope-secret") && !json.contains("private-runtime-secret"));
+        assert!(!json.contains("\"variables\""));
     }
     struct RunnerAdapter<'a>(&'a Fixture);
     impl apogee_core::automation::prepared::AsyncRequestExecutor for RunnerAdapter<'_> {

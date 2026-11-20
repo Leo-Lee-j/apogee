@@ -1,23 +1,32 @@
 //! Session-bound credential operations, separate from response/history event pipelines.
 pub(crate) mod managed;
-use crate::{
-    app_settings::{apply_network_defaults, AppSettings},
-    state::AppState,
-};
+#[cfg(test)]
+use crate::app_settings::{apply_network_defaults, AppSettings};
+use crate::state::AppState;
+#[cfg(test)]
+use apogee_core::request::{AuthConfig, Body, RequestSpec};
 use apogee_core::{
     oauth2::{OAuth2Grant, OAuth2TokenRequest, OAuth2TokenResponse},
     public::PublicError,
-    request::{AuthConfig, Body, RequestSettings, RequestSpec},
+    request::RequestSettings,
     AppError, ErrorKind, Hint,
 };
 use serde::Deserialize;
 use std::sync::Arc;
 use uuid::Uuid;
 
+pub(crate) struct FrozenTokenContext {
+    pub settings: RequestSettings,
+    pub environment: Option<apogee_core::vars::Environment>,
+    pub variables: apogee_core::vars::VariableScopes,
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TokenOperationInput {
     pub operation_id: Uuid,
+    #[serde(default)]
+    pub runtime_variables: std::collections::BTreeMap<String, String>,
     pub node_id: Option<Uuid>,
     pub environment_id: Option<Uuid>,
     pub request: OAuth2TokenRequest,
@@ -47,6 +56,7 @@ impl Drop for InFlightGuard {
     }
 }
 
+#[cfg(test)]
 pub async fn fetch(
     state: Arc<AppState>,
     workspace_id: Uuid,
@@ -64,6 +74,7 @@ pub async fn fetch(
     )
     .await
 }
+#[cfg(test)]
 async fn fetch_with_browser<F>(
     state: Arc<AppState>,
     workspace_id: Uuid,
@@ -75,7 +86,7 @@ async fn fetch_with_browser<F>(
 where
     F: FnOnce(&url::Url) -> Result<(), AppError>,
 {
-    let (mut settings, environment) = state
+    let mut frozen = state
         .with_workspace(workspace_id, session_id, |repository| {
             let settings = if let Some(id) = input.node_id {
                 repository
@@ -100,10 +111,49 @@ where
                 .environment_id
                 .map(|id| repository.read_environment(id))
                 .transpose()?;
-            Ok((settings, environment))
+            let global = repository.global_variables_for_execution()?;
+            let (collection, folder) = input
+                .node_id
+                .map(|id| repository.token_variable_scopes(id))
+                .transpose()?
+                .unwrap_or_default();
+            Ok(FrozenTokenContext {
+                settings,
+                environment,
+                variables: apogee_core::vars::VariableScopes {
+                    global,
+                    collection,
+                    folder,
+                    runtime: input.runtime_variables.clone(),
+                },
+            })
         })
         .map_err(|_| failure("无法读取 Token 请求所属工作区、环境或网络设置"))?;
-    apply_network_defaults(&mut settings, app_settings);
+    apply_network_defaults(&mut frozen.settings, app_settings);
+    fetch_frozen_with_browser(state, workspace_id, session_id, input, frozen, open_browser).await
+}
+
+pub(super) async fn fetch_frozen(
+    state: Arc<AppState>,
+    workspace_id: Uuid,
+    session_id: Uuid,
+    input: TokenOperationInput,
+    frozen: FrozenTokenContext,
+) -> Result<Option<OAuth2TokenResponse>, PublicError> {
+    fetch_frozen_with_browser(state, workspace_id, session_id, input, frozen, open_browser).await
+}
+
+async fn fetch_frozen_with_browser<F>(
+    state: Arc<AppState>,
+    workspace_id: Uuid,
+    session_id: Uuid,
+    input: TokenOperationInput,
+    frozen: FrozenTokenContext,
+    open_browser: F,
+) -> Result<Option<OAuth2TokenResponse>, PublicError>
+where
+    F: FnOnce(&url::Url) -> Result<(), AppError>,
+{
     let lease = match state.begin_token_request(workspace_id, session_id, input.operation_id) {
         Ok(lease) => lease,
         Err(error) if error.to_string() == "TOKEN_OPERATION_CANCELLED" => return Ok(None),
@@ -116,10 +166,13 @@ where
     };
     let (_runtime, cancel, access) = lease.into_execution_parts();
     let result = if matches!(input.grant, OAuth2Grant::AuthorizationCode) {
-        apogee_core::oauth2::authorize(
+        apogee_core::oauth2::authorize_with_scopes(
             &input.request,
-            environment.as_ref(),
-            &settings.resolve(),
+            apogee_core::vars::VariableContext {
+                environment: frozen.environment.as_ref(),
+                scopes: &frozen.variables,
+            },
+            &frozen.settings.resolve(),
             cancel,
             |url| {
                 // No detached browser task can open after cancellation or a workspace switch.
@@ -133,11 +186,14 @@ where
         )
         .await
     } else {
-        apogee_core::oauth2::fetch_token(
+        apogee_core::oauth2::fetch_token_with_scopes(
             &input.request,
             input.grant,
-            environment.as_ref(),
-            &settings.resolve(),
+            apogee_core::vars::VariableContext {
+                environment: frozen.environment.as_ref(),
+                scopes: &frozen.variables,
+            },
+            &frozen.settings.resolve(),
             cancel,
         )
         .await
@@ -270,6 +326,7 @@ mod tests {
             .unwrap();
         let id = Uuid::new_v4();
         let input = TokenOperationInput {
+            runtime_variables: Default::default(),
             operation_id: id,
             node_id: None,
             environment_id: None,
@@ -358,6 +415,7 @@ mod tests {
             });
             let id = Uuid::new_v4();
             let input = TokenOperationInput {
+                runtime_variables: Default::default(),
                 operation_id: id,
                 node_id: None,
                 environment_id: None,
@@ -431,6 +489,7 @@ mod tests {
             drop(reservation);
             let id = Uuid::new_v4();
             let input = TokenOperationInput {
+                runtime_variables: Default::default(),
                 operation_id: id,
                 node_id: None,
                 environment_id: None,

@@ -56,6 +56,7 @@ export async function round2(page, root, base, received) {
   const exported = await page.evaluate(async () => { const value = await window.__round2Blob.text(); URL.createObjectURL = window.__round2CreateObjectURL; delete window.__round2Blob; delete window.__round2CreateObjectURL; return JSON.parse(value) })
   assert.equal(exported.item[0].request.auth.type, 'bearer')
   assert.equal(exported.item[0].request.url.query.length, 5)
+  assert.ok(!JSON.stringify(exported).includes('round2-fixture-token'), 'safe export must remove direct Auth credentials')
   exported.info.name = 'Round2 roundtrip'
   const exportPath = join(root, 'round2-export.json'); writeFileSync(exportPath, JSON.stringify(exported))
   await page.evaluate(async path => {
@@ -66,7 +67,7 @@ export async function round2(page, root, base, received) {
     await workspace.openRequest(workspace.nodes.find(node => node.parentId === result.collectionId && node.kind === 'request'), false)
   }, exportPath)
   const replay = await send()
-  assert.equal(replay.headers.authorization, original.headers.authorization)
+  assert.ok(!replay.headers.authorization?.includes('round2-fixture-token'), 'imported safe export must not silently recover the original credential')
   assert.equal(replay.url, original.url); assert.equal(replay.body, original.body)
 
   const badPath = join(root, 'round2-invalid.json')

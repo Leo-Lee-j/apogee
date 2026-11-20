@@ -233,6 +233,7 @@ impl AppState {
         let root = repository.root().to_path_buf();
         self.with_workspace_open_transition(&root, |write_lock| {
             repository.recover_pending_transactions()?;
+            repository.migrate_auth_credentials()?;
             self.open_workspace_with_write_lock(repository, runtime_root, write_lock)
         })
     }

@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 mod pkce;
-pub use pkce::authorize;
+pub use pkce::{authorize, authorize_with_scopes};
 
 pub const MAX_TOKEN_RESPONSE_BYTES: usize = 64 * 1024;
 const MAX_TOKEN_BYTES: usize = 16 * 1024;
@@ -122,6 +122,22 @@ pub fn issuance_context(
     settings: &crate::request::RequestSettings,
     environment_id: Option<uuid::Uuid>,
 ) -> Result<String, AppError> {
+    issuance_context_with_scopes(
+        auth,
+        environment,
+        settings,
+        environment_id,
+        &crate::vars::VariableScopes::default(),
+    )
+}
+
+pub fn issuance_context_with_scopes(
+    auth: &crate::request::AuthConfig,
+    environment: Option<&Environment>,
+    settings: &crate::request::RequestSettings,
+    environment_id: Option<uuid::Uuid>,
+    scopes: &crate::vars::VariableScopes,
+) -> Result<String, AppError> {
     let crate::request::AuthConfig::OAuth2 { token_request, .. } = auth else {
         return Ok(String::new());
     };
@@ -139,7 +155,19 @@ pub fn issuance_context(
             variable.clear_secret = false;
         }
     }
-    let bytes = serde_json::to_vec(&(config, environment, settings, environment_id))
+    let mut scopes = scopes.clone();
+    for variables in [
+        &mut scopes.global,
+        &mut scopes.collection,
+        &mut scopes.folder,
+    ] {
+        for variable in variables {
+            variable.id = uuid::Uuid::nil();
+            variable.has_value = false;
+            variable.clear_secret = false;
+        }
+    }
+    let bytes = serde_json::to_vec(&(config, environment, settings, environment_id, scopes))
         .map_err(|_| error(ErrorKind::Parse, "OAuth2 context unavailable"))?;
     let digest = ring::digest::digest(&ring::digest::SHA256, &bytes);
     Ok(digest
@@ -195,28 +223,48 @@ fn error(kind: ErrorKind, message: &str) -> AppError {
         "检查 Token URL、客户端凭据、授权范围和所选环境；详情请在服务端安全日志中排查",
     ))
 }
+#[cfg(test)]
 fn resolve(
     input: &OAuth2TokenRequest,
     grant: OAuth2Grant,
     environment: Option<&Environment>,
 ) -> Result<OAuth2TokenRequest, AppError> {
-    let resolve_text = |text: &str, env| {
-        crate::vars::resolve_text(text, env)
-            .map_err(|_| error(ErrorKind::Var, "OAuth2 配置变量解析失败；检查所选环境"))
-    };
+    resolve_with_scopes(
+        input,
+        grant,
+        crate::vars::VariableContext {
+            environment,
+            scopes: &Default::default(),
+        },
+    )
+}
+fn resolve_with_scopes(
+    input: &OAuth2TokenRequest,
+    grant: OAuth2Grant,
+    context: crate::vars::VariableContext<'_>,
+) -> Result<OAuth2TokenRequest, AppError> {
     let mut resolved = input.clone();
-    resolved.token_url = resolve_text(&input.token_url, environment)?;
-    // Endpoint must be explicit: do not accidentally send credentials to an environment host.
-    resolved.client_id = resolve_text(&input.client_id, environment)?;
-    resolved.client_secret = resolve_text(&input.client_secret, environment)?;
-    resolved.scope = resolve_text(&input.scope, environment)?;
-    resolved.refresh_token = match grant {
-        OAuth2Grant::RefreshToken => resolve_text(&input.refresh_token, environment)?,
-        _ => String::new(),
-    };
-    if matches!(grant, OAuth2Grant::AuthorizationCode) {
-        resolved.authorization_url = resolve_text(&input.authorization_url, environment)?;
-        resolved.redirect_uri = resolve_text(&input.redirect_uri, environment)?;
+    if !matches!(grant, OAuth2Grant::RefreshToken) {
+        resolved.refresh_token.clear();
+    }
+    if !matches!(grant, OAuth2Grant::AuthorizationCode) {
+        resolved.authorization_url.clear();
+        resolved.redirect_uri.clear();
+    }
+    let fields = [
+        &mut resolved.token_url,
+        &mut resolved.client_id,
+        &mut resolved.client_secret,
+        &mut resolved.scope,
+        &mut resolved.refresh_token,
+        &mut resolved.authorization_url,
+        &mut resolved.redirect_uri,
+    ];
+    let texts: Vec<&str> = fields.iter().map(|text| text.as_str()).collect();
+    let values = crate::vars::resolve_texts_with_scopes(&texts, context)
+        .map_err(|_| error(ErrorKind::Var, "OAuth2 配置变量解析失败；检查变量作用域"))?;
+    for (field, value) in fields.into_iter().zip(values) {
+        *field = value;
     }
     Ok(resolved)
 }
@@ -433,7 +481,27 @@ pub async fn fetch_token(
     settings: &ResolvedSettings,
     cancel: tokio::sync::oneshot::Receiver<()>,
 ) -> Result<Option<OAuth2TokenResponse>, AppError> {
-    let input = resolve(input, grant, environment)?;
+    fetch_token_with_scopes(
+        input,
+        grant,
+        crate::vars::VariableContext {
+            environment,
+            scopes: &Default::default(),
+        },
+        settings,
+        cancel,
+    )
+    .await
+}
+
+pub async fn fetch_token_with_scopes(
+    input: &OAuth2TokenRequest,
+    grant: OAuth2Grant,
+    context: crate::vars::VariableContext<'_>,
+    settings: &ResolvedSettings,
+    cancel: tokio::sync::oneshot::Receiver<()>,
+) -> Result<Option<OAuth2TokenResponse>, AppError> {
+    let input = resolve_with_scopes(input, grant, context)?;
     fetch_resolved(&input, grant, settings, cancel, None).await
 }
 async fn fetch_resolved(

@@ -210,6 +210,7 @@ impl Drop for CredentialUndo {
 fn default_true() -> bool {
     true
 }
+mod auth_storage;
 mod postman;
 pub use postman::{PostmanExportResult, PostmanWorkspaceImportResult};
 
@@ -711,8 +712,14 @@ impl WorkspaceRepository {
             }
         } else {
             self.ensure_collection_delete_paths_unreferenced(manifest, id, &target, &tombstone)?;
+            let refs = [
+                self.auth_references(&tombstone)?,
+                self.auth_references(&target)?,
+            ]
+            .concat();
             remove_directory_if_exists(&tombstone)?;
             remove_directory_if_exists(&target)?;
+            self.delete_auth_references(refs);
         }
         self.finish_transaction(journal)
     }
@@ -763,14 +770,14 @@ impl WorkspaceRepository {
         self.validate_collection_transaction_entry(entry)?;
         let (target, _) = self.collection_transaction_paths(id)?;
         let marker = target.join(COLLECTION_MARKER);
-        let mut document: ContainerDocument = read_yaml(&marker)?;
+        let mut document: ContainerDocument = self.read_document(&marker)?;
         if document.id != id {
             bail!("集合重命名恢复发现文档 ID 与清单不一致");
         }
         // manifest 是唯一提交点；只恢复名称，保留鉴权和设置等其他字段。
         if document.name != entry.name {
             document.name = entry.name.clone();
-            write_yaml(&marker, &document)?;
+            self.write_document(&marker, &document)?;
         }
         self.finish_transaction(journal)
     }
@@ -794,7 +801,7 @@ impl WorkspaceRepository {
             bail!("集合重命名前存在待恢复的删除 tombstone");
         }
         let marker = target.join(COLLECTION_MARKER);
-        let mut document: ContainerDocument = read_yaml(&marker)?;
+        let mut document: ContainerDocument = self.read_document(&marker)?;
         if document.id != id {
             bail!("集合文档 ID 与清单不一致");
         }
@@ -803,7 +810,8 @@ impl WorkspaceRepository {
         })?;
         entry.name = name.clone();
         document.name = name;
-        let publish = write_yaml(&marker, &document)
+        let publish = self
+            .write_document(&marker, &document)
             .and_then(|()| write_manifest(&self.manifest_path(), &manifest));
         if let Err(error) = publish {
             // 根据磁盘上的 manifest 恢复，而不猜测提交点是否经过。
@@ -1159,7 +1167,8 @@ impl WorkspaceRepository {
         if !matches!(location.node.kind, WorkspaceNodeKind::Request) {
             bail!("节点不是请求：{id}");
         }
-        let document: PersistedRequest = read_yaml(&location.path)
+        let document: PersistedRequest = self
+            .read_document(&location.path)
             .with_context(|| format!("读取请求文件失败：{}", location.path.display()))?;
         if document.id != id {
             bail!("请求文件 {} 的 id 不一致", location.path.display());
@@ -1170,7 +1179,7 @@ impl WorkspaceRepository {
     pub fn read_container(&self, id: Uuid) -> Result<WorkspaceContainer> {
         let location = self.locate(id)?;
         let marker = container_marker(&location.node.kind)?;
-        let document: ContainerDocument = read_yaml(&location.path.join(marker))?;
+        let document: ContainerDocument = self.read_document(&location.path.join(marker))?;
         validate_container_variables(&document.variables)?;
         Ok(WorkspaceContainer {
             id: document.id,
@@ -1194,7 +1203,7 @@ impl WorkspaceRepository {
             settings: container.settings,
             variables: container.variables,
         };
-        write_yaml(&location.path.join(marker), &document)?;
+        self.write_document(&location.path.join(marker), &document)?;
         if matches!(location.node.kind, WorkspaceNodeKind::Collection) {
             let mut manifest = self.read_manifest()?;
             let entry = manifest
@@ -1230,12 +1239,36 @@ impl WorkspaceRepository {
         Vec<apogee_core::vars::EnvironmentVariable>,
         Vec<apogee_core::vars::EnvironmentVariable>,
     )> {
+        self.node_variable_scopes(request_id, false)
+    }
+
+    pub(crate) fn token_variable_scopes(
+        &self,
+        node: Uuid,
+    ) -> Result<(
+        Vec<apogee_core::vars::EnvironmentVariable>,
+        Vec<apogee_core::vars::EnvironmentVariable>,
+    )> {
+        self.node_variable_scopes(node, true)
+    }
+
+    fn node_variable_scopes(
+        &self,
+        request_id: Uuid,
+        include_self: bool,
+    ) -> Result<(
+        Vec<apogee_core::vars::EnvironmentVariable>,
+        Vec<apogee_core::vars::EnvironmentVariable>,
+    )> {
         let nodes = self.scan()?;
         let mut current = nodes
             .iter()
             .find(|item| item.node.id == request_id)
             .context("找不到变量作用域对应的请求")?;
         let mut ancestors = Vec::new();
+        if include_self && current.node.is_folder {
+            ancestors.push(current);
+        }
         while let Some(parent_id) = current.node.parent_id {
             current = nodes
                 .iter()
@@ -1347,7 +1380,7 @@ impl WorkspaceRepository {
         let mut settings = RequestSettings::default();
         for ancestor in ancestors {
             let marker = container_marker(&ancestor.node.kind)?;
-            let container: ContainerDocument = read_yaml(&ancestor.path.join(marker))?;
+            let container: ContainerDocument = self.read_document(&ancestor.path.join(marker))?;
             if !matches!(container.auth, AuthConfig::Inherit) {
                 auth = container.auth;
                 source = Some(ancestor.node.id);
@@ -1370,7 +1403,7 @@ impl WorkspaceRepository {
             return Ok(self.read_request(id)?.spec.auth);
         }
         let marker = container_marker(&location.node.kind)?;
-        let document: ContainerDocument = read_yaml(&location.path.join(marker))?;
+        let document: ContainerDocument = self.read_document(&location.path.join(marker))?;
         if document.id != id {
             bail!("OAUTH2_SOURCE_STALE");
         }
@@ -1393,24 +1426,24 @@ impl WorkspaceRepository {
     ) -> Result<()> {
         let location = self.locate(id)?;
         if matches!(location.node.kind, WorkspaceNodeKind::Request) {
-            let mut document: PersistedRequest = read_yaml(&location.path)?;
+            let mut document: PersistedRequest = self.read_document(&location.path)?;
             if document.id != id
                 || serde_json::to_value(&document.spec.auth)? != serde_json::to_value(expected)?
             {
                 bail!("OAUTH2_SOURCE_STALE");
             }
             document.spec.auth = updated;
-            write_yaml(&location.path, &document)
+            self.write_document(&location.path, &document)
         } else {
             let path = location.path.join(container_marker(&location.node.kind)?);
-            let mut document: ContainerDocument = read_yaml(&path)?;
+            let mut document: ContainerDocument = self.read_document(&path)?;
             if document.id != id
                 || serde_json::to_value(&document.auth)? != serde_json::to_value(expected)?
             {
                 bail!("OAUTH2_SOURCE_STALE");
             }
             document.auth = updated;
-            write_yaml(&path, &document)
+            self.write_document(&path, &document)
         }
     }
 
@@ -1884,7 +1917,8 @@ impl WorkspaceRepository {
         if !matches!(location.node.kind, WorkspaceNodeKind::Request) {
             bail!("节点不是请求：{request_id}");
         }
-        let document: PersistedRequest = read_yaml(&location.path)
+        let document: PersistedRequest = self
+            .read_document(&location.path)
             .with_context(|| format!("读取请求文件失败：{}", location.path.display()))?;
         if document.id != request_id {
             bail!("请求文件 {} 的 id 不一致", location.path.display());
@@ -1904,7 +1938,8 @@ impl WorkspaceRepository {
         if !matches!(location.node.kind, WorkspaceNodeKind::Request) {
             bail!("节点不是请求：{request_id}");
         }
-        let mut document: PersistedRequest = read_yaml(&location.path)
+        let mut document: PersistedRequest = self
+            .read_document(&location.path)
             .with_context(|| format!("读取请求文件失败：{}", location.path.display()))?;
         if document.id != request_id {
             bail!("请求文件 {} 的 id 不一致", location.path.display());
@@ -1920,7 +1955,7 @@ impl WorkspaceRepository {
             updated_at_ms: now,
         };
         document.debug_cases.push(debug_case.clone());
-        write_yaml(&location.path, &document)?;
+        self.write_document(&location.path, &document)?;
         Ok(debug_case)
     }
 
@@ -1929,7 +1964,8 @@ impl WorkspaceRepository {
         if !matches!(location.node.kind, WorkspaceNodeKind::Request) {
             bail!("节点不是请求：{request_id}");
         }
-        let mut document: PersistedRequest = read_yaml(&location.path)
+        let mut document: PersistedRequest = self
+            .read_document(&location.path)
             .with_context(|| format!("读取请求文件失败：{}", location.path.display()))?;
         if document.id != request_id {
             bail!("请求文件 {} 的 id 不一致", location.path.display());
@@ -1941,7 +1977,7 @@ impl WorkspaceRepository {
         if document.debug_cases.len() == original_len {
             bail!("未知的调试用例：{case_id}");
         }
-        write_yaml(&location.path, &document)
+        self.write_document(&location.path, &document)
     }
 
     pub fn save_request(&self, id: Uuid, name: String, spec: RequestSpec) -> Result<()> {
@@ -1950,12 +1986,13 @@ impl WorkspaceRepository {
         if !matches!(location.node.kind, WorkspaceNodeKind::Request) {
             bail!("节点不是请求：{id}");
         }
-        let document: PersistedRequest = read_yaml(&location.path)
+        let document: PersistedRequest = self
+            .read_document(&location.path)
             .with_context(|| format!("读取请求文件失败：{}", location.path.display()))?;
         if document.id != id {
             bail!("请求文件 {} 的 id 不一致", location.path.display());
         }
-        write_yaml(
+        self.write_document(
             &location.path,
             &PersistedRequest {
                 apogee: WORKSPACE_FORMAT_VERSION,
@@ -1973,7 +2010,7 @@ impl WorkspaceRepository {
         let directory = format!("collections/{id}");
         let path = self.root.join(&directory);
         fs::create_dir_all(&path)?;
-        write_yaml(
+        self.write_document(
             &path.join(COLLECTION_MARKER),
             &ContainerDocument {
                 apogee: WORKSPACE_FORMAT_VERSION,
@@ -2031,7 +2068,7 @@ impl WorkspaceRepository {
 
         fs::create_dir_all(&staging_collection)?;
         let prepare = (|| -> Result<(usize, Vec<Environment>)> {
-            write_yaml(
+            self.write_document(
                 &staging_collection.join(COLLECTION_MARKER),
                 &ContainerDocument {
                     apogee: WORKSPACE_FORMAT_VERSION,
@@ -2060,7 +2097,7 @@ impl WorkspaceRepository {
                     let id = Uuid::new_v4();
                     let path = parent.join(id.to_string());
                     fs::create_dir_all(&path)?;
-                    write_yaml(
+                    self.write_document(
                         &path.join(FOLDER_MARKER),
                         &ContainerDocument {
                             apogee: WORKSPACE_FORMAT_VERSION,
@@ -2075,7 +2112,7 @@ impl WorkspaceRepository {
                     parent = path;
                 }
                 let request_id = Uuid::new_v4();
-                write_yaml(
+                self.write_document(
                     &parent.join(format!("{request_id}.yaml")),
                     &PersistedRequest {
                         apogee: WORKSPACE_FORMAT_VERSION,
@@ -2126,7 +2163,11 @@ impl WorkspaceRepository {
         let (imported_folders, environments) = match prepare {
             Ok(value) => value,
             Err(error) => {
+                let refs = self.auth_references(&staging_collection)?;
                 let _ = fs::remove_dir_all(&staging_collection);
+                if !staging_collection.exists() {
+                    self.delete_auth_references(refs);
+                }
                 let _ = fs::remove_dir_all(&staging_environments);
                 return Err(error);
             }
@@ -2162,7 +2203,16 @@ impl WorkspaceRepository {
 
         let _ = fs::remove_dir_all(&staging_environments);
         if let Err(error) = publish {
+            let refs = [
+                self.auth_references(&final_collection)?,
+                self.auth_references(&staging_collection)?,
+            ]
+            .concat();
             let _ = fs::remove_dir_all(&final_collection);
+            let _ = fs::remove_dir_all(&staging_collection);
+            if !final_collection.exists() && !staging_collection.exists() {
+                self.delete_auth_references(refs);
+            }
             for path in published_environments {
                 let _ = fs::remove_file(path);
             }
@@ -2190,7 +2240,9 @@ impl WorkspaceRepository {
             .transaction_directory()
             .join(format!("duplicate-{copy_id}"));
         if staging.exists() {
+            let refs = self.auth_references(&staging)?;
             fs::remove_dir_all(&staging)?;
+            self.delete_auth_references(refs);
         }
         // Folder/request publication is one rename, hence already complete if visible.
         // Collections commit at the manifest; remove an unpublished orphan after a crash.
@@ -2200,7 +2252,9 @@ impl WorkspaceRepository {
             if marker.id != copy_id || fs::symlink_metadata(&target)?.file_type().is_symlink() {
                 bail!("复制事务的集合标识或目录无效");
             }
+            let refs = self.auth_references(&target)?;
             fs::remove_dir_all(target)?;
+            self.delete_auth_references(refs);
         }
         self.finish_transaction(journal)
     }
@@ -2287,7 +2341,8 @@ impl WorkspaceRepository {
                     } else {
                         FOLDER_MARKER
                     };
-                    let mut document: ContainerDocument = read_yaml(&item.path.join(marker))?;
+                    let mut document: ContainerDocument =
+                        self.read_document(&item.path.join(marker))?;
                     if document.id != item.node.id {
                         bail!("复制来源的容器标识不一致");
                     }
@@ -2296,11 +2351,11 @@ impl WorkspaceRepository {
                         document.name = name.clone();
                     }
                     fs::create_dir_all(&path)?;
-                    write_yaml(&path.join(marker), &document)?;
-                    let _: ContainerDocument = read_yaml(&path.join(marker))?;
+                    self.write_document(&path.join(marker), &document)?;
+                    let _: ContainerDocument = self.read_document(&path.join(marker))?;
                     paths.insert(item.path.clone(), path);
                 } else {
-                    let mut document: PersistedRequest = read_yaml(&item.path)?;
+                    let mut document: PersistedRequest = self.read_document(&item.path)?;
                     if document.id != item.node.id {
                         bail!("复制来源的请求标识不一致");
                     }
@@ -2312,8 +2367,8 @@ impl WorkspaceRepository {
                         case.id = Uuid::new_v4();
                         case.request_id = id;
                     }
-                    write_yaml(&path, &document)?;
-                    let _: PersistedRequest = read_yaml(&path)?;
+                    self.write_document(&path, &document)?;
+                    let _: PersistedRequest = self.read_document(&path)?;
                 }
             }
             fs::rename(&staged_root, &target).context("发布复制内容失败")?;
@@ -2340,16 +2395,20 @@ impl WorkspaceRepository {
                 return Err(error.context("副本已完整提交，但后续清理失败，请刷新工作区"));
             }
             if published {
+                let refs = self.auth_references(&target)?;
                 if source.node.is_folder {
                     fs::remove_dir_all(&target)?;
                 } else {
                     fs::remove_file(&target)?;
                 }
+                self.delete_auth_references(refs);
             }
             self.recover_duplicate(&self.read_manifest()?, copy_id, &journal)?;
             return Err(error.context("复制失败，已回滚副本"));
         }
+        let refs = self.auth_references(&staging)?;
         fs::remove_dir_all(&staging)?;
+        self.delete_auth_references(refs);
         self.finish_transaction(&journal)?;
         self.snapshot()
     }
@@ -2367,7 +2426,7 @@ impl WorkspaceRepository {
         let id = Uuid::new_v4();
         let path = parent.path.join(id.to_string());
         fs::create_dir_all(&path)?;
-        write_yaml(
+        self.write_document(
             &path.join(FOLDER_MARKER),
             &ContainerDocument {
                 apogee: WORKSPACE_FORMAT_VERSION,
@@ -2400,7 +2459,7 @@ impl WorkspaceRepository {
             debug_cases: Vec::new(),
         };
         let path = parent.path.join(format!("{id}.yaml"));
-        write_yaml(&path, &document)?;
+        self.write_document(&path, &document)?;
         Ok(document.as_ipc())
     }
 
@@ -2416,14 +2475,14 @@ impl WorkspaceRepository {
             }
             WorkspaceNodeKind::Folder => {
                 let mut document: ContainerDocument =
-                    read_yaml(&location.path.join(FOLDER_MARKER))?;
+                    self.read_document(&location.path.join(FOLDER_MARKER))?;
                 document.name = name;
-                write_yaml(&location.path.join(FOLDER_MARKER), &document)?;
+                self.write_document(&location.path.join(FOLDER_MARKER), &document)?;
             }
             WorkspaceNodeKind::Request => {
-                let mut document: PersistedRequest = read_yaml(&location.path)?;
+                let mut document: PersistedRequest = self.read_document(&location.path)?;
                 document.name = name;
-                write_yaml(&location.path, &document)?;
+                self.write_document(&location.path, &document)?;
             }
         }
         self.snapshot()
@@ -2439,12 +2498,16 @@ impl WorkspaceRepository {
                 });
             }
             WorkspaceNodeKind::Folder => {
+                let refs = self.auth_references(&location.path)?;
                 fs::remove_dir_all(&location.path)
                     .with_context(|| format!("删除文件夹目录失败：{}", location.path.display()))?;
+                self.delete_auth_references(refs);
             }
             WorkspaceNodeKind::Request => {
+                let refs = self.auth_references(&location.path)?;
                 fs::remove_file(&location.path)
                     .with_context(|| format!("删除请求文件失败：{}", location.path.display()))?;
+                self.delete_auth_references(refs);
             }
         }
         self.snapshot()
@@ -2458,7 +2521,7 @@ impl WorkspaceRepository {
         let directory = format!("collections/{collection_id}");
         let collection_path = self.root.join(&directory);
         fs::create_dir_all(&collection_path)?;
-        write_yaml(
+        self.write_document(
             &collection_path.join(COLLECTION_MARKER),
             &ContainerDocument {
                 apogee: WORKSPACE_FORMAT_VERSION,

@@ -475,6 +475,7 @@ mod commands {
         state
             .with_workspace_open_transition(&root, |write_lock| {
                 repository.recover_pending_transactions()?;
+                repository.migrate_auth_credentials()?;
                 let snapshot = repository.snapshot()?;
                 let descriptor = registry(app)
                     .map_err(anyhow::Error::msg)?
@@ -1138,6 +1139,7 @@ mod commands {
             session_id,
             crate::oauth2::managed::Input {
                 operation_id: input.operation_id,
+                runtime_variables: input.runtime_variables,
                 owner_id: input.node_id.unwrap_or(input.operation_id).to_string(),
                 node_id: input.node_id,
                 environment_id: input.environment_id,

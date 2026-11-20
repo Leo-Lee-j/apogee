@@ -704,13 +704,13 @@ export const ipc = {
   },
 
   /** Sensitive source-aware operation. None grant prepares inherited/direct Auth before Send. */
-  oauth2AuthOperation(input: { operationId: string; nodeId?: string; ownerId: string; environmentId?: string;
+  oauth2AuthOperation(input: { runtimeVariables?: Record<string, string>; operationId: string; nodeId?: string; ownerId: string; environmentId?: string;
     auth: AuthConfig; expectedAuth?: AuthConfig; grant?: OAuth2Grant; settings: RequestSettings; ephemeral?: boolean }, session: WorkspaceSession = sessionArgs()): Promise<{ auth: AuthConfig; sourceId?: string; token?: OAuth2TokenResponse; error?: AppError } | null> {
     return call('oauth2_auth_operation', { ...session, input })
   },
 
   /** Explicit credential operation; its result belongs only to the initiating Auth editor. */
-  oauth2FetchToken(input: { operationId: string; nodeId?: string; environmentId?: string; request: OAuth2TokenRequest; grant: OAuth2Grant; settings: RequestSettings },
+  oauth2FetchToken(input: { runtimeVariables?: Record<string, string>; operationId: string; nodeId?: string; environmentId?: string; request: OAuth2TokenRequest; grant: OAuth2Grant; settings: RequestSettings },
     session: WorkspaceSession = sessionArgs()): Promise<OAuth2TokenResponse | null> {
     return call('oauth2_fetch_token', { ...session, input })
   },

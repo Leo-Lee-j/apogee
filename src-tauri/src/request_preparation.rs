@@ -139,11 +139,12 @@ pub(crate) async fn prepare(
     if ephemeral && !matches!(spec.auth, AuthConfig::Inherit) {
         // Ordinary send events cannot return credentials. A draft's rotation would otherwise be
         // lost after execution, so only its dedicated sensitive preflight may acquire/refresh.
-        let context = apogee_core::oauth2::issuance_context(
+        let context = apogee_core::oauth2::issuance_context_with_scopes(
             &frozen.spec.auth,
             frozen.environment.as_ref(),
             &frozen.spec.settings,
             environment_id,
+            &frozen.variables,
         )
         .map_err(|_| failure("REQUEST_PREPARATION_FAILED"))?;
         let changed = matches!(&frozen.spec.auth, AuthConfig::OAuth2 { token_context: Some(value), .. } if value != &context);
@@ -169,6 +170,7 @@ pub(crate) async fn prepare(
         session,
         managed::Input {
             operation_id: operation,
+            runtime_variables: frozen.variables.runtime.clone(),
             node_id: node,
             owner_id,
             environment_id,
@@ -192,5 +194,6 @@ pub(crate) async fn prepare(
     frozen.spec.auth = output.auth;
     frozen.spec.settings = output.settings;
     frozen.environment = output.environment;
+    frozen.variables = output.variables;
     Ok(Some(frozen))
 }
