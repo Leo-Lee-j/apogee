@@ -23,6 +23,7 @@ pub struct WorkspaceSession {
     pub id: Uuid,
     pub workspace_id: Uuid,
     pub repository: WorkspaceRepository,
+    pub http: Arc<apogee_core::http::HttpSession>,
     /// 每个 session 都持有一份 OS 写锁引用；close 后仍在执行的 mutation 继续持有
     /// clone，避免锁在提交中途被新进程取得。
     write_lock: Arc<crate::persistence::WorkspaceWriteLock>,
@@ -283,6 +284,7 @@ impl AppState {
             std::mem::replace(&mut *runtime_guard, runtime)
         };
         *guard = Some(WorkspaceSession {
+            http: Arc::new(apogee_core::http::HttpSession::default()),
             id: session_id,
             workspace_id,
             repository,
@@ -361,6 +363,20 @@ impl AppState {
         let access_gate = self.workspace_access_gate(workspace_id, session_id)?;
         let _access = access_gate.read();
         self.with_workspace_after_access_gate(workspace_id, session_id, operation)
+    }
+
+    pub fn with_http_session<T>(
+        &self,
+        workspace_id: Uuid,
+        session_id: Uuid,
+        operation: impl FnOnce(&Arc<apogee_core::http::HttpSession>) -> Result<T>,
+    ) -> Result<T> {
+        let guard = self.workspace.read().unwrap_or_else(|p| p.into_inner());
+        let session = guard.as_ref().context("当前没有打开的工作区")?;
+        if session.workspace_id != workspace_id || session.id != session_id {
+            bail!("WORKSPACE_SESSION_EXPIRED");
+        }
+        operation(&session.http)
     }
 
     /// 在不持有 workspace 读锁时捕获当前 session 的多文件访问 gate。等待 gate 后
@@ -1579,6 +1595,53 @@ mod tests {
         assert!(state.register_operation(expired, None, true).is_ok());
         assert!(state.token_cancellations.lock().unwrap().is_empty());
         assert!(state.cancel_token_operation(expired));
+    }
+
+    #[test]
+    fn cookie_sessions_are_discarded_and_late_mutations_cannot_reach_reopened_workspace() {
+        let root = std::env::temp_dir().join(format!("apogee-cookie-session-{}", Uuid::new_v4()));
+        let state = AppState::new().unwrap();
+        let repository =
+            WorkspaceRepository::create(root.join("workspace"), "fixture".into()).unwrap();
+        let (workspace, session) = state
+            .open_workspace(repository, root.join("runtime-one"))
+            .unwrap();
+        let old_http = state
+            .with_http_session(workspace, session, |http| Ok(http.clone()))
+            .unwrap();
+        old_http
+            .cookies
+            .put(
+                &url::Url::parse("https://example.test/").unwrap(),
+                "sid=fixture; Path=/",
+                None,
+            )
+            .unwrap();
+        assert_eq!(old_http.cookies.list().len(), 1);
+        state.close_workspace(workspace, session).unwrap();
+        assert!(state
+            .with_http_session(workspace, session, |http| Ok(http.cookies.list()))
+            .is_err());
+        let repository = WorkspaceRepository::open(root.join("workspace")).unwrap();
+        let (next_workspace, next_session) = state
+            .open_workspace(repository, root.join("runtime-two"))
+            .unwrap();
+        old_http
+            .cookies
+            .put(
+                &url::Url::parse("https://example.test/").unwrap(),
+                "late=fixture; Path=/",
+                None,
+            )
+            .unwrap();
+        assert!(state
+            .with_http_session(next_workspace, next_session, |http| Ok(http.cookies.list()))
+            .unwrap()
+            .is_empty());
+        state.close_workspace(next_workspace, next_session).unwrap();
+        drop(old_http);
+        drop(state);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

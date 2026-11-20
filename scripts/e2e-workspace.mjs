@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { round2 } from './e2e-round2.mjs'
 /**
  * Desktop smoke test for the workspace lifecycle.
  *
@@ -53,6 +54,8 @@ const slowServer = createServer((request, response) => {
     request.on('data', (chunk) => chunks.push(chunk))
     request.on('end', () => {
       echoedRequests.push({ url: request.url, headers: request.headers, body: Buffer.concat(chunks).toString() })
+      if (request.url === '/round2/set-cookie') response.setHeader('Set-Cookie', 'round2_session=fixture; Path=/; HttpOnly')
+      if (request.url === '/round2/redirect') { response.statusCode = 302; response.setHeader('Set-Cookie', 'redirected=fixture; Path=/'); response.setHeader('Location', '/round2/needs-cookie') }
       response.setHeader('Content-Type', 'application/json')
       response.end(request.url?.startsWith('/tree')
         ? JSON.stringify([...Array.from({ length: 200 }, (_, i) => i), { nested: Array.from({ length: 401 }, (_, i) => i) }])
@@ -206,7 +209,10 @@ try {
   assert.ok(echoedRequests[3].body.includes('中文 + &'), 'multipart must preserve the converted text field')
   await page.getByRole('button', { name: '发送请求', exact: true }).waitFor()
   await page.locator('.body-types').getByText('x-www-form-urlencoded', { exact: true }).click()
-  assert.equal(await form.locator('.n-select').count(), 3, 'unsupported conversion must retain file rows and form-data type')
+  assert.equal(await form.locator('.n-select').count(), 0, 'switching back restores the independent urlencoded draft')
+  assert.equal(await form.getByRole('textbox', { name: '参数值', exact: true }).first().inputValue(), '中文 + &')
+  await page.locator('.body-types').getByText('form-data', { exact: true }).click()
+  assert.equal(await form.locator('.n-select').count(), 3, 'switching back to multipart restores file rows')
 
   await page.getByRole('textbox', { name: '请求地址', exact: true }).fill(`http://127.0.0.1:${address.port}/:id/{name}?copy=:ignored`)
   await page.getByRole('tablist', { name: '请求编辑项' }).getByRole('tab', { name: 'Params', exact: true }).click()
@@ -286,16 +292,11 @@ try {
   const migration = await page.evaluate(async path => {
     const { ipc } = await import('/src/ipc/index.ts')
     const { useWorkspaceStore } = await import('/src/stores/workspace.ts')
-    const { postmanRequest } = await import('/src/features/postmanExport.ts')
     const result = await ipc.postmanImportWorkspace(path, crypto.randomUUID())
     const workspace = useWorkspaceStore()
     await workspace.load()
     const ids = workspace.nodes.filter(node => node.parentId === result.collectionId && node.kind === 'request').map(node => node.id)
-    const exported = []
-    for (const id of ids) {
-      const request = await ipc.workspaceReadRequest(id)
-      exported.push({ name: request.name, request: postmanRequest(request.spec) })
-    }
+    const exported = JSON.parse((await ipc.workspaceExportPostman(result.collectionId)).json).item
     return { result, ids, exported }
   }, postmanPath)
   assert.equal(migration.result.importedRequests, 3)
@@ -369,6 +370,7 @@ try {
   await page.locator('.container-config').getByRole('button', { name: '保存', exact: true }).click()
   await page.getByText('未保存修改', { exact: true }).waitFor({ state: 'hidden' })
 
+  await round2(page, root, 'http://127.0.0.1:' + address.port, echoedRequests)
   console.log('E2E PASS: workspace lifecycle and draft recovery; native close cancellation; container editor retention; atomic copy via IPC; virtual JSON tree and nested paging; Postman body transmission and export/reimport; cancellation; immediate Query/Header/form edits; blank rows; bulk metadata and duplicate/disabled params; form conversion and multipart upload; Path constraints; keyboard and drag ordering')
 } catch (error) {
   console.error(`E2E FAIL: ${error instanceof Error ? error.stack ?? error.message : String(error)}`)

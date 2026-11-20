@@ -101,6 +101,9 @@ export default defineConfig({
   server: {
     port: 5183,
     strictPort: true,
+    // Runtime fixtures are not source. Windows recursive watchers can keep
+    // nested staging directories open and prevent an atomic collection rename.
+    watch: { ignored: ['**/.apogee-e2e/**'] },
   },
 
   // CodeMirror is loaded on demand in the response viewer. Explicitly prebundle

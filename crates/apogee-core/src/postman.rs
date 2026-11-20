@@ -5,6 +5,7 @@ use crate::request::{
 use crate::vars::{Environment, EnvironmentVariable};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+pub mod export;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -12,12 +13,22 @@ pub struct ImportedRequest {
     pub name: String,
     pub spec: RequestSpec,
     pub folder: Vec<String>,
+    /// Source item ordinals, independent of display names and path separators.
+    #[serde(default)]
+    pub folder_ids: Vec<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImportedFolder {
+    pub path: Vec<usize>,
+    pub name: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PostmanImportResult {
     pub name: String,
     pub requests: Vec<ImportedRequest>,
+    pub folders: Vec<ImportedFolder>,
     pub warnings: Vec<String>,
 }
 
@@ -108,13 +119,15 @@ pub fn import_json(input: &str) -> Result<PostmanImportResult, crate::error::App
         .unwrap_or("Imported Collection")
         .to_string();
     let mut requests = Vec::new();
+    let mut folders = Vec::new();
     let mut warnings = Vec::new();
     let mut scope_warnings = Vec::new();
     migration_gaps(&root, &mut scope_warnings);
     let inherited_auth = import_auth(root.get("auth"), &AuthConfig::None, &mut scope_warnings);
     walk_items(
         root.get("item").and_then(|v| v.as_array()),
-        &mut Vec::new(),
+        &mut ImportPath::default(),
+        &mut folders,
         &mut requests,
         &mut warnings,
         &inherited_auth,
@@ -126,37 +139,52 @@ pub fn import_json(input: &str) -> Result<PostmanImportResult, crate::error::App
     Ok(PostmanImportResult {
         name,
         requests,
+        folders,
         warnings,
     })
 }
 
+#[derive(Default)]
+struct ImportPath {
+    names: Vec<String>,
+    ids: Vec<usize>,
+}
+
 fn walk_items(
     items: Option<&Vec<serde_json::Value>>,
-    folder: &mut Vec<String>,
+    path: &mut ImportPath,
+    folders: &mut Vec<ImportedFolder>,
     out: &mut Vec<ImportedRequest>,
     warnings: &mut Vec<String>,
     inherited_auth: &AuthConfig,
     inherited_warnings: &[String],
 ) {
-    for item in items.into_iter().flatten() {
+    for (index, item) in items.into_iter().flatten().enumerate() {
         let mut local_warnings = inherited_warnings.to_vec();
         migration_gaps(item, &mut local_warnings);
         if let Some(children) = item.get("item").and_then(|v| v.as_array()) {
-            if let Some(name) = item.get("name").and_then(|v| v.as_str()) {
-                folder.push(name.into());
-            }
+            let name = item
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("Imported Folder");
+            path.names.push(name.into());
+            path.ids.push(index);
+            folders.push(ImportedFolder {
+                path: path.ids.clone(),
+                name: name.into(),
+            });
             let folder_auth = import_auth(item.get("auth"), inherited_auth, &mut local_warnings);
             walk_items(
                 Some(children),
-                folder,
+                path,
+                folders,
                 out,
                 warnings,
                 &folder_auth,
                 &local_warnings,
             );
-            if item.get("name").is_some() {
-                folder.pop();
-            }
+            path.names.pop();
+            path.ids.pop();
             continue;
         }
         let Some(request) = item.get("request") else {
@@ -206,7 +234,8 @@ fn walk_items(
                 .and_then(|v| v.as_str())
                 .unwrap_or("Imported Request")
                 .into(),
-            folder: folder.clone(),
+            folder: path.names.clone(),
+            folder_ids: path.ids.clone(),
             spec: RequestSpec {
                 method,
                 // Apifox exports its service URL as `{{baseUrl}}` in the Postman
@@ -242,7 +271,8 @@ fn walk_items(
                 settings: Default::default(),
             },
         });
-        let label = folder
+        let label = path
+            .names
             .iter()
             .map(String::as_str)
             .chain(std::iter::once(

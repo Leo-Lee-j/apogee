@@ -22,7 +22,7 @@ import RequestDocumentation from './RequestDocumentation.vue'
 import { commonHeadersFor, isKnownOfficialHeader } from '@/features/commonHeaders'
 import { buildRequestDocumentation, type RequestDocViewModel } from '@/features/requestDocumentation'
 import { booleanSetting, httpVersionSetting, numberSetting, settingBooleanValue } from '@/features/requestSettings'
-import { convertFormBody, parameterRowsEqual, parseParameterRows, serializeParameterRows, type ParameterParseError } from '@/features/requestParameters'
+import { parameterRowsEqual, parseParameterRows, serializeParameterRows, type ParameterParseError } from '@/features/requestParameters'
 
 /**
  * 请求编辑区 —— v0.1 先落地 Params、Headers、Body 三条发送主链。
@@ -32,6 +32,8 @@ import { convertFormBody, parameterRowsEqual, parseParameterRows, serializeParam
  */
 const TABS = ['Params', 'Headers', 'Body', 'Auth', 'Settings'] as const
 const JsonBodyEditor = defineAsyncComponent(() => import('./JsonBodyEditor.vue'))
+const CookieManager = defineAsyncComponent(() => import('./CookieManager.vue'))
+const cookiesOpen = ref(false)
 type PanelTab = (typeof TABS)[number]
 type RowField = 'params' | 'pathParams' | 'headers'
 type BodyType = Body['type']
@@ -290,7 +292,8 @@ const bulkDraft = ref('')
 const bulkErrors = ref<ParameterParseError[]>([])
 watch(bulkDraft, () => { bulkErrors.value = [] })
 
-watch(() => tab.value?.id, () => {
+watch(() => tab.value?.recoveryId, () => {
+  cookiesOpen.value = false
   editedHeaders = new WeakSet<KeyValue>()
   // A bulk draft belongs to the visible editor instance; changing requests
   // must not carry it into another request's document view.
@@ -344,35 +347,9 @@ function selectTab(next: PanelTab) {
 }
 
 function setBodyType(nextType: BodyType) {
-  const currentBody = body.value
-  if (nextType === currentBody.type) return
-  if (nextType === 'formData' || nextType === 'urlEncoded') {
-    try { patchTab({ body: convertFormBody(currentBody, nextType) }) }
-    catch (error) { if (tab.value) tabs.patch(tab.value.id, { error: normalizeError(error) }) }
-    return
-  }
-  const content = 'content' in currentBody ? currentBody.content : ''
-  let nextBody: Body
-
-  if (nextType === 'none') {
-    nextBody = { type: 'none' }
-  } else if (nextType === 'json') {
-    nextBody = { type: 'json', content }
-  } else if (nextType === 'text') {
-    nextBody = {
-      type: 'text',
-      content,
-      contentType: currentBody.type === 'text' ? currentBody.contentType : 'text/plain',
-    }
-  } else if (nextType === 'binary') {
-    nextBody = { type: 'binary', path: currentBody.type === 'binary' ? currentBody.path : '' }
-  } else {
-    nextBody = currentBody.type === 'graphQl'
-      ? currentBody
-      : { type: 'graphQl', query: '', variables: '{}', operationName: undefined }
-  }
-
-  patchTab({ body: nextBody })
+  if (!tab.value) return
+  try { tabs.switchBodyType(tab.value.id, nextType) }
+  catch (error) { tabs.patch(tab.value.id, { error: normalizeError(error) }) }
 }
 
 function bodyRows(): KeyValue[] {
@@ -417,7 +394,7 @@ async function chooseBinaryFile() {
   if (typeof selected === 'string') patchBodyField('path', selected)
 }
 
-function patchBooleanSetting(field: 'followRedirects' | 'verifyTls', value: string | number | null) {
+function patchBooleanSetting(field: 'followRedirects' | 'verifyTls' | 'sendCookies', value: string | number | null) {
   patchTab({ settings: { ...tab.value?.settings, [field]: booleanSetting(value) } })
 }
 
@@ -549,7 +526,7 @@ function patchVersion(value: string | number | null) {
         <header class="config-head body-type-head">
           <AppTooltip>
             <template #trigger><strong class="hint-title">请求体类型</strong></template>
-            选择发送内容的编码方式。
+            选择发送内容的编码方式。已编辑的类型保存在本机，切回时恢复；首次进入新类型时才转换。
           </AppTooltip>
           <AppRadioGroup
             class="body-types"
@@ -560,6 +537,7 @@ function patchVersion(value: string | number | null) {
           />
         </header>
 
+        <button v-if="tab && Object.keys(tab.bodyDrafts).length" type="button" class="text-action" @click="tabs.patch(tab.id, { bodyDrafts: {} })">清除其他 Body 类型草稿</button>
         <div class="body-content">
           <div v-if="bodyType === 'none'" class="editor-empty">此请求不发送请求体。</div>
         <JsonBodyEditor
@@ -626,6 +604,11 @@ function patchVersion(value: string | number | null) {
         <header class="section-head"><strong>请求设置</strong><span>未设置的项目继承上级默认值</span></header>
         <div class="settings-grid">
           <label class="field-stack">
+            <span>Cookie 会话（收发）</span>
+            <AppSelect :value="settingBooleanValue(tab.settings.sendCookies)" :options="[{ label: '继承（默认开启）', value: 'inherit' }, { label: '开启', value: 'true' }, { label: '关闭', value: 'false' }]" @update:value="patchBooleanSetting('sendCookies', $event)" />
+          </label>
+          <div class="field-stack"><span>工作区 Cookie</span><AppButton @click="cookiesOpen = true">管理 Cookie 会话</AppButton></div>
+          <label class="field-stack">
             <span>超时（毫秒）</span>
             <AppInputNumber :value="tab.settings.timeoutMs ?? null" :min="0" :step="1000" placeholder="继承" @update:value="patchNumberSetting('timeoutMs', $event)" />
           </label>
@@ -653,10 +636,12 @@ function patchVersion(value: string | number | null) {
       </p>
     </div>
   </NaiveThemeScope>
+  <NaiveThemeScope v-if="cookiesOpen"><CookieManager @close="cookiesOpen = false" /></NaiveThemeScope>
   </section>
 </template>
 
 <style scoped>
+.text-action { color: var(--a-primary); background: transparent; border: 1px solid var(--a-border); padding: 4px 8px; border-radius: var(--a-radius-sm); cursor: pointer; }
 .bulk-error { color: var(--a-error); margin: 6px 0; font-size: var(--a-fs-xs); }
 .req { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; overflow: hidden; }
 .tabs {

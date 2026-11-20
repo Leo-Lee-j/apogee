@@ -293,6 +293,7 @@ fn convert_interface(
     }
 
     Some(ImportedRequest {
+        folder_ids: Vec::new(),
         name,
         folder: vec![if category.trim().is_empty() {
             "未分类".into()

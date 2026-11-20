@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import type { RecoverySnapshot } from '@/ipc'
-const mocks = vi.hoisted(() => ({ read: vi.fn(), write: vi.fn(), save: vi.fn(), choice: vi.fn() }))
+const mocks = vi.hoisted(() => ({ read: vi.fn(), write: vi.fn(), save: vi.fn(), readRequest: vi.fn(), saveRequest: vi.fn(), choice: vi.fn() }))
 vi.mock('@/ipc', () => ({
   inTauri: true,
-  ipc: { workspaceReadRecovery: mocks.read, workspaceSaveRecovery: mocks.write, workspaceSaveContainer: mocks.save },
+  ipc: { workspaceReadRequest: mocks.readRequest, workspaceSaveRequest: mocks.saveRequest, workspaceReadRecovery: mocks.read, workspaceSaveRecovery: mocks.write, workspaceSaveContainer: mocks.save },
   normalizeError: (error: unknown) => ({ kind: 'io', message: error instanceof Error ? error.message : String(error), hints: [] }),
 }))
 vi.mock('@/features/feedback', () => ({ confirmUnsaved: mocks.choice, toast: () => ({ error: vi.fn() }), errorText: (text: string) => text }))
@@ -21,6 +21,40 @@ beforeEach(() => {
 })
 afterEach(() => { useEditorRecoveryStore().stop(); useTabsStore().resetWorkspace(); vi.useRealTimers() })
 describe('editor recovery and leave protection', () => {
+  it('retains clean saved Body drafts through autosave, close, preview reopen and workspace recovery', async () => {
+    const store = useEditorRecoveryStore(), tabs = useTabsStore()
+    await store.start()
+    const tab = tabs.open({ nodeId: 'saved', body: { type: 'json', content: 'fixture' } })
+    tabs.switchBodyType(tab.id, 'none'); await tabs.save(tab.id)
+    expect(tabs.active?.dirty).toBe(false)
+    await tabs.close(tab.id)
+    expect(saved.requests[0]).toMatchObject({ dirty: false, bodyDrafts: { json: { content: 'fixture' } } })
+    tabs.open({ preview: true })
+    const reopened = tabs.open({ nodeId: 'saved', preview: true })
+    expect(reopened.bodyDrafts.json).toMatchObject({ content: 'fixture' })
+    expect(reopened.preview).toBe(false)
+    await store.flush(); tabs.resetWorkspace()
+    await store.start()
+    expect(tabs.active).toBeNull()
+    tabs.open({ ...saved.requests[0]!.spec, nodeId: 'saved', title: 'Latest title', auth: { type: 'bearer', token: 'rotated' } })
+    expect(tabs.active?.dirty).toBe(false)
+    expect(tabs.active?.persistedAuth).toEqual({ type: 'bearer', token: 'rotated' })
+    tabs.switchBodyType(tabs.active!.id, 'json')
+    expect(tabs.active?.body).toEqual({ type: 'json', content: 'fixture' })
+  })
+  it('opens a deleted source detached by Rust as an editable draft with its inactive Body types', async () => {
+    const store = useEditorRecoveryStore(), tabs = useTabsStore()
+    saved.requests.push({
+      id: 'recovered', title: 'Deleted request', dirty: true, nodeId: null, expectedAuth: null, debugCaseEditor: false,
+      spec: { method: 'POST', url: 'https://fixture.test', params: [], pathParams: [], headers: [], body: { type: 'none' }, auth: { type: 'none' } },
+      bodyDrafts: { json: { type: 'json', content: 'preserved fixture' } },
+    })
+    await store.start()
+    expect(tabs.active).toMatchObject({ title: 'Deleted request', dirty: true, nodeId: undefined })
+    tabs.switchBodyType(tabs.active!.id, 'json')
+    expect(tabs.active?.body).toEqual({ type: 'json', content: 'preserved fixture' })
+    expect(mocks.readRequest).not.toHaveBeenCalled()
+  })
   it('cancels closing without losing a draft, then saves and restores the closed draft', async () => {
     const store = useEditorRecoveryStore(), tabs = useTabsStore()
     await store.start()

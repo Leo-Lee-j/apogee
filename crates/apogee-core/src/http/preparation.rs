@@ -1,5 +1,5 @@
 //! Shared cancellable preparation boundary for desktop and future runner/CLI adapters.
-use super::{execute, Outcome, Progress};
+use super::{execute_with_session, HttpSession, Outcome, Progress};
 use crate::{error::AppError, request::RequestSpec, response::Spool, vars::Environment};
 use std::future::Future;
 use tokio::sync::oneshot;
@@ -18,8 +18,18 @@ pub async fn execute_prepared(
     id: Uuid,
     preparation: impl Future<Output = Result<Option<PreparedRequest>, AppError>>,
     spool: &Spool,
+    cancel: oneshot::Receiver<()>,
+    on_progress: impl FnMut(Progress),
+) -> Outcome {
+    execute_prepared_with_session(id, preparation, spool, cancel, on_progress, None).await
+}
+pub async fn execute_prepared_with_session(
+    id: Uuid,
+    preparation: impl Future<Output = Result<Option<PreparedRequest>, AppError>>,
+    spool: &Spool,
     mut cancel: oneshot::Receiver<()>,
     on_progress: impl FnMut(Progress),
+    session: Option<&HttpSession>,
 ) -> Outcome {
     let prepared = tokio::select! { biased;
         _ = &mut cancel => return Outcome::Cancelled,
@@ -33,13 +43,14 @@ pub async fn execute_prepared(
     if !matches!(cancel.try_recv(), Err(oneshot::error::TryRecvError::Empty)) {
         return Outcome::Cancelled;
     }
-    execute(
+    execute_with_session(
         id,
         &prepared.spec,
         prepared.environment.as_ref(),
         spool,
         cancel,
         on_progress,
+        session,
     )
     .await
 }

@@ -133,6 +133,10 @@ pub fn run() {
             commands::postman_import,
             commands::postman_import_file,
             commands::postman_import_workspace,
+            commands::workspace_export_postman,
+            commands::workspace_list_cookies,
+            commands::workspace_put_cookie,
+            commands::workspace_delete_cookie,
             commands::postman_import_environment_workspace,
             commands::yapi_analyze_import,
             commands::yapi_apply_import,
@@ -795,6 +799,9 @@ mod commands {
             .begin_request(workspace_id, session_id, id, tab_id)
             .map_err(|error| error.to_string())?;
         let (runtime, cancel_rx, response_access) = lease.into_execution_parts();
+        let http_session = state
+            .with_http_session(workspace_id, session_id, |http| Ok(http.clone()))
+            .map_err(|error| error.to_string())?;
         let state2 = state.inner().clone();
         let app2 = app.clone();
 
@@ -879,11 +886,11 @@ mod commands {
 
             let body = AssertUnwindSafe(async {
                 let outcome =
-                    apogee_core::http::execute_prepared(
+                    apogee_core::http::execute_prepared_with_session(
                         id,
                         crate::request_preparation::prepare(state2.clone(), workspace_id,
                             session_id, spec, ctx, &settings),
-                        runtime.spool(), cancel_rx, on_progress,
+                        runtime.spool(), cancel_rx, on_progress, Some(&http_session),
                     )
                     .await;
 
@@ -1308,14 +1315,7 @@ mod commands {
         apogee_core::postman::import_json(&json)
     }
 
-    #[derive(Debug, Serialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct PostmanWorkspaceImportResult {
-        pub collection_id: Uuid,
-        pub imported_requests: usize,
-        pub imported_folders: usize,
-        pub warnings: Vec<String>,
-    }
+    use crate::workspace::PostmanWorkspaceImportResult;
 
     #[derive(Clone, Debug, Serialize)]
     #[serde(rename_all = "camelCase")]
@@ -1372,86 +1372,89 @@ mod commands {
             }
             state
                 .with_workspace_mutation(workspace_id, session_id, |repository| {
-                    use apogee_core::workspace::WorkspaceNodeKind;
-                    use std::collections::HashMap;
-
-                    let collection_snapshot =
-                        repository.create_collection(imported.name.clone())?;
-                    emit_postman_import_progress(&app, &import_id, 20, 100, "创建集合");
-                    let collection = collection_snapshot
-                        .nodes
-                        .iter()
-                        .rev()
-                        .find(|node| {
-                            matches!(node.kind, WorkspaceNodeKind::Collection)
-                                && node.name == imported.name
-                        })
-                        .ok_or_else(|| anyhow::anyhow!("导入集合创建后无法定位节点"))?;
-                    let collection_id = collection.id;
-                    let mut folders = HashMap::<String, Uuid>::new();
-                    let mut imported_folders = 0;
-                    let mut imported_requests = 0;
-                    let mut last_progress = 20;
-
-                    for item in &imported.requests {
-                        let mut parent_id = collection_id;
-                        let mut path_key = String::new();
-                        for folder_name in &item.folder {
-                            if !path_key.is_empty() {
-                                path_key.push('/');
-                            }
-                            path_key.push_str(folder_name);
-                            if let Some(id) = folders.get(&path_key) {
-                                parent_id = *id;
-                                continue;
-                            }
-                            let snapshot =
-                                repository.create_folder(parent_id, folder_name.clone())?;
-                            let folder = snapshot
-                                .nodes
-                                .iter()
-                                .rev()
-                                .find(|node| {
-                                    node.parent_id == Some(parent_id)
-                                        && matches!(node.kind, WorkspaceNodeKind::Folder)
-                                        && node.name == *folder_name
-                                })
-                                .ok_or_else(|| anyhow::anyhow!("导入文件夹创建后无法定位节点"))?;
-                            folders.insert(path_key.clone(), folder.id);
-                            parent_id = folder.id;
-                            imported_folders += 1;
-                        }
-                        let request = repository.create_request(parent_id, item.name.clone())?;
-                        repository.save_request(
-                            request.id,
-                            item.name.clone(),
-                            item.spec.clone(),
-                        )?;
-                        imported_requests += 1;
-                        let progress = 20 + imported_requests * 80 / imported.requests.len();
-                        if progress > last_progress || imported_requests == imported.requests.len()
-                        {
-                            emit_postman_import_progress(
-                                &app,
-                                &import_id,
-                                progress,
-                                100,
-                                "导入请求",
-                            );
-                            last_progress = progress;
-                        }
-                    }
-                    Ok(PostmanWorkspaceImportResult {
-                        collection_id,
-                        imported_requests,
-                        imported_folders,
-                        warnings: imported.warnings.clone(),
-                    })
+                    let result = repository.import_postman(&imported)?;
+                    emit_postman_import_progress(&app, &import_id, 100, 100, "导入完成");
+                    Ok(result)
                 })
                 .map_err(|error| error.to_string())
         })
         .await
         .map_err(|error| format!("Postman 导入任务异常结束: {error}"))?
+    }
+
+    #[tauri::command]
+    pub async fn workspace_export_postman(
+        state: State<'_, Arc<AppState>>,
+        workspace_id: String,
+        session_id: String,
+        node_id: String,
+    ) -> Result<crate::workspace::PostmanExportResult, String> {
+        let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
+        let id = Uuid::parse_str(&node_id).map_err(|_| "节点标识无效".to_string())?;
+        let state = state.inner().clone();
+        tokio::task::spawn_blocking(move || {
+            state
+                .with_workspace(workspace_id, session_id, |repository| {
+                    repository.export_postman(id)
+                })
+                .map_err(|error| error.to_string())
+        })
+        .await
+        .map_err(|_| "导出任务异常结束".to_string())?
+    }
+
+    #[tauri::command]
+    pub fn workspace_list_cookies(
+        state: State<'_, Arc<AppState>>,
+        workspace_id: String,
+        session_id: String,
+    ) -> Result<Vec<apogee_core::cookies::SessionCookie>, String> {
+        let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
+        state
+            .with_http_session(workspace_id, session_id, |http| Ok(http.cookies.list()))
+            .map_err(|error| error.to_string())
+    }
+    #[tauri::command]
+    pub fn workspace_put_cookie(
+        state: State<'_, Arc<AppState>>,
+        workspace_id: String,
+        session_id: String,
+        url: String,
+        header: String,
+        cookie_id: Option<String>,
+    ) -> Result<(), String> {
+        let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
+        let url = url::Url::parse(&url).map_err(|_| "Cookie 来源 URL 无效".to_string())?;
+        let id = cookie_id
+            .map(|id| Uuid::parse_str(&id))
+            .transpose()
+            .map_err(|_| "Cookie 标识无效".to_string())?;
+        state
+            .with_http_session(workspace_id, session_id, |http| {
+                http.cookies
+                    .put(&url, &header, id)
+                    .map_err(anyhow::Error::msg)
+            })
+            .map_err(|error| error.to_string())
+    }
+    #[tauri::command]
+    pub fn workspace_delete_cookie(
+        state: State<'_, Arc<AppState>>,
+        workspace_id: String,
+        session_id: String,
+        cookie_id: Option<String>,
+    ) -> Result<(), String> {
+        let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
+        let id = cookie_id
+            .map(|id| Uuid::parse_str(&id))
+            .transpose()
+            .map_err(|_| "Cookie 标识无效".to_string())?;
+        state
+            .with_http_session(workspace_id, session_id, |http| {
+                http.cookies.delete(id);
+                Ok(())
+            })
+            .map_err(|error| error.to_string())
     }
 
     /// Imports a Postman Environment export into the active workspace.
@@ -1477,11 +1480,8 @@ mod commands {
             state
                 .with_workspace_mutation(workspace_id, session_id, |repository| {
                     emit_postman_import_progress(&app, &import_id, 55, 100, "创建环境");
-                    let created =
-                        repository.create_environment(imported.environment.name.clone())?;
-                    let mut environment = imported.environment.clone();
-                    environment.id = created.id;
-                    let environment = repository.save_environment(environment)?;
+                    let environment =
+                        repository.import_environment(imported.environment.clone())?;
                     emit_postman_import_progress(
                         &app,
                         &import_id,
@@ -1809,7 +1809,11 @@ mod commands {
         let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
         let repository = crate::recovery::RecoveryRepository::new(&super::app_data_dir(&app)?);
         state
-            .with_workspace(workspace_id, session_id, |_| repository.load(workspace_id))
+            .with_workspace(workspace_id, session_id, |workspace| {
+                let mut snapshot = repository.load(workspace_id)?;
+                workspace.reconcile_recovery(&mut snapshot)?;
+                Ok(snapshot)
+            })
             .map_err(|error| error.to_string())
     }
 

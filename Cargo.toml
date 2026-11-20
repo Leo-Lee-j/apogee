@@ -57,7 +57,10 @@ reqwest = { version = "0.13", default-features = false, features = [
     "deflate",
     "multipart",
     "stream",
+    "cookies",
 ] }
+cookie_store = { version = "0.22.1", default-features = false }
+psl = "2.1"
 # rustls 的加密后端。显式选 ring 而不是默认的 aws-lc-rs，理由见上。
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 tracing = "0.1"

@@ -43,6 +43,8 @@ const HISTORY_DIR: &str = "history";
 const HISTORY_LIMIT: usize = 200;
 const TRANSACTION_DIR: &str = ".apogee-tx";
 const TRANSACTION_VERSION: u32 = 1;
+mod postman;
+pub use postman::{PostmanExportResult, PostmanWorkspaceImportResult};
 
 /// 可恢复多文件操作的持久化标记。journal 只保存由 UUID 推导的对象身份，绝不接受
 /// 外部路径；恢复路径因此不会因损坏/手写 journal 删除工作区外的任意文件。
@@ -61,6 +63,7 @@ enum WorkspaceTransactionOperation {
     CollectionDelete { collection_id: Uuid },
     CollectionRename { collection_id: Uuid },
     Duplicate { copy_id: Uuid },
+    ImportCollection { collection_id: Uuid },
 }
 
 impl WorkspaceTransactionOperation {
@@ -79,6 +82,7 @@ impl WorkspaceTransactionOperation {
                 format!("collection-rename-{collection_id}.json")
             }
             Self::Duplicate { copy_id } => format!("duplicate-{copy_id}.json"),
+            Self::ImportCollection { collection_id } => format!("import-{collection_id}.json"),
         }
     }
 }
@@ -379,6 +383,9 @@ impl WorkspaceRepository {
                 }
                 WorkspaceTransactionOperation::Duplicate { copy_id } => {
                     self.recover_duplicate(&manifest, copy_id, &path)?;
+                }
+                WorkspaceTransactionOperation::ImportCollection { collection_id } => {
+                    self.recover_postman_import(&manifest, collection_id, &path)?;
                 }
             }
         }
@@ -774,6 +781,34 @@ impl WorkspaceRepository {
             nodes: located.into_iter().map(|item| item.node).collect(),
             environments,
         })
+    }
+
+    /// Saved Body drafts attach to the current file; deleted sources become independent drafts.
+    pub fn reconcile_recovery(
+        &self,
+        snapshot: &mut crate::recovery::RecoverySnapshot,
+    ) -> Result<()> {
+        if !snapshot
+            .requests
+            .iter()
+            .any(|item| !item.dirty && item.node_id.is_some())
+        {
+            return Ok(());
+        }
+        let requests: std::collections::HashSet<_> = self
+            .scan()?
+            .into_iter()
+            .filter(|item| matches!(item.node.kind, WorkspaceNodeKind::Request))
+            .map(|item| item.node.id)
+            .collect();
+        for item in &mut snapshot.requests {
+            if !item.dirty && item.node_id.is_some_and(|id| !requests.contains(&id)) {
+                item.node_id = None;
+                item.expected_auth = None;
+                item.dirty = true;
+            }
+        }
+        Ok(())
     }
 
     pub fn record_history(
@@ -1203,13 +1238,27 @@ impl WorkspaceRepository {
         name: String,
         write_manifest: impl FnOnce(&Path, &WorkspaceManifest) -> Result<()>,
     ) -> Result<Environment> {
-        let name = required_name(&name)?;
-        let environment = Environment {
-            id: Uuid::new_v4(),
-            name: name.clone(),
-            host: String::new(),
-            variables: Vec::new(),
-        };
+        self.create_environment_value_with_writer(
+            Environment {
+                id: Uuid::new_v4(),
+                name,
+                host: String::new(),
+                variables: Vec::new(),
+            },
+            write_manifest,
+        )
+    }
+    pub fn import_environment(&self, mut environment: Environment) -> Result<Environment> {
+        environment.id = Uuid::new_v4();
+        self.create_environment_value_with_writer(environment, write_yaml)
+    }
+    fn create_environment_value_with_writer(
+        &self,
+        mut environment: Environment,
+        write_manifest: impl FnOnce(&Path, &WorkspaceManifest) -> Result<()>,
+    ) -> Result<Environment> {
+        let name = required_name(&environment.name)?;
+        environment.name = name.clone();
         let journal = self.begin_transaction(WorkspaceTransactionOperation::EnvironmentCreate {
             environment_id: environment.id,
         })?;

@@ -599,6 +599,14 @@ export const ipc = {
     })
   },
 
+  workspaceListCookies(): Promise<SessionCookie[]> { return call('workspace_list_cookies', { ...sessionArgs() }) },
+  workspacePutCookie(url: string, header: string, cookieId?: string): Promise<void> { return call('workspace_put_cookie', { ...sessionArgs(), url, header, cookieId }) },
+  workspaceDeleteCookie(cookieId?: string): Promise<void> { return call('workspace_delete_cookie', { ...sessionArgs(), cookieId }) },
+
+  workspaceExportPostman(nodeId: string): Promise<{ json: string; warnings: string[] }> {
+    return call('workspace_export_postman', { ...sessionArgs(), nodeId })
+  },
+
   workspaceReadRecovery(): Promise<RecoverySnapshot> {
     return call('workspace_read_recovery', { ...sessionArgs() })
   },
@@ -974,6 +982,8 @@ export interface WorkspaceContainer {
 }
 
 export interface RequestDraft {
+  dirty?: boolean
+  bodyDrafts?: Partial<Record<Body['type'], Body>>
   id: string
   title: string
   spec: RequestSpec
@@ -1443,4 +1453,9 @@ export async function onUpdateProgress(
   return tauriListen<UpdateProgress>('update:progress', (event) => {
     if (event.payload.operationId === operationId) handler(event.payload)
   })
+}
+
+export interface SessionCookie {
+  id: string; name: string; value: string; domain: string; path: string
+  hostOnly: boolean; secure: boolean; httpOnly: boolean; expiresAt: number | null; header: string
 }

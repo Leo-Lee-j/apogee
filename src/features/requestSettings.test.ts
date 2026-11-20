@@ -4,6 +4,7 @@ import { booleanSetting, httpVersionSetting, numberSetting, settingBooleanValue 
 describe('request settings conversion', () => {
   it('preserves inherited boolean values', () => {
     expect(settingBooleanValue(undefined)).toBe('inherit')
+    expect(settingBooleanValue(null)).toBe('inherit')
     expect(settingBooleanValue(true)).toBe('true')
     expect(settingBooleanValue(false)).toBe('false')
     expect(booleanSetting('inherit')).toBeUndefined()

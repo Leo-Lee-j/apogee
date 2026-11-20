@@ -1,4 +1,5 @@
 import { pathParameterNames } from '@/features/requestParameters'
+import { switchBody, type BodyDrafts } from '@/features/bodyDrafts'
 import { defineStore } from 'pinia'
 import { useEditorRecoveryStore } from './editorRecovery'
 import { ref, shallowRef, computed, markRaw } from 'vue'
@@ -46,6 +47,8 @@ export interface Tab {
   pathParams: KeyValue[]
   headers: KeyValue[]
   body: Body
+  /** Inactive Body types, machine-local only. Never part of RequestSpec. */
+  bodyDrafts: BodyDrafts
   auth: AuthConfig
   settings: RequestSettings
   /** 最近一次请求错误；成功发送后清除。 */
@@ -238,6 +241,7 @@ export const useTabsStore = defineStore('tabs', () => {
         return existing
       }
     }
+    const restored = init?.nodeId ? useEditorRecoveryStore().takeBodyDrafts(init.nodeId) : undefined
     // 单击预览：已有临时标签时复用它，避免浏览集合时开出 30 个标签（02 文档 §4.5）
     if (init?.preview) {
       const existing = tabs.value.find((t) => t.preview)
@@ -255,7 +259,8 @@ export const useTabsStore = defineStore('tabs', () => {
           persistedAuth: init.nodeId ? init.auth ?? { type: 'inherit' } : undefined,
           id: existing.id,
           recoveryId: crypto.randomUUID(),
-          preview: true,
+          bodyDrafts: init.bodyDrafts ?? restored ?? {},
+          preview: !restored,
           dirty: false,
           error: null,
           actualRequest: null,
@@ -281,6 +286,7 @@ export const useTabsStore = defineStore('tabs', () => {
       pathParams: [],
       headers: [],
       body: { type: 'none' },
+      bodyDrafts: restored ?? {},
       auth: { type: 'inherit' },
       settings: {},
       error: null,
@@ -291,6 +297,7 @@ export const useTabsStore = defineStore('tabs', () => {
       historyPreview: false,
       newPanel: false,
       ...init,
+      ...(restored ? { preview: false } : {}),
       persistedAuth: init?.nodeId ? init.persistedAuth ?? init.auth ?? { type: 'inherit' } : undefined,
     })
     tabs.value = [...tabs.value, tab]
@@ -390,6 +397,17 @@ export const useTabsStore = defineStore('tabs', () => {
       // 保存完成与关闭之间若又发生编辑，保留标签让新的自动保存继续。
       if (generation !== workspaceGeneration || tabs.value.find((tab) => tab.id === id)?.dirty) return
     }
+    if (current.nodeId) {
+      const generation = workspaceGeneration
+      const closing = tabs.value.find(tab => tab.id === id)
+      if (!closing) return
+      recovery.archiveBodyDrafts(closing)
+      if (!(await recovery.flush())) {
+        if (recovery.lastError) await showSaveError(recovery.lastError, generation)
+        return
+      }
+      if (generation !== workspaceGeneration || tabs.value.find(tab => tab.id === id) !== closing) return
+    }
     const idx = tabs.value.findIndex((tab) => tab.id === id)
     if (idx < 0) return
     tabs.value = tabs.value.filter((t) => t.id !== id)
@@ -419,6 +437,14 @@ export const useTabsStore = defineStore('tabs', () => {
     tabs.value = tabs.value.map((tab, tabIndex) => (tabIndex === index ? next : tab))
 
     if (edited) schedulePersist(next)
+  }
+
+  function switchBodyType(id: string, type: Body['type']) {
+    const tab = tabs.value.find(item => item.id === id)
+    if (!tab || tab.body.type === type) return
+    const delta = switchBody(tab.body, tab.bodyDrafts, type)
+    useEditorRecoveryStore().assertBodyDraftCapacity(tab, delta.bodyDrafts, delta.body)
+    patch(id, { ...delta, dirty: true })
   }
 
   /**
@@ -535,6 +561,7 @@ export const useTabsStore = defineStore('tabs', () => {
     activate,
     close,
     patch,
+    switchBodyType,
     save,
     flushAll,
     resetWorkspace,

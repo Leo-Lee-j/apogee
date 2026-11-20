@@ -2,8 +2,8 @@ import type { RequestSettings } from '@/ipc'
 
 export type InheritedBoolean = 'inherit' | 'true' | 'false'
 
-export function settingBooleanValue(value: boolean | undefined): InheritedBoolean {
-  return value === undefined ? 'inherit' : value ? 'true' : 'false'
+export function settingBooleanValue(value: boolean | null | undefined): InheritedBoolean {
+  return value == null ? 'inherit' : value ? 'true' : 'false'
 }
 
 export function booleanSetting(value: string | number | null): boolean | undefined {

@@ -14,7 +14,9 @@
 //!    把取消信号和网络 future 一起等。
 
 mod preparation;
-pub use preparation::{execute_prepared, PreparedRequest};
+#[cfg(test)]
+mod session_tests;
+pub use preparation::{execute_prepared, execute_prepared_with_session, PreparedRequest};
 
 use crate::error::{AppError, ErrorKind, Hint};
 use crate::model::{ActualRequest, KeyValue, ResponseMeta, Timing, ValueKind};
@@ -24,7 +26,7 @@ use crate::response::Spool;
 use crate::vars::{resolve_request, Environment};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Instant;
 use tokio_util::io::ReaderStream;
 use uuid::Uuid;
@@ -1068,6 +1070,13 @@ struct PoolKey {
 
 static POOL: OnceLock<Mutex<HashMap<PoolKey, reqwest::Client>>> = OnceLock::new();
 
+/// Session-local clients share a bounded jar; the provider owns no clients (no Arc cycle).
+#[derive(Default)]
+pub struct HttpSession {
+    pub cookies: Arc<crate::cookies::CookieJar>,
+    pool: Mutex<HashMap<PoolKey, reqwest::Client>>,
+}
+
 /// 安装 rustls 的进程级加密后端。**在建任何 `Client` 之前必须调用。**
 ///
 /// reqwest 的 `rustls-no-provider` feature 的含义是「provider 由调用方给」：
@@ -1101,6 +1110,13 @@ fn ensure_crypto_provider() {
 /// §4.5 要求连接池复用与 DNS 缓存。每次请求新建 `Client` 会把两者都丢掉，
 /// 「请求发送开销 < 5ms」直接打穿。
 pub(crate) fn client_for(settings: &ResolvedSettings) -> Result<reqwest::Client, AppError> {
+    client_for_session(settings, None)
+}
+
+fn client_for_session(
+    settings: &ResolvedSettings,
+    session: Option<&HttpSession>,
+) -> Result<reqwest::Client, AppError> {
     ensure_crypto_provider();
 
     let key = PoolKey {
@@ -1111,7 +1127,10 @@ pub(crate) fn client_for(settings: &ResolvedSettings) -> Result<reqwest::Client,
         proxy_url: settings.proxy_url.clone(),
     };
 
-    let pool = POOL.get_or_init(|| Mutex::new(HashMap::new()));
+    let pool = session.map_or_else(
+        || POOL.get_or_init(|| Mutex::new(HashMap::new())),
+        |session| &session.pool,
+    );
     // 锁只护 HashMap 的查改，不跨越网络调用。`Client` 自身是 Arc 语义，
     // clone 很便宜，所以持锁时间是常数级。
     let mut guard = pool.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -1135,6 +1154,9 @@ pub(crate) fn client_for(settings: &ResolvedSettings) -> Result<reqwest::Client,
         // （见 `ResolvedSettings::default`）—— 这个开关是给自签证书的内网环境用的，
         // 不能因为「省事」而默认放开。
         .danger_accept_invalid_certs(!settings.verify_tls);
+    if let Some(session) = session {
+        builder = builder.cookie_provider(session.cookies.clone());
+    }
 
     if settings.proxy_url.as_deref() == Some("direct://") {
         // reqwest otherwise honors HTTP(S)_PROXY environment variables.
@@ -1165,6 +1187,11 @@ pub(crate) fn client_for(settings: &ResolvedSettings) -> Result<reqwest::Client,
             .detail(error.to_string())
             .hint(Hint::new("这通常是 TLS 后端问题，请反馈日志"))
     })?;
+    if guard.len() >= 32 {
+        if let Some(cold) = guard.keys().next().cloned() {
+            guard.remove(&cold);
+        }
+    }
     guard.insert(key, client.clone());
     Ok(client)
 }
@@ -1228,7 +1255,19 @@ pub async fn execute(
     cancel: tokio::sync::oneshot::Receiver<()>,
     on_progress: impl FnMut(Progress),
 ) -> Outcome {
-    match execute_inner(id, spec, environment, spool, cancel, on_progress).await {
+    execute_with_session(id, spec, environment, spool, cancel, on_progress, None).await
+}
+
+pub async fn execute_with_session(
+    id: Uuid,
+    spec: &RequestSpec,
+    environment: Option<&Environment>,
+    spool: &Spool,
+    cancel: tokio::sync::oneshot::Receiver<()>,
+    on_progress: impl FnMut(Progress),
+    session: Option<&HttpSession>,
+) -> Outcome {
+    match execute_inner(id, spec, environment, spool, cancel, on_progress, session).await {
         Ok(Some(meta)) => Outcome::Done(Box::new(meta)),
         Ok(None) => Outcome::Cancelled,
         Err(failure) => Outcome::Failed {
@@ -1247,6 +1286,7 @@ async fn execute_inner(
     spool: &Spool,
     mut cancel: tokio::sync::oneshot::Receiver<()>,
     on_progress: impl FnMut(Progress),
+    session: Option<&HttpSession>,
 ) -> Result<Option<ResponseMeta>, ExecuteFailure> {
     let prepare_start = Instant::now();
     // 解析在执行层入口完成，保证 URL、参数、Header、Body 和鉴权共享同一份
@@ -1258,9 +1298,19 @@ async fn execute_inner(
     if matches!(resolved.auth, AuthConfig::OAuth1 { .. }) {
         settings.follow_redirects = false;
     }
-    let client = client_for(&settings)?;
+    let session = session.filter(|_| resolved.settings.send_cookies.unwrap_or(true));
+    let client = client_for_session(&settings, session)?;
     let (request, url) = build_request(&client, &resolved)?;
-    let actual_request = snapshot_request(&request, &resolved);
+    let mut actual_request = snapshot_request(&request, &resolved);
+    if !request.headers().contains_key(reqwest::header::COOKIE) {
+        if let Some(value) = session.and_then(|session| {
+            reqwest::cookie::CookieStore::cookies(&*session.cookies, request.url())
+        }) {
+            if let Ok(value) = value.to_str() {
+                actual_request.headers.push(("cookie".into(), value.into()));
+            }
+        }
+    }
     let prepare_ms = prepare_start.elapsed().as_secs_f64() * 1000.0;
 
     let t0 = Instant::now();

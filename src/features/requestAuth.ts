@@ -65,35 +65,6 @@ export const PKCE_TOKEN_FIELDS: AuthField[] = [
   { key: 'redirectUri', label: 'Redirect URI（需在认证服务注册）', placeholder: 'http://127.0.0.1:53682/oauth/callback' },
 ]
 
-/** Explicit collection export only; never use this projection for history / documentation. */
-export function postmanAuth(auth: AuthConfig | undefined): Record<string, unknown> | undefined {
-  if (!auth || auth.type === 'inherit') return undefined
-  if (auth.type === 'none') return { type: 'noauth' }
-  const type = auth.type === 'apiKey' ? 'apikey' : auth.type
-  let fields: Record<string, string>
-  switch (auth.type) {
-    case 'basic': fields = { username: auth.username, password: auth.password }; break
-    case 'bearer': fields = { token: auth.token }; break
-    case 'apiKey': fields = { key: auth.key, value: auth.value, in: auth.location }; break
-    case 'oauth1': fields = { consumerKey: auth.consumerKey, consumerSecret: auth.consumerSecret, token: auth.token,
-      tokenSecret: auth.tokenSecret, signatureMethod: auth.signatureMethod, realm: auth.realm,
-      callback: auth.callback, verifier: auth.verifier, nonce: auth.nonce, timestamp: auth.timestamp,
-      addParamsToHeader: 'true', addEmptyParamsToSign: 'false' }; break
-    case 'oauth2':
-      fields = { accessToken: auth.accessToken, headerPrefix: auth.headerPrefix, addTokenTo: 'header' }
-      if (auth.tokenRequest) Object.assign(fields, { grant_type: auth.tokenRequest.grantType === 'authorizationCode' ? 'authorization_code_with_pkce' : 'client_credentials',
-        accessTokenUrl: auth.tokenRequest.tokenUrl,
-        clientId: auth.tokenRequest.clientId, clientSecret: auth.tokenRequest.clientSecret, scope: auth.tokenRequest.scope,
-        refreshToken: auth.tokenRequest.refreshToken, client_authentication: auth.tokenRequest.clientAuth === 'basic' ? 'header' : 'body' })
-      if (auth.tokenRequest?.grantType === 'authorizationCode') Object.assign(fields, { authUrl: auth.tokenRequest.authorizationUrl ?? '',
-        redirect_uri: auth.tokenRequest.redirectUri ?? '', code_challenge_method: 'S256' })
-      break
-    case 'jwt': fields = { secret: auth.secret, payload: auth.payload, header: auth.header,
-      algorithm: auth.algorithm, headerPrefix: auth.headerPrefix, isSecretBase64Encoded: 'false', addTokenTo: 'header' }; break
-  }
-  return { type, [type]: Object.entries(fields).map(([key, value]) => ({ key, value, type: 'string' })) }
-}
-
 /** Map only static core codes; never restore backend free-text error details. */
 export function oauth2OperationError(error: AppError): AppError {
   const messages: Record<string, string> = {

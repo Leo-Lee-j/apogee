@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { postmanRequest } from '@/features/postmanExport'
 import { h, ref, computed, shallowRef, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useTabsStore } from '@/stores/tabs'
 import { useUiStore } from '@/stores/ui'
@@ -471,58 +470,18 @@ function exportFilename(node: FlatNode) {
   return `${safeName}.postman_collection.json`
 }
 
-function isDescendantOf(node: FlatNode, rootId: string, byId: Map<string, FlatNode>) {
-  let cursor: FlatNode | undefined = node
-  while (cursor?.parentId) {
-    if (cursor.parentId === rootId) return true
-    cursor = byId.get(cursor.parentId)
-  }
-  return false
-}
-
-type PostmanItem = {
-  name: string
-  item?: PostmanItem[]
-  request?: Record<string, unknown>
-}
-
 async function exportNode(node: FlatNode) {
   if (!workspace.available || !node.kind) return
   try {
-    const byId = new Map(all.value.map((item) => [item.id, item]))
-    const scope = all.value.filter((item) => item.id === node.id || isDescendantOf(item, node.id, byId))
-    const requests = await Promise.all(scope
-      .filter((item) => item.kind === 'request')
-      .map(async (item) => ({ node: item, request: await ipc.workspaceReadRequest(item.id) })))
-    const requestsById = new Map(requests.map(({ node: item, request }) => [item.id, request]))
-    const buildItems = (parentId: string): PostmanItem[] => {
-      const items: PostmanItem[] = []
-      for (const item of scope.filter((candidate) => candidate.parentId === parentId)) {
-        if (item.kind === 'request') {
-          const request = requestsById.get(item.id)
-          if (request) items.push({ name: item.name, request: postmanRequest(request.spec) })
-          continue
-        }
-        items.push({ name: item.name, item: buildItems(item.id) })
-      }
-      return items
-    }
-    const payload = {
-      info: {
-        name: node.name,
-        schema: 'https://schema.getpostman.com/json/collection/v2.1.0/collection.json',
-      },
-      item: node.kind === 'request'
-        ? [{ name: node.name, request: postmanRequest(requestsById.get(node.id)!.spec) }]
-        : buildItems(node.id),
-    }
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
+    const payload = await ipc.workspaceExportPostman(node.id)
+    const blob = new Blob([payload.json], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const anchor = document.createElement('a')
     anchor.href = url
     anchor.download = exportFilename(node)
     anchor.click()
     URL.revokeObjectURL(url)
+    if (payload.warnings.length) toast().warning(payload.warnings.slice(0, 3).join('；') + (payload.warnings.length > 3 ? '；更多设置请在目标客户端检查' : ''))
     toast().success(`已导出 Postman Collection：“${node.name}”`)
   } catch (error) {
     deleteError.value = error instanceof Error ? error.message : '导出失败，请稍后重试。'

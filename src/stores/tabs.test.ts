@@ -16,6 +16,16 @@ beforeEach(() => { setActivePinia(createPinia()); vi.useFakeTimers(); saveReques
 afterEach(() => { vi.clearAllTimers(); vi.useRealTimers() })
 
 describe('saved Auth optimistic concurrency', () => {
+  it('autosaves the active body without putting inactive type drafts in shared RequestSpec', async () => {
+    const tabs = useTabsStore(), tab = tabs.open({ nodeId: 'request', body: { type: 'json', content: 'fixture' } })
+    tabs.switchBodyType(tab.id, 'none')
+    await vi.advanceTimersByTimeAsync(300)
+    expect(tabs.active?.dirty).toBe(false)
+    expect(tabs.active?.bodyDrafts.json).toEqual({ type: 'json', content: 'fixture' })
+    expect(saveRequest.mock.calls[0][2]).not.toHaveProperty('bodyDrafts')
+    tabs.switchBodyType(tab.id, 'json')
+    expect(tabs.active?.body).toEqual({ type: 'json', content: 'fixture' })
+  })
   it('passes the persisted baseline, not the edited Auth, and keeps it out of RequestSpec', async () => {
     const tabs = useTabsStore()
     const tab = tabs.open({ nodeId: 'request', auth: oldAuth })

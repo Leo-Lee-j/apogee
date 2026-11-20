@@ -2,12 +2,12 @@
 use crate::persistence::atomic_write;
 use anyhow::{bail, Context, Result};
 use apogee_core::{
-    request::{AuthConfig, RequestSpec},
+    request::{AuthConfig, Body, RequestSpec},
     workspace::WorkspaceContainer,
 };
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
 };
@@ -22,12 +22,19 @@ pub struct RequestDraft {
     pub id: Uuid,
     pub title: String,
     pub spec: RequestSpec,
+    #[serde(default = "default_dirty")]
+    pub dirty: bool,
+    #[serde(default)]
+    pub body_drafts: HashMap<String, Body>,
     pub node_id: Option<Uuid>,
     pub expected_auth: Option<AuthConfig>,
     pub source_request_id: Option<Uuid>,
     pub debug_case_id: Option<Uuid>,
     #[serde(default)]
     pub debug_case_editor: bool,
+}
+fn default_dirty() -> bool {
+    true
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -55,6 +62,11 @@ impl RecoverySnapshot {
         for request in &self.requests {
             if !ids.insert(request.id) || request.title.len() > 1024 {
                 bail!("恢复草稿的标识或名称无效");
+            }
+            for (key, body) in &request.body_drafts {
+                if serde_json::to_value(body)?["type"].as_str() != Some(key) {
+                    bail!("Body 类型草稿无效");
+                }
             }
         }
         ids.clear();
@@ -110,8 +122,62 @@ mod tests {
         RequestDraft {
         id: Uuid::new_v4(), title: "draft".into(),
         spec: serde_json::from_value(serde_json::json!({"method":"POST","url":"https://example.test","body":{"type":"json","content":"private fixture"}})).unwrap(),
-        node_id: None, expected_auth: None, source_request_id: None, debug_case_id: None, debug_case_editor: false,
+        node_id: None, expected_auth: None, source_request_id: None, debug_case_id: None, debug_case_editor: false, dirty: true, body_drafts: HashMap::new(),
     }
+    }
+    #[test]
+    fn saved_body_recovery_detaches_deleted_sources_without_restoring_existing_requests() {
+        let root = std::env::temp_dir().join(format!("apogee-recovery-source-{}", Uuid::new_v4()));
+        let workspace =
+            crate::workspace::WorkspaceRepository::create(root.join("workspace"), "fixture".into())
+                .unwrap();
+        let collection = workspace.create_collection("fixture".into()).unwrap().nodes[0].id;
+        let existing = workspace
+            .create_request(collection, "existing".into())
+            .unwrap();
+        let removed = workspace
+            .create_request(collection, "removed".into())
+            .unwrap();
+        let mut request = draft();
+        request.dirty = false;
+        request.node_id = Some(existing.id);
+        request.expected_auth = Some(AuthConfig::Bearer {
+            token: "old-fixture".into(),
+        });
+        request.body_drafts.insert(
+            "text".into(),
+            Body::Text {
+                content: "inactive fixture".into(),
+                content_type: "text/plain".into(),
+            },
+        );
+        let mut deleted = request.clone();
+        deleted.id = Uuid::new_v4();
+        deleted.node_id = Some(removed.id);
+        let repository = RecoveryRepository::new(&root);
+        repository
+            .save(
+                workspace.id().unwrap(),
+                &RecoverySnapshot {
+                    requests: vec![request, deleted],
+                    containers: vec![],
+                },
+            )
+            .unwrap();
+        workspace.delete_node(removed.id).unwrap();
+        let mut snapshot = repository.load(workspace.id().unwrap()).unwrap();
+        workspace.reconcile_recovery(&mut snapshot).unwrap();
+        assert!(!snapshot.requests[0].dirty);
+        assert_eq!(snapshot.requests[0].node_id, Some(existing.id));
+        assert!(snapshot.requests[0].expected_auth.is_some());
+        assert!(snapshot.requests[1].dirty);
+        assert!(snapshot.requests[1].node_id.is_none());
+        assert!(snapshot.requests[1].expected_auth.is_none());
+        assert_eq!(
+            serde_json::to_value(&snapshot.requests[0].body_drafts).unwrap(),
+            serde_json::to_value(&snapshot.requests[1].body_drafts).unwrap()
+        );
+        fs::remove_dir_all(root).unwrap();
     }
     #[test]
     fn recovery_is_isolated_and_rejected_writes_preserve_previous_content() {
@@ -129,6 +195,35 @@ mod tests {
         snapshot.requests.push(snapshot.requests[0].clone());
         assert!(repository.save(workspace, &snapshot).is_err());
         assert_eq!(fs::read(repository.path(workspace)).unwrap(), before);
+        snapshot.requests = vec![draft()];
+        snapshot.requests[0].dirty = false;
+        snapshot.requests[0].body_drafts.insert(
+            "text".into(),
+            Body::Text {
+                content: "inactive fixture".into(),
+                content_type: "application/xml".into(),
+            },
+        );
+        repository.save(workspace, &snapshot).unwrap();
+        assert!(!repository.load(workspace).unwrap().requests[0].dirty);
+        let with_body_drafts = fs::read(repository.path(workspace)).unwrap();
+        snapshot.requests[0].body_drafts.insert(
+            "json".into(),
+            Body::Json {
+                content: "x".repeat(MAX_BYTES as usize),
+            },
+        );
+        assert!(repository.save(workspace, &snapshot).is_err());
+        assert_eq!(
+            fs::read(repository.path(workspace)).unwrap(),
+            with_body_drafts
+        );
+        snapshot.requests[0].body_drafts.clear();
+        snapshot.requests[0]
+            .body_drafts
+            .insert("wrong".into(), Body::None);
+        assert!(repository.save(workspace, &snapshot).is_err());
+        fs::write(repository.path(workspace), &before).unwrap();
         snapshot.requests = (0..101).map(|_| draft()).collect();
         assert!(repository.save(workspace, &snapshot).is_err());
         snapshot.requests = vec![draft()];

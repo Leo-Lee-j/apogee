@@ -1,7 +1,8 @@
 import { ref, shallowRef, watch, type WatchStopHandle } from 'vue'
 import { defineStore } from 'pinia'
-import { ipc, inTauri, normalizeError, type AppError, type AuthConfig, type ContainerDraft, type RequestDraft, type RecoverySnapshot, type WorkspaceContainer } from '@/ipc'
+import { ipc, inTauri, normalizeError, type AppError, type AuthConfig, type Body, type ContainerDraft, type RequestDraft, type RecoverySnapshot, type WorkspaceContainer } from '@/ipc'
 import { useTabsStore, type Tab } from './tabs'
+import { bodyDraftBytes, BODY_DRAFT_BYTES, type BodyDrafts } from '@/features/bodyDrafts'
 
 interface ContainerEditor extends ContainerDraft { dirty: boolean }
 
@@ -19,13 +20,13 @@ export const useEditorRecoveryStore = defineStore('editor-recovery', () => {
 
   function draft(tab: Tab): RequestDraft {
     const { method, url, params, pathParams, headers, body, auth, settings } = tab
-    return { id: tab.recoveryId, title: tab.title, spec: { method, url, params, pathParams, headers, body, auth, settings },
+    return { id: tab.recoveryId, title: tab.title, dirty: tab.dirty, bodyDrafts: tab.bodyDrafts, spec: { method, url, params, pathParams, headers, body, auth, settings },
       nodeId: tab.nodeId, expectedAuth: tab.persistedAuth, sourceRequestId: tab.sourceRequestId,
       debugCaseId: tab.debugCaseId, debugCaseEditor: tab.debugCaseEditor ?? false }
   }
   function snapshot(): RecoverySnapshot {
     return {
-      requests: [...archived, ...useTabsStore().tabs.filter(tab => tab.kind === 'request' && tab.dirty && !tab.historyPreview && !excludedDrafts.has(tab.recoveryId)).map(draft)],
+      requests: [...archived.filter(item => !useTabsStore().tabs.some(tab => tab.recoveryId === item.id || (item.nodeId && item.nodeId === tab.nodeId))), ...useTabsStore().tabs.filter(tab => tab.kind === 'request' && (tab.dirty || Object.keys(tab.bodyDrafts).length > 0) && !tab.historyPreview && !excludedDrafts.has(tab.recoveryId)).map(draft)],
       containers: Object.values(containers.value).filter(entry => entry.dirty).map(({ value, expectedAuth }) => ({ value, expectedAuth })),
     }
   }
@@ -59,11 +60,18 @@ export const useEditorRecoveryStore = defineStore('editor-recovery', () => {
     const saved = inTauri ? await ipc.workspaceReadRecovery() : { requests: [], containers: [] }
     if (version !== generation) return
     const tabs = useTabsStore()
-    for (const item of saved.requests) tabs.open({
-      ...item.spec, title: item.title, recoveryId: item.id, nodeId: item.nodeId ?? undefined,
-      persistedAuth: item.expectedAuth ?? undefined, sourceRequestId: item.sourceRequestId ?? undefined,
-      debugCaseId: item.debugCaseId ?? undefined, debugCaseEditor: item.debugCaseEditor, dirty: true, preview: false,
-    })
+    for (const item of saved.requests) {
+      // Clean saved requests restore only their inactive types, when opened from disk.
+      // This avoids stale credentials/names and a startup fan-out of per-request IPC.
+      if (item.dirty === false && item.nodeId) {
+        archived.push(item)
+        continue
+      }
+      tabs.open({ ...item.spec, title: item.title, recoveryId: item.id, nodeId: item.nodeId ?? undefined,
+        persistedAuth: item.expectedAuth ?? undefined, sourceRequestId: item.sourceRequestId ?? undefined,
+        debugCaseId: item.debugCaseId ?? undefined, debugCaseEditor: item.debugCaseEditor,
+        dirty: item.dirty ?? true, bodyDrafts: item.bodyDrafts ?? {}, preview: false })
+    }
     containers.value = Object.fromEntries(saved.containers.map(item => [item.value.id, { ...item, dirty: true }]))
     for (const item of saved.containers) tabs.openContainerConfig(item.value)
     started = true
@@ -208,6 +216,28 @@ export const useEditorRecoveryStore = defineStore('editor-recovery', () => {
     }
     return written
   }
+  function archiveBodyDrafts(tab: Tab) {
+    archived = [...archived.filter(item => item.nodeId !== tab.nodeId), ...(Object.keys(tab.bodyDrafts).length ? [draft(tab)] : [])]
+    schedule()
+  }
+  function assertBodyDraftCapacity(tab: Tab, bodyDrafts: BodyDrafts, body: Body) {
+    const saved = snapshot()
+    const others = saved.requests.filter(item => item.id !== tab.recoveryId)
+    if (others.length + saved.containers.length >= 100) throw new Error('恢复草稿达到 100 项上限，请先保存或关闭其他编辑')
+    if (others.reduce((bytes, item) => bytes + bodyDraftBytes(item.bodyDrafts ?? {}), bodyDraftBytes(bodyDrafts)) > BODY_DRAFT_BYTES) {
+      throw new Error('Body 类型草稿达到 8 MiB 上限，请先清除不用的类型草稿')
+    }
+    const candidate = { requests: [...others, draft({ ...tab, body, bodyDrafts, dirty: true })], containers: saved.containers }
+    if (new TextEncoder().encode(JSON.stringify(candidate)).byteLength > BODY_DRAFT_BYTES) {
+      throw new Error('本机恢复草稿达到 8 MiB 上限，请先保存或清除不用的编辑')
+    }
+  }
+  function takeBodyDrafts(nodeId: string) {
+    const item = archived.find(item => item.nodeId === nodeId)
+    if (!item) return undefined
+    archived = archived.filter(entry => entry !== item)
+    return item.bodyDrafts
+  }
   function forgetContainer(id: string) { const next = { ...containers.value }; delete next[id]; containers.value = next }
-  return { containers, lastError, start, stop, flush, put, edit, baseline, saveContainer, closeDraft, settleContainers, prepareLeave, forgetContainer }
+  return { assertBodyDraftCapacity, archiveBodyDrafts, takeBodyDrafts, containers, lastError, start, stop, flush, put, edit, baseline, saveContainer, closeDraft, settleContainers, prepareLeave, forgetContainer }
 })
