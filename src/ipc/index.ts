@@ -447,6 +447,9 @@ export const ipc = {
   updateOpenDownload(tag: string, reveal: boolean): Promise<void> {
     return call('update_open_download', { tag, reveal })
   },
+  updateInstallAndRestart(tag: string): Promise<void> {
+    return call('update_install_and_restart', { tag })
+  },
 
   appSettingsLoad(): Promise<AppSettings> {
     return call('app_settings_load')

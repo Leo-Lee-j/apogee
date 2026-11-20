@@ -173,6 +173,20 @@ export const useAppStore = defineStore('app', () => {
     catch (error) { shell.value = previous; lastError.value = normalizeError(error); return false }
   }
 
+  async function installUpdateAndRestart(tag: string) {
+    const previous = shell.value
+    lastError.value = null
+    try {
+      if (!(await prepareExit())) return false
+      await ipc.updateInstallAndRestart(tag)
+      return true
+    } catch (error) {
+      shell.value = previous
+      lastError.value = normalizeError(error)
+      return false
+    }
+  }
+
   async function closeWorkspace() {
     if (shell.value !== 'workspace') return false
     if (!(await prepareExit())) return false
@@ -272,6 +286,6 @@ export const useAppStore = defineStore('app', () => {
 
   return {
     shell, workspaces, busyWorkspaceId, lastError, createDialogOpen, settings,
-    initialize, refresh, openWorkspace, createWorkspace, closeWorkspace, switchWorkspace, forgetWorkspace, relocateWorkspace, revealWorkspace, saveSettings, prepareExit, restart,
+    initialize, refresh, openWorkspace, createWorkspace, closeWorkspace, switchWorkspace, forgetWorkspace, relocateWorkspace, revealWorkspace, saveSettings, prepareExit, restart, installUpdateAndRestart,
   }
 })

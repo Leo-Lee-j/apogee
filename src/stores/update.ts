@@ -2,6 +2,7 @@ import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { version as packageVersion } from '../../package.json'
 import { ipc, normalizeError, onUpdateProgress, type DownloadedUpdate, type UpdateRelease } from '@/ipc'
+import { useAppStore } from '@/stores/app'
 
 export type UpdatePhase = 'idle' | 'checking' | 'available' | 'upToDate' | 'empty' | 'starting' | 'downloading' | 'cancelling' | 'ready' | 'failed' | 'cancelled'
 
@@ -18,9 +19,10 @@ export const useUpdateStore = defineStore('update', () => {
   const error = ref<string | null>(null)
   const opening = ref(false)
   const installStarted = ref(false)
+  const installing = ref(false)
   let operationId: string | null = null
   let versionPromise: Promise<void> | null = null
-  const busy = computed(() => opening.value || ['checking', 'starting', 'downloading', 'cancelling'].includes(phase.value))
+  const busy = computed(() => opening.value || installing.value || ['checking', 'starting', 'downloading', 'cancelling'].includes(phase.value))
   const canDownload = computed(() => updateAvailable.value && latest.value !== null && !busy.value && phase.value !== 'ready')
   const progress = computed(() => totalBytes.value > 0 ? Math.min(100, Math.floor(receivedBytes.value / totalBytes.value * 100)) : 0)
   const status = computed(() => ({
@@ -32,7 +34,8 @@ export const useUpdateStore = defineStore('update', () => {
     starting: '正在准备下载…',
     downloading: '正在下载安装包…',
     cancelling: '正在取消下载…',
-    ready: installStarted.value ? '安装程序已启动。请保存工作后手动退出 Apogee，再完成安装。' : '下载完成，大小与 SHA-256 校验通过。',
+    ready: installing.value ? '正在保存工作并准备安装，安装完成后将自动重新打开 Apogee…'
+      : installStarted.value ? '安装程序已启动。请保存工作后手动退出 Apogee，再完成安装。' : '下载完成，大小与 SHA-256 校验通过。',
     failed: '更新操作失败，可重试。',
     cancelled: '下载已取消，可重新下载。',
   }[phase.value]))
@@ -136,7 +139,29 @@ export const useUpdateStore = defineStore('update', () => {
       }
     } finally { opening.value = false }
   }
+  async function installAndRestart() {
+    if (busy.value || phase.value !== 'ready' || !downloaded.value || installStarted.value) return
+    installing.value = true
+    error.value = null
+    let started = false
+    try {
+      const app = useAppStore()
+      started = await app.installUpdateAndRestart(downloaded.value.tag)
+      if (!started && app.lastError) {
+        error.value = app.lastError.message
+        if (app.lastError.code === 'UPDATE_PACKAGE_INVALID') {
+          downloaded.value = null
+          phase.value = 'available'
+        }
+      }
+    } catch (cause) {
+      error.value = normalizeError(cause).message
+    } finally {
+      // Once handed to NSIS, keep actions locked until the host exits.
+      if (!started) installing.value = false
+    }
+  }
   return { currentVersion, includePrerelease, phase, latest, downloaded, receivedBytes, totalBytes, error,
-    opening, installStarted, busy, canDownload, updateAvailable, progress, status,
-    loadVersion, setChannel, check, download, cancel, openDownloaded }
+    opening, installStarted, installing, busy, canDownload, updateAvailable, progress, status,
+    loadVersion, setChannel, check, download, cancel, openDownloaded, installAndRestart }
 })

@@ -49,8 +49,12 @@ function published(value: string | null) {
         <AppButton v-if="updates.canDownload" type="primary" @click="updates.download">{{ updates.phase === 'failed' || updates.phase === 'cancelled' ? '重新下载' : '下载更新' }}</AppButton>
         <AppButton v-if="updates.phase === 'downloading' || updates.phase === 'cancelling'" :disabled="updates.phase === 'cancelling'" @click="updates.cancel">取消下载</AppButton>
         <template v-if="updates.phase === 'ready' && updates.downloaded">
+          <AppPopconfirm positive-text="安装并重启" negative-text="稍后安装" :disabled="updates.busy || updates.installStarted" @positive-click="updates.installAndRestart">
+            <template #trigger><AppButton type="primary" :loading="updates.installing" :disabled="updates.busy || updates.installStarted">安装并重启</AppButton></template>
+            将先保存工作区状态，并提示处理未保存的草稿与配置。确认后关闭 Apogee，安装完成后自动重新打开；取消保存或安装程序启动失败时会留在当前应用。
+          </AppPopconfirm>
           <AppPopconfirm positive-text="打开安装包" negative-text="暂不安装" :disabled="updates.busy" @positive-click="updates.openDownloaded(false)">
-            <template #trigger><AppButton type="primary" :loading="updates.opening" :disabled="updates.busy">打开安装包</AppButton></template>
+            <template #trigger><AppButton :loading="updates.opening" :disabled="updates.busy">打开安装包</AppButton></template>
             请先保存未保存的请求。安装程序启动后，请手动退出 Apogee 再完成安装；应用不会自动关闭。
           </AppPopconfirm>
           <AppButton :disabled="updates.busy" @click="updates.openDownloaded(true)">在文件夹中显示</AppButton>
@@ -58,7 +62,7 @@ function published(value: string | null) {
       </div>
       <p v-if="updates.downloaded" class="download-path">缓存位置：{{ updates.downloaded.path }}</p>
     </div>
-    <p class="update-footnote">仅下载已发布标签对应的官方安装包，下载后校验大小与 SHA-256。校验不等于发布者签名；未签名安装包可能触发 Windows 安全提示。不会降级、自动安装或上传工作区数据。</p>
+    <p class="update-footnote">仅下载已发布标签对应的官方安装包，下载后校验大小与 SHA-256。校验不等于发布者签名；未签名安装包可能触发 Windows 安全提示。确认“安装并重启”后才会退出并安装，不会降级或上传工作区数据。</p>
   </section>
 </template>
 

@@ -102,10 +102,29 @@ describe('update panel', () => {
     store.phase = 'ready'; store.downloaded = { tag: 'v0.2.0', filename: store.latest.filename, path: 'C:/cache/setup.exe' }
     const open = vi.spyOn(store, 'openDownloaded').mockResolvedValue()
     const root = mount(); await nextTick()
-    const confirm = find(root, n => n.type === 'app-popconfirm')[0]!
+    const confirm = find(root, n => n.type === 'app-popconfirm' && n.props['positive-text'] === '打开安装包')[0]!
     expect(text(confirm)).toContain('请先保存未保存的请求')
     expect(open).not.toHaveBeenCalled()
     await (confirm.props.onPositiveClick as () => Promise<void>)()
     expect(open).toHaveBeenCalledWith(false)
+  })
+
+  it('offers install and restart only after a verified download and requires confirmation', async () => {
+    const store = useUpdateStore()
+    const root = mount(); await nextTick()
+    expect(text(root)).not.toContain('稍后安装')
+    store.latest = { tag: 'v0.2.0', version: '0.2.0', notes: '', publishedAt: null,
+      prerelease: false, filename: 'Apogee_0.2.0_x64-setup.exe', size: 100, sha256: 'a'.repeat(64) }
+    store.phase = 'ready'; store.downloaded = { tag: 'v0.2.0', filename: store.latest.filename, path: 'C:/cache/setup.exe' }
+    const install = vi.spyOn(store, 'installAndRestart').mockResolvedValue()
+    await nextTick()
+    const confirm = find(root, n => n.type === 'app-popconfirm' && n.props['positive-text'] === '安装并重启')[0]!
+    expect(text(confirm)).toContain('未保存的草稿与配置')
+    expect(install).not.toHaveBeenCalled()
+    await (confirm.props.onPositiveClick as () => Promise<void>)()
+    expect(install).toHaveBeenCalledTimes(1)
+    store.installing = true; await nextTick()
+    expect(confirm.props.disabled).toBe(true)
+    expect(find(root, n => n.type === 'app-button' && text(n) === '检查更新')[0]!.props.disabled).toBe(true)
   })
 })

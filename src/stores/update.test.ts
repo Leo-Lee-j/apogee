@@ -2,6 +2,7 @@ import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { ipc, onUpdateProgress, type UpdateCheckResult, type UpdateProgress, type UpdateRelease } from '@/ipc'
 import { useUpdateStore } from './update'
+import { useAppStore } from './app'
 
 vi.mock('@/ipc', async importOriginal => ({ ...await importOriginal<typeof import('@/ipc')>(), onUpdateProgress: vi.fn() }))
 function deferred<T>() {
@@ -25,6 +26,7 @@ beforeEach(() => {
   vi.spyOn(ipc, 'updateDownload').mockResolvedValue(downloaded)
   vi.spyOn(ipc, 'updateCancel').mockResolvedValue(true)
   vi.spyOn(ipc, 'updateOpenDownload').mockResolvedValue()
+  vi.spyOn(ipc, 'updateInstallAndRestart').mockResolvedValue()
 })
 afterEach(() => { vi.restoreAllMocks(); vi.mocked(onUpdateProgress).mockReset() })
 
@@ -143,6 +145,64 @@ describe('application update lifecycle', () => {
     await store.openDownloaded(false)
     expect(store.downloaded).toBeNull(); expect(store.phase).toBe('available')
     expect(store.canDownload).toBe(true); expect(store.error).toBe('安装包校验失败')
+  })
+
+  it('installs only a verified download and locks all update actions until the host exits', async () => {
+    const store = useUpdateStore()
+    await store.installAndRestart()
+    expect(ipc.updateInstallAndRestart).not.toHaveBeenCalled()
+    await store.check(); await store.download()
+    const pending = deferred<void>()
+    vi.mocked(ipc.updateInstallAndRestart).mockReturnValueOnce(pending.promise)
+    const installing = store.installAndRestart()
+    await vi.waitFor(() => expect(ipc.updateInstallAndRestart).toHaveBeenCalledWith(release.tag))
+    expect(store.installing).toBe(true); expect(store.busy).toBe(true)
+    expect(store.status).toContain('安装完成后将自动重新打开')
+    await store.installAndRestart(); await store.check(); await store.download(); await store.openDownloaded(false)
+    store.setChannel(true)
+    expect(ipc.updateInstallAndRestart).toHaveBeenCalledTimes(1)
+    expect(ipc.updateCheck).toHaveBeenCalledTimes(1)
+    expect(ipc.updateDownload).toHaveBeenCalledTimes(1)
+    expect(ipc.updateOpenDownload).not.toHaveBeenCalled()
+    expect(store.includePrerelease).toBe(false)
+    pending.resolve(); await installing
+    expect(store.busy).toBe(true)
+  })
+
+  it('keeps the verified package ready when the user cancels saving', async () => {
+    const store = useUpdateStore(); await store.check(); await store.download()
+    const app = useAppStore()
+    vi.spyOn(app, 'installUpdateAndRestart').mockResolvedValueOnce(false)
+    await store.installAndRestart()
+    expect(ipc.updateInstallAndRestart).not.toHaveBeenCalled()
+    expect(store.phase).toBe('ready'); expect(store.downloaded).toEqual(downloaded)
+    expect(store.busy).toBe(false); expect(store.error).toBeNull()
+  })
+
+  it('allows retrying a failed installer launch and shows the error', async () => {
+    const store = useUpdateStore(); await store.check(); await store.download()
+    vi.mocked(ipc.updateInstallAndRestart).mockRejectedValueOnce(new Error('UAC cancelled'))
+    await store.installAndRestart()
+    expect(store.phase).toBe('ready'); expect(store.downloaded).toEqual(downloaded)
+    expect(store.installing).toBe(false); expect(store.busy).toBe(false)
+    expect(store.error).toBe('UAC cancelled')
+    await store.installAndRestart()
+    expect(ipc.updateInstallAndRestart).toHaveBeenCalledTimes(2)
+  })
+
+  it('requires a new download if the installer changed before install and restart', async () => {
+    const store = useUpdateStore(); await store.check(); await store.download()
+    vi.mocked(ipc.updateInstallAndRestart).mockRejectedValueOnce({ code: 'UPDATE_PACKAGE_INVALID', kind: 'io', message: '安装包校验失败', hints: [] })
+    await store.installAndRestart()
+    expect(store.downloaded).toBeNull(); expect(store.phase).toBe('available')
+    expect(store.canDownload).toBe(true); expect(store.busy).toBe(false)
+    expect(store.error).toBe('安装包校验失败')
+  })
+
+  it('does not launch a second installer after opening the package manually', async () => {
+    const store = useUpdateStore(); await store.check(); await store.download()
+    await store.openDownloaded(false); await store.installAndRestart()
+    expect(ipc.updateInstallAndRestart).not.toHaveBeenCalled()
   })
 
 })

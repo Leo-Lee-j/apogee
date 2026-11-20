@@ -63,6 +63,12 @@ struct Downloaded {
     path: PathBuf,
     release: Release,
 }
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PackageAction {
+    Reveal,
+    Open,
+    InstallAndRestart,
+}
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CheckResult {
@@ -243,35 +249,65 @@ pub async fn update_open_download(
     tag: String,
     reveal: bool,
 ) -> Result<(), String> {
-    supported()?;
-    let (_guard, _) = state.begin(uuid::Uuid::new_v4().to_string())?;
+    let action = if reveal {
+        PackageAction::Reveal
+    } else {
+        PackageAction::Open
+    };
+    open_downloaded(&app, state.inner(), &tag, action).await
+}
+
+#[tauri::command]
+pub async fn update_install_and_restart(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Arc<UpdateState>>,
+    tag: String,
+) -> Result<(), String> {
+    open_downloaded(&app, state.inner(), &tag, PackageAction::InstallAndRestart).await?;
+    // The frontend has completed its save/leave guard. Never restart the old executable:
+    // NSIS replaces it and starts the installed version only after a successful install.
+    app.exit(0);
+    Ok(())
+}
+
+fn downloaded_for_tag(state: &UpdateState, tag: &str, cache: &Path) -> Result<Downloaded, String> {
     let downloaded = state
-        .inner()
         .0
         .lock()
         .unwrap_or_else(|p| p.into_inner())
         .downloaded
         .clone()
         .filter(|d| d.release.tag == tag)
-        .ok_or("没有可用的已下载安装包，请重新下载")?;
-    // Re-hash immediately before opening; only the backend's own exact cache file is usable.
-    let cache = cache_dir(&app)?;
+        .ok_or("UPDATE_PACKAGE_INVALID: 没有可用的已下载安装包，请重新下载")?;
     if downloaded.path != cache.join(&downloaded.release.filename) {
-        return Err("安装包缓存路径不匹配".into());
+        return Err("UPDATE_PACKAGE_INVALID: 安装包缓存路径不匹配，请重新下载".into());
     }
+    Ok(downloaded)
+}
+
+async fn open_downloaded(
+    app: &tauri::AppHandle,
+    state: &Arc<UpdateState>,
+    tag: &str,
+    action: PackageAction,
+) -> Result<(), String> {
+    supported()?;
+    let (_guard, _) = state.begin(uuid::Uuid::new_v4().to_string())?;
+    // Re-hash immediately before opening; only the backend's own exact cache file is usable.
+    let downloaded = downloaded_for_tag(state, tag, &cache_dir(app)?)?;
     tauri::async_runtime::spawn_blocking(move || {
         service::verify_package(&downloaded.path, &downloaded.release)
             .map_err(|e| format!("UPDATE_PACKAGE_INVALID: {e}"))?;
-        open_package(&downloaded.path, reveal)
+        open_package(&downloaded.path, action)
     })
     .await
     .map_err(|_| "打开安装包任务失败".to_string())?
 }
-fn open_package(path: &Path, reveal: bool) -> Result<(), String> {
+fn open_package(path: &Path, action: PackageAction) -> Result<(), String> {
     #[cfg(windows)]
     {
         use std::os::windows::ffi::OsStrExt;
-        if reveal {
+        if action == PackageAction::Reveal {
             std::process::Command::new("explorer.exe")
                 .arg("/select,")
                 .arg(path)
@@ -281,12 +317,23 @@ fn open_package(path: &Path, reveal: bool) -> Result<(), String> {
             // ShellExecute supports an installer's UAC elevation; never start cmd/PowerShell.
             let verb: Vec<u16> = "open".encode_utf16().chain(Some(0)).collect();
             let file: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+            // Tauri's NSIS installer: show progress, preserve update behavior, then
+            // launch the newly installed binary. No shell, caller arguments or paths.
+            let parameters: Vec<u16> = if action == PackageAction::InstallAndRestart {
+                "/P /UPDATE /R".encode_utf16().chain(Some(0)).collect()
+            } else {
+                Vec::new()
+            };
             let result = unsafe {
                 windows_sys::Win32::UI::Shell::ShellExecuteW(
                     std::ptr::null_mut(),
                     verb.as_ptr(),
                     file.as_ptr(),
-                    std::ptr::null(),
+                    if parameters.is_empty() {
+                        std::ptr::null()
+                    } else {
+                        parameters.as_ptr()
+                    },
                     std::ptr::null(),
                     1,
                 )
@@ -299,7 +346,7 @@ fn open_package(path: &Path, reveal: bool) -> Result<(), String> {
     }
     #[cfg(not(windows))]
     {
-        let _ = (path, reveal);
+        let _ = (path, action);
         Err("安装入口仅支持 Windows".into())
     }
 }
@@ -318,5 +365,32 @@ mod tests {
         assert!(token.is_cancelled());
         drop(guard);
         assert!(state.begin("b".into()).is_ok());
+    }
+
+    #[test]
+    fn installer_is_bound_to_the_downloaded_tag_and_backend_cache_path() {
+        let state = UpdateState::default();
+        let cache = std::env::temp_dir().join("apogee-update-boundary-test");
+        let tag = "v0.2.0";
+        assert!(downloaded_for_tag(&state, tag, &cache).is_err());
+        let filename = "Apogee_0.2.0_x64-setup.exe";
+        state.0.lock().unwrap().downloaded = Some(Downloaded {
+            path: cache.join(filename),
+            release: Release {
+                tag: tag.into(),
+                version: "0.2.0".into(),
+                notes: String::new(),
+                published_at: None,
+                prerelease: false,
+                filename: filename.into(),
+                size: 3,
+                sha256: "a".repeat(64),
+            },
+        });
+        assert!(downloaded_for_tag(&state, tag, &cache).is_ok());
+        assert!(downloaded_for_tag(&state, "v0.3.0", &cache).is_err());
+        assert!(downloaded_for_tag(&state, tag, &cache.join("other")).is_err());
+        state.0.lock().unwrap().downloaded.as_mut().unwrap().path = cache.join("other.exe");
+        assert!(downloaded_for_tag(&state, tag, &cache).is_err());
     }
 }

@@ -6,6 +6,7 @@ const workspaceOpen = vi.fn()
 const workspaceList = vi.fn()
 const appSettingsLoad = vi.fn()
 const appRestart = vi.fn()
+const updateInstallAndRestart = vi.fn()
 
 vi.mock('@/ipc', () => ({
   inTauri: true,
@@ -16,6 +17,7 @@ vi.mock('@/ipc', () => ({
       if (key === 'workspaceList') return workspaceList
       if (key === 'appSettingsLoad') return appSettingsLoad
       if (key === 'appRestart') return appRestart
+      if (key === 'updateInstallAndRestart') return updateInstallAndRestart
       if (key === 'workspaceReadRecovery') return vi.fn().mockResolvedValue({ requests: [], containers: [] })
       return vi.fn()
     },
@@ -38,6 +40,7 @@ describe('app workspace lifecycle', () => {
     workspaceList.mockResolvedValue([])
     appSettingsLoad.mockReset()
     appRestart.mockReset().mockResolvedValue(undefined)
+    updateInstallAndRestart.mockReset().mockResolvedValue(undefined)
     appSettingsLoad.mockResolvedValue({
       settingsVersion: 1,
       defaultWorkspaceRoot: 'C:/workspaces',
@@ -91,6 +94,53 @@ describe('app workspace lifecycle', () => {
 
     expect(app.shell).toBe('workspace')
     expect(app.lastError?.message).toBe('close failed')
+  })
+
+  it('waits for workspace and editor saves before handing a verified update to the installer', async () => {
+    const app = useAppStore()
+    app.shell = 'workspace'
+    const workspace = (await import('./workspace')).useWorkspaceStore()
+    const tabs = (await import('./tabs')).useTabsStore()
+    const recovery = (await import('./editorRecovery')).useEditorRecoveryStore()
+    const flush = vi.spyOn(workspace, 'flushWorkspaceState').mockResolvedValueOnce(true)
+    const environments = vi.spyOn(workspace, 'saveDirtyEnvironments').mockResolvedValueOnce(true)
+    const requests = vi.spyOn(tabs, 'flushAll').mockResolvedValueOnce(true)
+    const drafts = vi.spyOn(recovery, 'prepareLeave').mockResolvedValueOnce(true)
+
+    expect(await app.installUpdateAndRestart('v0.2.0')).toBe(true)
+    expect(updateInstallAndRestart).toHaveBeenCalledWith('v0.2.0')
+    expect(app.shell).toBe('closing')
+    expect(flush.mock.invocationCallOrder[0]).toBeLessThan(environments.mock.invocationCallOrder[0]!)
+    expect(environments.mock.invocationCallOrder[0]).toBeLessThan(requests.mock.invocationCallOrder[0]!)
+    expect(requests.mock.invocationCallOrder[0]).toBeLessThan(drafts.mock.invocationCallOrder[0]!)
+    expect(drafts.mock.invocationCallOrder[0]).toBeLessThan(updateInstallAndRestart.mock.invocationCallOrder[0]!)
+    expect(appRestart).not.toHaveBeenCalled()
+  })
+
+  it('does not start an installer if saving fails or the draft prompt is cancelled', async () => {
+    const app = useAppStore()
+    app.shell = 'workspace'
+    const tabs = (await import('./tabs')).useTabsStore()
+    vi.spyOn(tabs, 'flushAll').mockResolvedValueOnce(false)
+    expect(await app.installUpdateAndRestart('v0.2.0')).toBe(false)
+    expect(app.shell).toBe('workspace')
+    expect(app.lastError?.message).toContain('保存请求失败')
+    const recovery = (await import('./editorRecovery')).useEditorRecoveryStore()
+    vi.spyOn(recovery, 'prepareLeave').mockResolvedValueOnce(false)
+    expect(await app.installUpdateAndRestart('v0.2.0')).toBe(false)
+    expect(updateInstallAndRestart).not.toHaveBeenCalled()
+    expect(app.shell).toBe('workspace')
+    expect(app.lastError).toBeNull()
+  })
+
+  it.each(['launcher', 'workspace'] as const)('restores the %s if the installer cannot start', async shell => {
+    const app = useAppStore()
+    app.shell = shell
+    updateInstallAndRestart.mockRejectedValueOnce(new Error('安装程序授权已取消'))
+    expect(await app.installUpdateAndRestart('v0.2.0')).toBe(false)
+    expect(app.shell).toBe(shell)
+    expect(app.lastError?.message).toBe('安装程序授权已取消')
+    expect(appRestart).not.toHaveBeenCalled()
   })
 
   it.each(['close', 'switch'] as const)('preserves the workspace and save error when %s cannot flush requests', async (action) => {

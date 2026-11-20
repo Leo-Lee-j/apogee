@@ -81,6 +81,7 @@ pub fn run() {
             update::update_download,
             update::update_cancel,
             update::update_open_download,
+            update::update_install_and_restart,
             commands::spike_make_response,
             commands::spike_index_response,
             commands::spike_get_response_tree,
