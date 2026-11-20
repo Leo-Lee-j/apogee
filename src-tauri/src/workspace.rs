@@ -43,6 +43,173 @@ const HISTORY_DIR: &str = "history";
 const HISTORY_LIMIT: usize = 200;
 const TRANSACTION_DIR: &str = ".apogee-tx";
 const TRANSACTION_VERSION: u32 = 1;
+
+fn validate_variable_names(variables: &[apogee_core::vars::EnvironmentVariable]) -> Result<()> {
+    if variables.len() > 256 {
+        bail!("变量数量超过 256 条限制");
+    }
+    let mut names = std::collections::HashSet::new();
+    let mut ids = std::collections::HashSet::new();
+    let mut size = 0usize;
+    for variable in variables {
+        if variable.id.is_nil() || !ids.insert(variable.id) {
+            bail!("变量 ID 为空或重复");
+        }
+        let key = variable.key.trim();
+        size = size
+            .saturating_add(key.len())
+            .saturating_add(variable.value.len());
+        if !variable.enabled {
+            continue;
+        }
+        if key.is_empty() {
+            continue;
+        }
+        if key.eq_ignore_ascii_case("host") {
+            bail!("变量名 host 为保留名称");
+        }
+        if !names.insert(key.to_string()) {
+            bail!("变量名重复：{key}");
+        }
+    }
+    if size > 65_536 {
+        bail!("变量总长度超过 65536 字节限制");
+    }
+    Ok(())
+}
+
+fn validate_container_variables(
+    variables: &[apogee_core::vars::EnvironmentVariable],
+) -> Result<()> {
+    validate_variable_names(variables)?;
+    if variables.iter().any(|variable| variable.secret) {
+        bail!("集合与文件夹变量不能包含密钥；请将密钥保存到环境或全局作用域");
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StoredEnvironment {
+    id: Uuid,
+    name: String,
+    #[serde(default)]
+    host: String,
+    #[serde(default)]
+    variables: Vec<StoredEnvironmentVariable>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StoredEnvironmentVariable {
+    #[serde(default = "Uuid::new_v4")]
+    id: Uuid,
+    key: String,
+    #[serde(default)]
+    value: String,
+    #[serde(default = "default_true")]
+    enabled: bool,
+    #[serde(default)]
+    secret: bool,
+    #[serde(default)]
+    secret_ref: Option<Uuid>,
+}
+
+impl StoredEnvironment {
+    fn execution(&self, workspace: Uuid) -> Result<Environment> {
+        self.hydrated(workspace, false)
+    }
+
+    fn hydrated(&self, workspace: Uuid, include_disabled: bool) -> Result<Environment> {
+        let mut environment = self.public();
+        for (variable, stored) in environment.variables.iter_mut().zip(&self.variables) {
+            if !variable.secret || (!variable.enabled && !include_disabled) {
+                continue;
+            }
+            if let Some(reference) = stored.secret_ref {
+                variable.value = crate::secrets::get(workspace, self.id, reference)?
+                    .context("系统凭据缺失，请重新设置该密钥变量")?;
+            }
+        }
+        Ok(environment)
+    }
+
+    fn public(&self) -> Environment {
+        Environment {
+            id: self.id,
+            name: self.name.clone(),
+            host: self.host.clone(),
+            variables: self
+                .variables
+                .iter()
+                .map(|variable| apogee_core::vars::EnvironmentVariable {
+                    id: variable.id,
+                    key: variable.key.clone(),
+                    value: if variable.secret {
+                        String::new()
+                    } else {
+                        variable.value.clone()
+                    },
+                    enabled: variable.enabled,
+                    secret: variable.secret,
+                    has_value: variable.secret && variable.secret_ref.is_some(),
+                    clear_secret: false,
+                })
+                .collect(),
+        }
+    }
+}
+
+struct CredentialUndo {
+    workspace: Uuid,
+    environment: Uuid,
+    previous: Vec<(Uuid, Option<String>)>,
+    committed: bool,
+}
+
+impl CredentialUndo {
+    fn new(workspace: Uuid, environment: Uuid) -> Self {
+        Self {
+            workspace,
+            environment,
+            previous: Vec::new(),
+            committed: false,
+        }
+    }
+
+    fn set(&mut self, variable: Uuid, value: &str) -> Result<()> {
+        let old = crate::secrets::get(self.workspace, self.environment, variable)?;
+        crate::secrets::set(self.workspace, self.environment, variable, value)?;
+        self.previous.push((variable, old));
+        Ok(())
+    }
+
+    fn commit(&mut self) {
+        self.committed = true;
+    }
+}
+
+impl Drop for CredentialUndo {
+    fn drop(&mut self) {
+        if self.committed {
+            return;
+        }
+        for (variable, value) in self.previous.iter().rev() {
+            match value {
+                Some(value) => {
+                    let _ = crate::secrets::set(self.workspace, self.environment, *variable, value);
+                }
+                None => {
+                    let _ = crate::secrets::delete(self.workspace, self.environment, *variable);
+                }
+            }
+        }
+    }
+}
+
+fn default_true() -> bool {
+    true
+}
 mod postman;
 pub use postman::{PostmanExportResult, PostmanWorkspaceImportResult};
 
@@ -748,12 +915,14 @@ impl WorkspaceRepository {
     pub fn snapshot(&self) -> Result<WorkspaceSnapshot> {
         let manifest = self.read_manifest()?;
         let environments = self.read_environments(&manifest)?;
+        let global_variables = self.read_global_variables(manifest.id, false)?;
         let mut located = Vec::new();
 
         for entry in &manifest.collections {
             let path = self.collection_path(entry)?;
             let document: ContainerDocument = read_yaml(&path.join(COLLECTION_MARKER))
                 .with_context(|| format!("读取集合文件失败：{}", path.display()))?;
+            validate_container_variables(&document.variables)?;
             if document.id != entry.id {
                 bail!("集合目录 {} 的 id 与工作区清单不一致", path.display());
             }
@@ -769,6 +938,7 @@ impl WorkspaceRepository {
                     expanded: true,
                     kind: WorkspaceNodeKind::Collection,
                     debug_case_count: 0,
+                    variables: document.variables.clone(),
                 },
                 path: path.clone(),
             });
@@ -780,6 +950,7 @@ impl WorkspaceRepository {
             name: manifest.name,
             nodes: located.into_iter().map(|item| item.node).collect(),
             environments,
+            global_variables,
         })
     }
 
@@ -1000,15 +1171,18 @@ impl WorkspaceRepository {
         let location = self.locate(id)?;
         let marker = container_marker(&location.node.kind)?;
         let document: ContainerDocument = read_yaml(&location.path.join(marker))?;
+        validate_container_variables(&document.variables)?;
         Ok(WorkspaceContainer {
             id: document.id,
             name: document.name,
             auth: document.auth,
             settings: document.settings,
+            variables: document.variables,
         })
     }
 
     pub fn save_container(&self, container: WorkspaceContainer) -> Result<WorkspaceContainer> {
+        validate_container_variables(&container.variables)?;
         let location = self.locate(container.id)?;
         let marker = container_marker(&location.node.kind)?;
         let name = required_name(&container.name)?;
@@ -1018,6 +1192,7 @@ impl WorkspaceRepository {
             name: name.clone(),
             auth: container.auth,
             settings: container.settings,
+            variables: container.variables,
         };
         write_yaml(&location.path.join(marker), &document)?;
         if matches!(location.node.kind, WorkspaceNodeKind::Collection) {
@@ -1035,6 +1210,7 @@ impl WorkspaceRepository {
             name: document.name,
             auth: document.auth,
             settings: document.settings,
+            variables: document.variables,
         })
     }
 
@@ -1044,6 +1220,56 @@ impl WorkspaceRepository {
         spec: RequestSpec,
     ) -> Result<RequestSpec> {
         self.resolve_inheritance(request_id, spec, false)
+    }
+
+    /// Return workspace, collection, and merged ancestor-folder variable scopes.
+    pub fn request_variable_scopes(
+        &self,
+        request_id: Uuid,
+    ) -> Result<(
+        Vec<apogee_core::vars::EnvironmentVariable>,
+        Vec<apogee_core::vars::EnvironmentVariable>,
+    )> {
+        let nodes = self.scan()?;
+        let mut current = nodes
+            .iter()
+            .find(|item| item.node.id == request_id)
+            .context("找不到变量作用域对应的请求")?;
+        let mut ancestors = Vec::new();
+        while let Some(parent_id) = current.node.parent_id {
+            current = nodes
+                .iter()
+                .find(|item| item.node.id == parent_id)
+                .context("变量作用域的父级不存在")?;
+            ancestors.push(current);
+        }
+        ancestors.reverse();
+        let mut collection = Vec::new();
+        let mut folders = std::collections::BTreeMap::new();
+        for ancestor in ancestors {
+            if !ancestor.node.is_folder {
+                continue;
+            }
+            let marker = container_marker(&ancestor.node.kind)?;
+            let document: ContainerDocument = read_yaml(&ancestor.path.join(marker))?;
+            validate_container_variables(&document.variables)?;
+            if matches!(ancestor.node.kind, WorkspaceNodeKind::Collection) {
+                collection = document.variables;
+            } else {
+                // Disabled values do not shadow an enabled value from a parent folder.
+                for variable in document.variables.into_iter().filter(|item| item.enabled) {
+                    folders.insert(variable.key.trim().to_string(), variable);
+                }
+            }
+        }
+        Ok((collection, folders.into_values().collect()))
+    }
+
+    pub fn global_variables_for_execution(
+        &self,
+    ) -> Result<Vec<apogee_core::vars::EnvironmentVariable>> {
+        let manifest = self.read_manifest()?;
+        self.read_global_variables(manifest.id, true)
     }
 
     /// Token operations inherit only network settings; auth is explicitly supplied by the editor.
@@ -1192,6 +1418,59 @@ impl WorkspaceRepository {
         self.read_environment_after_manifest(id, || Ok(()))
     }
 
+    fn global_variables_path(&self) -> PathBuf {
+        self.root.join("globals.yaml")
+    }
+
+    fn read_global_variables(
+        &self,
+        workspace_id: Uuid,
+        hydrate: bool,
+    ) -> Result<Vec<apogee_core::vars::EnvironmentVariable>> {
+        let path = self.global_variables_path();
+        if !path.exists() {
+            return Ok(Vec::new());
+        }
+        let stored: StoredEnvironment = read_yaml(&path)?;
+        if !stored.id.is_nil() {
+            bail!("全局变量文件的作用域 ID 无效");
+        }
+        let environment = if hydrate {
+            stored.execution(workspace_id)?
+        } else {
+            stored.public()
+        };
+        Ok(environment.variables)
+    }
+
+    pub fn save_global_variables(
+        &self,
+        variables: Vec<apogee_core::vars::EnvironmentVariable>,
+    ) -> Result<Vec<apogee_core::vars::EnvironmentVariable>> {
+        let manifest = self.read_manifest()?;
+        let path = self.global_variables_path();
+        let old = path
+            .exists()
+            .then(|| read_yaml::<StoredEnvironment>(&path))
+            .transpose()?;
+        if old.as_ref().is_some_and(|stored| !stored.id.is_nil()) {
+            bail!("全局变量文件的作用域 ID 无效");
+        }
+        let mut undo = CredentialUndo::new(manifest.id, Uuid::nil());
+        let environment = Environment {
+            id: Uuid::nil(),
+            name: "全局".into(),
+            host: String::new(),
+            variables,
+        };
+        let (stored, obsolete) =
+            self.store_environment_values(environment, old.as_ref(), &mut undo)?;
+        write_yaml(&path, &stored)?;
+        undo.commit();
+        self.delete_credentials_best_effort(manifest.id, Uuid::nil(), &obsolete);
+        Ok(stored.public().variables)
+    }
+
     /// 为跨文件读取的并发回归测试保留的暂停边界。生产读取没有额外回调。
     #[cfg(test)]
     pub(crate) fn read_environment_with_after_manifest(
@@ -1212,17 +1491,17 @@ impl WorkspaceRepository {
             bail!("未知的环境：{id}");
         }
         after_manifest()?;
-        let environment: Environment =
+        let stored: StoredEnvironment =
             read_yaml(&self.environment_path(id)).with_context(|| {
                 format!("读取环境文件失败：{}", self.environment_path(id).display())
             })?;
-        if environment.id != id {
+        if stored.id != id {
             bail!(
                 "环境文件 {} 的 id 不一致",
                 self.environment_path(id).display()
             );
         }
-        Ok(environment)
+        stored.execution(manifest.id)
     }
 
     pub fn create_environment(&self, name: String) -> Result<Environment> {
@@ -1259,14 +1538,17 @@ impl WorkspaceRepository {
     ) -> Result<Environment> {
         let name = required_name(&environment.name)?;
         environment.name = name.clone();
+        let manifest_before = self.read_manifest()?;
+        let mut undo = CredentialUndo::new(manifest_before.id, environment.id);
+        let (stored, _) = self.store_environment_values(environment, None, &mut undo)?;
         let journal = self.begin_transaction(WorkspaceTransactionOperation::EnvironmentCreate {
-            environment_id: environment.id,
+            environment_id: stored.id,
         })?;
-        let staging = self.environment_create_staging_path(environment.id);
-        let target = self.environment_path(environment.id);
+        let staging = self.environment_create_staging_path(stored.id);
+        let target = self.environment_path(stored.id);
         let mut published = false;
 
-        if let Err(error) = write_yaml(&staging, &environment) {
+        if let Err(error) = write_yaml(&staging, &stored) {
             let rollback = self.rollback_environment_create(&journal, &staging, &target, published);
             return match rollback {
                 Ok(()) => Err(error),
@@ -1275,10 +1557,10 @@ impl WorkspaceRepository {
                 ))),
             };
         }
-        let staged = read_yaml::<Environment>(&staging)
+        let staged = read_yaml::<StoredEnvironment>(&staging)
             .with_context(|| format!("校验环境 staging 失败：{}", staging.display()));
         match staged {
-            Ok(staged) if staged.id == environment.id => {}
+            Ok(staged) if staged.id == stored.id => {}
             Ok(_) => {
                 let error = anyhow::anyhow!("环境 staging 的 id 与事务不一致");
                 let rollback =
@@ -1341,9 +1623,9 @@ impl WorkspaceRepository {
         if manifest
             .environments
             .iter()
-            .any(|entry| entry.id == environment.id)
+            .any(|entry| entry.id == stored.id)
         {
-            let error = anyhow::anyhow!("环境创建 UUID 已存在于 manifest：{}", environment.id);
+            let error = anyhow::anyhow!("环境创建 UUID 已存在于 manifest：{}", stored.id);
             let rollback = self.rollback_environment_create(&journal, &staging, &target, published);
             return match rollback {
                 Ok(()) => Err(error),
@@ -1353,7 +1635,7 @@ impl WorkspaceRepository {
             };
         }
         manifest.environments.push(EnvironmentEntry {
-            id: environment.id,
+            id: stored.id,
             name,
         });
         if let Err(error) = write_manifest(&self.manifest_path(), &manifest) {
@@ -1365,26 +1647,138 @@ impl WorkspaceRepository {
                 ))),
             };
         }
+        undo.commit();
         if let Err(error) = self.finish_transaction(&journal) {
             return Err(error.context("环境创建已提交，但无法清理恢复 journal"));
         }
-
-        Ok(environment)
+        Ok(stored.public())
     }
 
-    pub fn save_environment(&self, mut environment: Environment) -> Result<Environment> {
+    pub fn save_environment(&self, environment: Environment) -> Result<Environment> {
+        self.save_environment_with_manifest_writer(environment, write_yaml)
+    }
+
+    fn save_environment_with_manifest_writer(
+        &self,
+        mut environment: Environment,
+        write_manifest: impl FnOnce(&Path, &WorkspaceManifest) -> Result<()>,
+    ) -> Result<Environment> {
         environment.name = required_name(&environment.name)?;
         environment.host = normalize_environment_host(&environment.host)?;
         let mut manifest = self.read_manifest()?;
+        if !manifest
+            .environments
+            .iter()
+            .any(|entry| entry.id == environment.id)
+        {
+            bail!("未知的环境：{}", environment.id);
+        }
+        let old: StoredEnvironment = read_yaml(&self.environment_path(environment.id))?;
+        if old.id != environment.id {
+            bail!("环境文件 ID 与清单不一致");
+        }
+        let environment_id = environment.id;
+        let mut undo = CredentialUndo::new(manifest.id, environment.id);
+        let (stored, obsolete) =
+            self.store_environment_values(environment, Some(&old), &mut undo)?;
         let entry = manifest
             .environments
             .iter_mut()
-            .find(|entry| entry.id == environment.id)
-            .with_context(|| format!("未知的环境：{}", environment.id))?;
-        entry.name = environment.name.clone();
-        write_yaml(&self.environment_path(environment.id), &environment)?;
-        write_yaml(&self.manifest_path(), &manifest)?;
-        Ok(environment)
+            .find(|entry| entry.id == environment_id)
+            .with_context(|| format!("未知的环境：{}", environment_id))?;
+        entry.name = stored.name.clone();
+        write_yaml(&self.environment_path(stored.id), &stored)?;
+        if let Err(error) = write_manifest(&self.manifest_path(), &manifest) {
+            if let Err(rollback) = write_yaml(&self.environment_path(old.id), &old) {
+                // The published file may still reference the new credentials. Keep both
+                // generations available if restoring the old file also fails.
+                undo.commit();
+                return Err(error.context(format!("环境保存失败，且恢复旧文件失败：{rollback:#}")));
+            }
+            return Err(error);
+        }
+        undo.commit();
+        self.delete_credentials_best_effort(manifest.id, stored.id, &obsolete);
+        Ok(stored.public())
+    }
+
+    fn store_environment_values(
+        &self,
+        environment: Environment,
+        old: Option<&StoredEnvironment>,
+        undo: &mut CredentialUndo,
+    ) -> Result<(StoredEnvironment, Vec<Uuid>)> {
+        validate_variable_names(&environment.variables)?;
+        let old_secrets = old
+            .into_iter()
+            .flat_map(|value| value.variables.iter())
+            .filter(|value| value.secret && value.secret_ref.is_some())
+            .filter_map(|value| value.secret_ref)
+            .collect::<std::collections::HashSet<_>>();
+        let mut live_secrets = std::collections::HashSet::new();
+        let variables = environment
+            .variables
+            .into_iter()
+            .map(|variable| {
+                let prior_secret = old
+                    .and_then(|value| value.variables.iter().find(|item| item.id == variable.id))
+                    .filter(|item| item.secret)
+                    .and_then(|item| item.secret_ref);
+                let secret_ref = if variable.secret {
+                    if !variable.value.is_empty() {
+                        let reference = Uuid::new_v4();
+                        undo.set(reference, &variable.value)?;
+                        Some(reference)
+                    } else if !variable.clear_secret {
+                        prior_secret
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                if let Some(reference) = secret_ref {
+                    live_secrets.insert(reference);
+                }
+                let value = if variable.secret {
+                    String::new()
+                } else {
+                    variable.value
+                };
+                Ok(StoredEnvironmentVariable {
+                    id: variable.id,
+                    key: variable.key,
+                    value,
+                    enabled: variable.enabled,
+                    secret: variable.secret,
+                    secret_ref,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let obsolete = old_secrets
+            .difference(&live_secrets)
+            .copied()
+            .collect::<Vec<_>>();
+        let stored = StoredEnvironment {
+            id: environment.id,
+            name: environment.name,
+            host: environment.host,
+            variables,
+        };
+        Ok((stored, obsolete))
+    }
+
+    fn delete_credentials_best_effort(
+        &self,
+        workspace: Uuid,
+        environment: Uuid,
+        variables: &[Uuid],
+    ) {
+        for variable in variables {
+            if let Err(error) = crate::secrets::delete(workspace, environment, *variable) {
+                tracing::warn!(%error, "已保存变量变更，但无法清理已移除密钥的系统凭据");
+            }
+        }
     }
 
     pub fn delete_environment(&self, id: Uuid) -> Result<WorkspaceSnapshot> {
@@ -1402,6 +1796,19 @@ impl WorkspaceRepository {
         write_manifest: impl FnOnce(&Path, &WorkspaceManifest) -> Result<()>,
     ) -> Result<WorkspaceSnapshot> {
         let mut manifest = self.read_manifest()?;
+        if !manifest.environments.iter().any(|entry| entry.id == id) {
+            bail!("未知的环境：{id}");
+        }
+        let stored: StoredEnvironment = read_yaml(&self.environment_path(id))?;
+        if stored.id != id {
+            bail!("环境文件 ID 与清单不一致：{id}");
+        }
+        let secret_ids = stored
+            .variables
+            .iter()
+            .filter(|variable| variable.secret && variable.secret_ref.is_some())
+            .filter_map(|variable| variable.secret_ref)
+            .collect::<Vec<_>>();
         let original_len = manifest.environments.len();
         manifest.environments.retain(|entry| entry.id != id);
         if manifest.environments.len() == original_len {
@@ -1432,6 +1839,7 @@ impl WorkspaceRepository {
                 ))),
             };
         }
+        self.delete_credentials_best_effort(manifest.id, id, &secret_ids);
 
         // manifest 发布后删除已提交：即使文件清理失败也不能回滚 manifest，而是保留
         // journal 让下次打开根据已提交 manifest 完成 target/tombstone 清理。
@@ -1449,6 +1857,26 @@ impl WorkspaceRepository {
             return Err(error.context("环境删除已提交，但无法清理恢复 journal"));
         }
         self.snapshot()
+    }
+
+    pub fn duplicate_environment(&self, id: Uuid) -> Result<Environment> {
+        let manifest = self.read_manifest()?;
+        if !manifest.environments.iter().any(|entry| entry.id == id) {
+            bail!("未知的环境：{id}");
+        }
+        let stored: StoredEnvironment = read_yaml(&self.environment_path(id))?;
+        if stored.id != id {
+            bail!("环境文件 ID 与清单不一致");
+        }
+        let mut source = stored.hydrated(manifest.id, true)?;
+        source.id = Uuid::new_v4();
+        source.name = required_name(&format!("{} 副本", source.name))?;
+        for variable in &mut source.variables {
+            variable.id = Uuid::new_v4();
+            variable.has_value = false;
+            variable.clear_secret = false;
+        }
+        self.import_environment(source)
     }
 
     pub fn list_debug_cases(&self, request_id: Uuid) -> Result<Vec<DebugCase>> {
@@ -1553,6 +1981,7 @@ impl WorkspaceRepository {
                 name: name.clone(),
                 auth: AuthConfig::Inherit,
                 settings: RequestSettings::default(),
+                variables: Vec::new(),
             },
         )?;
 
@@ -1610,6 +2039,7 @@ impl WorkspaceRepository {
                     name: collection_name.clone(),
                     auth: AuthConfig::Inherit,
                     settings: RequestSettings::default(),
+                    variables: Vec::new(),
                 },
             )?;
 
@@ -1638,6 +2068,7 @@ impl WorkspaceRepository {
                             name: folder_name,
                             auth: AuthConfig::Inherit,
                             settings: RequestSettings::default(),
+                            variables: Vec::new(),
                         },
                     )?;
                     folders.insert(path_key.clone(), (id, path.clone()));
@@ -1944,6 +2375,7 @@ impl WorkspaceRepository {
                 name,
                 auth: AuthConfig::Inherit,
                 settings: RequestSettings::default(),
+                variables: Vec::new(),
             },
         )?;
         self.snapshot()
@@ -2034,6 +2466,7 @@ impl WorkspaceRepository {
                 name: "我的集合".to_string(),
                 auth: AuthConfig::Inherit,
                 settings: RequestSettings::default(),
+                variables: Vec::new(),
             },
         )?;
         write_yaml(
@@ -2081,6 +2514,7 @@ impl WorkspaceRepository {
                     expanded: true,
                     kind: WorkspaceNodeKind::Collection,
                     debug_case_count: 0,
+                    variables: document.variables.clone(),
                 },
                 path: path.clone(),
             });
@@ -2109,6 +2543,7 @@ impl WorkspaceRepository {
                     continue;
                 }
                 let document: ContainerDocument = read_yaml(&marker)?;
+                validate_container_variables(&document.variables)?;
                 nodes.push(LocatedNode {
                     node: WorkspaceNode {
                         id: document.id,
@@ -2120,6 +2555,7 @@ impl WorkspaceRepository {
                         expanded: false,
                         kind: WorkspaceNodeKind::Folder,
                         debug_case_count: 0,
+                        variables: document.variables.clone(),
                     },
                     path: path.clone(),
                 });
@@ -2145,6 +2581,7 @@ impl WorkspaceRepository {
                         expanded: false,
                         kind: WorkspaceNodeKind::Request,
                         debug_case_count: document.debug_cases.len(),
+                        variables: Vec::new(),
                     },
                     path,
                 });
@@ -2177,7 +2614,7 @@ impl WorkspaceRepository {
             .environments
             .iter()
             .map(|entry| {
-                let environment: Environment = read_yaml(&self.environment_path(entry.id))
+                let environment: StoredEnvironment = read_yaml(&self.environment_path(entry.id))
                     .with_context(|| {
                         format!(
                             "读取环境文件失败：{}",
@@ -2190,7 +2627,7 @@ impl WorkspaceRepository {
                         self.environment_path(entry.id).display()
                     );
                 }
-                Ok(environment)
+                Ok(environment.public())
             })
             .collect()
     }
@@ -2391,6 +2828,388 @@ mod tests {
         fs::create_dir_all(&root).unwrap();
         assert!(WorkspaceRepository::open(&root).is_err());
         assert!(!root.join("apogee.yaml").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn secret_environment_projection_never_serializes_the_secret_value() {
+        let id = Uuid::new_v4();
+        let secret = "synthetic-secret-never-persist";
+        let stored = StoredEnvironment {
+            id: Uuid::new_v4(),
+            name: "fixture".into(),
+            host: String::new(),
+            variables: vec![StoredEnvironmentVariable {
+                id,
+                key: "token".into(),
+                value: String::new(),
+                enabled: true,
+                secret: true,
+                secret_ref: Some(id),
+            }],
+        };
+        let yaml = apogee_core::yaml::to_string(&stored).unwrap();
+        let public = serde_json::to_string(&stored.public()).unwrap();
+        assert!(!yaml.contains(secret));
+        assert!(!public.contains(secret));
+        assert!(public.contains("hasValue\":true"));
+        assert!(public.contains("\"value\":\"\""));
+    }
+
+    #[test]
+    fn environment_and_global_secrets_persist_only_as_keyring_references() {
+        let root = std::env::temp_dir().join(format!("apogee-secret-store-{}", Uuid::new_v4()));
+        let repository = WorkspaceRepository::create(&root, "密钥测试".into()).unwrap();
+        let workspace_id = repository.id().unwrap();
+        let secret = "synthetic-persisted-secret-4d91";
+
+        let mut environment = repository.create_environment("测试环境".into()).unwrap();
+        let variable_id = Uuid::new_v4();
+        environment
+            .variables
+            .push(apogee_core::vars::EnvironmentVariable {
+                id: variable_id,
+                key: "token".into(),
+                value: secret.into(),
+                enabled: true,
+                secret: true,
+                has_value: false,
+                clear_secret: false,
+            });
+        let saved = repository.save_environment(environment.clone()).unwrap();
+        let stored: StoredEnvironment = read_yaml(&repository.environment_path(saved.id)).unwrap();
+        let original_reference = stored.variables[0].secret_ref.unwrap();
+        let raw_file = fs::read_to_string(repository.environment_path(saved.id)).unwrap();
+        assert!(!raw_file.contains(secret));
+        assert!(raw_file.contains(&variable_id.to_string()));
+        let snapshot = repository.snapshot().unwrap();
+        let projected = snapshot
+            .environments
+            .iter()
+            .find(|item| item.id == saved.id)
+            .unwrap();
+        assert!(projected
+            .variables
+            .iter()
+            .find(|item| item.id == variable_id)
+            .unwrap()
+            .value
+            .is_empty());
+        assert!(repository
+            .read_environment(saved.id)
+            .unwrap()
+            .variables
+            .iter()
+            .any(|item| item.id == variable_id && item.value == secret));
+
+        let duplicate = repository.duplicate_environment(saved.id).unwrap();
+        let copied_secret = duplicate
+            .variables
+            .iter()
+            .find(|item| item.key == "token")
+            .unwrap();
+        assert_ne!(copied_secret.id, variable_id);
+        assert!(copied_secret.value.is_empty());
+        assert_eq!(
+            repository
+                .read_environment(duplicate.id)
+                .unwrap()
+                .variables
+                .iter()
+                .find(|item| item.id == copied_secret.id)
+                .unwrap()
+                .value,
+            secret
+        );
+        let copied: StoredEnvironment =
+            read_yaml(&repository.environment_path(duplicate.id)).unwrap();
+        let copied_reference = copied.variables[0].secret_ref.unwrap();
+        assert_ne!(copied_reference, original_reference);
+        assert!(
+            crate::secrets::get(workspace_id, duplicate.id, copied_reference)
+                .unwrap()
+                .is_some()
+        );
+
+        let postman = apogee_core::postman::import_environment_json(
+            r#"{"name":"Postman","values":[{"key":"importedToken","value":"synthetic-postman-secret","type":"secret"}]}"#,
+        )
+        .unwrap();
+        let imported = repository.import_environment(postman.environment).unwrap();
+        let imported_value = imported
+            .variables
+            .iter()
+            .find(|item| item.key == "importedToken")
+            .unwrap();
+        assert!(imported_value.secret && imported_value.has_value);
+        assert!(fs::read_to_string(repository.environment_path(imported.id))
+            .unwrap()
+            .find("synthetic-postman-secret")
+            .is_none());
+        assert_eq!(
+            repository
+                .read_environment(imported.id)
+                .unwrap()
+                .variables
+                .iter()
+                .find(|item| item.id == imported_value.id)
+                .unwrap()
+                .value,
+            "synthetic-postman-secret"
+        );
+
+        let globals = vec![apogee_core::vars::EnvironmentVariable {
+            id: Uuid::new_v4(),
+            key: "globalToken".into(),
+            value: secret.into(),
+            enabled: true,
+            secret: true,
+            has_value: false,
+            clear_secret: false,
+        }];
+        let global_id = globals[0].id;
+        repository.save_global_variables(globals).unwrap();
+        let global_file = fs::read_to_string(root.join("globals.yaml")).unwrap();
+        assert!(!global_file.contains(secret));
+        assert!(repository
+            .global_variables_for_execution()
+            .unwrap()
+            .iter()
+            .any(|item| item.id == global_id && item.value == secret));
+
+        repository.delete_environment(saved.id).unwrap();
+        assert!(
+            crate::secrets::get(workspace_id, saved.id, original_reference)
+                .unwrap()
+                .is_none()
+        );
+        assert!(repository
+            .read_environment(duplicate.id)
+            .unwrap()
+            .variables
+            .iter()
+            .any(|item| item.id == copied_secret.id && item.value == secret));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn failed_environment_publish_keeps_old_secret_and_rolls_back_new_credential() {
+        let root = std::env::temp_dir().join(format!("apogee-secret-rollback-{}", Uuid::new_v4()));
+        let repository = WorkspaceRepository::create(&root, "rollback".into()).unwrap();
+        let workspace_id = repository.id().unwrap();
+        let mut environment = repository.create_environment("staging".into()).unwrap();
+        environment
+            .variables
+            .push(apogee_core::vars::EnvironmentVariable {
+                id: Uuid::new_v4(),
+                key: "token".into(),
+                value: "old-synthetic".into(),
+                enabled: true,
+                secret: true,
+                has_value: false,
+                clear_secret: false,
+            });
+        let saved = repository.save_environment(environment).unwrap();
+        let old: StoredEnvironment = read_yaml(&repository.environment_path(saved.id)).unwrap();
+        let old_ref = old.variables[0].secret_ref.unwrap();
+
+        let mut replacement = repository.read_environment(saved.id).unwrap();
+        replacement.variables[0].value = "new-synthetic".into();
+        let error = repository
+            .save_environment_with_manifest_writer(replacement, |_, _| {
+                anyhow::bail!("injected manifest publish failure")
+            })
+            .unwrap_err();
+        assert!(format!("{error:#}").contains("injected manifest publish failure"));
+        assert_eq!(
+            repository.read_environment(saved.id).unwrap().variables[0].value,
+            "old-synthetic"
+        );
+        let current: StoredEnvironment = read_yaml(&repository.environment_path(saved.id)).unwrap();
+        assert_eq!(current.variables[0].secret_ref, Some(old_ref));
+        assert_eq!(
+            crate::secrets::get(workspace_id, saved.id, old_ref)
+                .unwrap()
+                .as_deref(),
+            Some("old-synthetic")
+        );
+        assert_eq!(
+            crate::secrets::test_references(workspace_id, saved.id).unwrap(),
+            vec![old_ref]
+        );
+        let mut replacement = saved;
+        replacement.variables[0].value = "new-synthetic".into();
+        replacement.variables[0].clear_secret = true; // new input after Clear wins
+        let mut replaced = repository.save_environment(replacement).unwrap();
+        assert_eq!(
+            repository.read_environment(replaced.id).unwrap().variables[0].value,
+            "new-synthetic"
+        );
+        assert!(crate::secrets::get(workspace_id, replaced.id, old_ref)
+            .unwrap()
+            .is_none());
+        replaced.variables[0].clear_secret = true;
+        let cleared = repository.save_environment(replaced).unwrap();
+        assert!(!cleared.variables[0].has_value);
+        assert!(crate::secrets::test_references(workspace_id, cleared.id)
+            .unwrap()
+            .is_empty());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn failed_environment_create_removes_new_credentials_and_published_file() {
+        let root =
+            std::env::temp_dir().join(format!("apogee-secret-create-rollback-{}", Uuid::new_v4()));
+        let repository = WorkspaceRepository::create(&root, "rollback".into()).unwrap();
+        let workspace_id = repository.id().unwrap();
+        let environment_id = Uuid::new_v4();
+        let environment = Environment {
+            id: environment_id,
+            name: "new".into(),
+            host: String::new(),
+            variables: vec![apogee_core::vars::EnvironmentVariable {
+                id: Uuid::new_v4(),
+                key: "token".into(),
+                value: "synthetic-create".into(),
+                enabled: true,
+                secret: true,
+                has_value: false,
+                clear_secret: false,
+            }],
+        };
+        assert!(repository
+            .create_environment_value_with_writer(environment, |_, _| {
+                anyhow::bail!("injected manifest publish failure")
+            })
+            .is_err());
+        assert!(
+            crate::secrets::test_references(workspace_id, environment_id)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(!repository.environment_path(environment_id).exists());
+        assert!(repository
+            .read_manifest()
+            .unwrap()
+            .environments
+            .iter()
+            .all(|entry| entry.id != environment_id));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn disabled_secret_survives_copy_and_missing_disabled_credential_does_not_block_execution() {
+        let root = std::env::temp_dir().join(format!("apogee-disabled-secret-{}", Uuid::new_v4()));
+        let repository = WorkspaceRepository::create(&root, "disabled".into()).unwrap();
+        let workspace_id = repository.id().unwrap();
+        let mut environment = repository.create_environment("source".into()).unwrap();
+        environment
+            .variables
+            .push(apogee_core::vars::EnvironmentVariable {
+                id: Uuid::new_v4(),
+                key: "token".into(),
+                value: "synthetic-disabled".into(),
+                enabled: false,
+                secret: true,
+                has_value: false,
+                clear_secret: false,
+            });
+        let saved = repository.save_environment(environment).unwrap();
+        let copied = repository.duplicate_environment(saved.id).unwrap();
+        assert!(copied.variables[0].has_value);
+        assert!(!copied.variables[0].enabled);
+        let mut enabled = copied;
+        enabled.variables[0].enabled = true;
+        let enabled = repository.save_environment(enabled).unwrap();
+        assert_eq!(
+            repository.read_environment(enabled.id).unwrap().variables[0].value,
+            "synthetic-disabled"
+        );
+        let stored: StoredEnvironment = read_yaml(&repository.environment_path(saved.id)).unwrap();
+        crate::secrets::delete(
+            workspace_id,
+            saved.id,
+            stored.variables[0].secret_ref.unwrap(),
+        )
+        .unwrap();
+        assert!(repository.read_environment(saved.id).is_ok());
+        repository.delete_environment(enabled.id).unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn folder_scope_merge_keeps_parent_when_child_variable_is_disabled_and_rejects_duplicates() {
+        let root = std::env::temp_dir().join(format!("apogee-variable-scopes-{}", Uuid::new_v4()));
+        let repository = WorkspaceRepository::create(&root, "测试工作区".into()).unwrap();
+        let collection_id = repository
+            .snapshot()
+            .unwrap()
+            .nodes
+            .into_iter()
+            .find(|node| matches!(node.kind, WorkspaceNodeKind::Collection))
+            .unwrap()
+            .id;
+        let parent_id = repository
+            .create_folder(collection_id, "父级".into())
+            .unwrap()
+            .nodes
+            .into_iter()
+            .find(|node| {
+                node.parent_id == Some(collection_id)
+                    && matches!(node.kind, WorkspaceNodeKind::Folder)
+            })
+            .unwrap()
+            .id;
+        let child_id = repository
+            .create_folder(parent_id, "子级".into())
+            .unwrap()
+            .nodes
+            .into_iter()
+            .find(|node| {
+                node.parent_id == Some(parent_id) && matches!(node.kind, WorkspaceNodeKind::Folder)
+            })
+            .unwrap()
+            .id;
+        let request = repository.create_request(child_id, "请求".into()).unwrap();
+        let variable = |value: &str, enabled: bool| apogee_core::vars::EnvironmentVariable {
+            id: Uuid::new_v4(),
+            key: "shared".into(),
+            value: value.into(),
+            enabled,
+            secret: false,
+            has_value: false,
+            clear_secret: false,
+        };
+        let mut parent = repository.read_container(parent_id).unwrap();
+        parent.variables = vec![variable("parent", true)];
+        repository.save_container(parent).unwrap();
+        let mut child = repository.read_container(child_id).unwrap();
+        child.variables = vec![variable("disabled-child", false)];
+        repository.save_container(child.clone()).unwrap();
+        let (_, merged) = repository.request_variable_scopes(request.id).unwrap();
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].value, "parent");
+
+        child.variables = vec![variable("one", true), variable("two", true)];
+        let child_path = repository
+            .locate(child_id)
+            .unwrap()
+            .path
+            .join(FOLDER_MARKER);
+        write_yaml(
+            &child_path,
+            &ContainerDocument {
+                apogee: WORKSPACE_FORMAT_VERSION,
+                id: child.id,
+                name: child.name,
+                auth: child.auth,
+                settings: child.settings,
+                variables: child.variables,
+            },
+        )
+        .unwrap();
+        assert!(repository.request_variable_scopes(request.id).is_err());
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -3362,6 +4181,7 @@ mod tests {
             sensitive_path_values: vec!["a b".into()],
             sensitive_query_names: vec!["q".into()],
             sensitive_header_names: vec!["X-My-Key".into()],
+            sensitive_values: Vec::new(),
         });
 
         repository
@@ -3738,6 +4558,7 @@ durationMs: 2
                     name: collection.name.clone(),
                     auth: auth.clone(),
                     settings: Default::default(),
+                    variables: Vec::new(),
                 })
                 .unwrap();
             let resolved = repository
@@ -3765,6 +4586,7 @@ durationMs: 2
                 name: folder.name,
                 auth: folder_auth,
                 settings: Default::default(),
+                variables: Vec::new(),
             })
             .unwrap();
         assert!(
@@ -3808,6 +4630,7 @@ durationMs: 2
                     verify_tls: Some(true),
                     ..Default::default()
                 },
+                variables: Vec::new(),
             })
             .unwrap();
         repository
@@ -3824,6 +4647,7 @@ durationMs: 2
                     verify_tls: Some(false),
                     ..Default::default()
                 },
+                variables: Vec::new(),
             })
             .unwrap();
 

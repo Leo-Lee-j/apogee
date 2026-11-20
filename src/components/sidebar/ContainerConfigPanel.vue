@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { useOAuth2TokenActions } from '@/features/oauth2TokenOperation'
 import { computed, ref, watch } from 'vue'
-import { AppAlert, AppButton, AppIcon, AppInputNumber, AppSelect } from '@/components/ui'
-import { ipc, normalizeError, type AuthConfig, type RequestSettings, type WorkspaceContainer } from '@/ipc'
+import { AppAlert, AppButton, AppCheckbox, AppIcon, AppInput, AppInputNumber, AppSelect } from '@/components/ui'
+import { ipc, normalizeError, type AuthConfig, type EnvironmentVariable, type RequestSettings, type WorkspaceContainer } from '@/ipc'
 import { useTabsStore } from '@/stores/tabs'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useEditorRecoveryStore } from '@/stores/editorRecovery'
@@ -26,6 +26,19 @@ const loading = ref(false)
 const saving = ref(false)
 const error = ref('')
 const container = computed(() => selectedNodeId.value ? editors.containers[selectedNodeId.value]?.value ?? null : null)
+const containerVariableError = computed(() => {
+  const variables = container.value?.variables ?? []
+  const names = new Set<string>()
+  for (const variable of variables) {
+    if (!variable.enabled || !variable.key.trim()) continue
+    const key = variable.key.trim()
+    if (key.toLowerCase() === 'host') return 'host 是保留变量名，请在环境 Host 字段中设置。'
+    if (names.has(key)) return '本层变量名重复：' + key
+    names.add(key)
+  }
+  if (variables.some((variable) => variable.secret)) return '集合与文件夹暂不保存密钥，请将密钥放到环境或全局变量中。'
+  return ''
+})
 const persistedAuth = computed<AuthConfig | undefined>({
   get: () => selectedNodeId.value ? editors.containers[selectedNodeId.value]?.expectedAuth : undefined,
   set: value => { if (value && selectedNodeId.value) editors.baseline(selectedNodeId.value, value) },
@@ -128,6 +141,18 @@ function booleanSelectValue(value: boolean | null | undefined, fallback: boolean
 function patchAuth(next: AuthConfig) { if (container.value) editors.edit({ ...container.value, auth: next }) }
 function authGuard(id: string) { return () => !saving.value && selectedNodeId.value === id && container.value?.id === id }
 function patchSettings(delta: Partial<RequestSettings>) { if (container.value) editors.edit({ ...container.value, settings: { ...settings.value, ...delta } }) }
+function patchVariables(variables: EnvironmentVariable[]) { if (container.value) editors.edit({ ...container.value, variables }) }
+function addVariable() {
+  if (!container.value) return
+  patchVariables([...(container.value.variables ?? []), { id: crypto.randomUUID(), key: '', value: '', enabled: true, secret: false }])
+}
+function updateVariable(index: number, delta: Partial<EnvironmentVariable>) {
+  if (!container.value) return
+  patchVariables((container.value.variables ?? []).map((variable, itemIndex) => itemIndex === index ? { ...variable, ...delta } : variable))
+}
+function removeVariable(index: number) {
+  if (container.value) patchVariables((container.value.variables ?? []).filter((_item, itemIndex) => itemIndex !== index))
+}
 function patchBooleanSetting(field: 'followRedirects' | 'verifyTls', value: string | number | null) {
   patchSettings({ [field]: value === 'inherit' ? undefined : value === 'true' } as Partial<RequestSettings>)
 }
@@ -141,7 +166,7 @@ function settingsSummary(value: RequestSettings | undefined) {
   return parts.length ? parts.join(' · ') : '未设置请求参数'
 }
 async function save() {
-  if (!container.value) return
+  if (!container.value || containerVariableError.value) return
   const target = container.value
   const workspaceId = workspace.workspaceId, sessionId = workspace.sessionId
   const current = () => selectedNodeId.value === target.id && container.value?.id === target.id
@@ -170,10 +195,11 @@ async function reload() {
     <WorkspaceToolbar class="config-toolbar">
       <div class="toolbar-title"><strong>{{ currentNode?.name ?? '容器配置' }}</strong><span>{{ selectedNodeId && editors.containers[selectedNodeId]?.dirty ? '未保存修改' : '继承链配置' }}</span></div>
       <AppButton quaternary :disabled="loading || saving" title="重新读取磁盘配置" @click="reload">重新加载</AppButton>
-      <AppButton quaternary type="primary" :loading="saving" :disabled="loading || !container" @click="save"><template #icon><AppIcon :component="IconSave" :size="15" /></template>保存</AppButton>
+      <AppButton quaternary type="primary" :loading="saving" :disabled="loading || !container || !!containerVariableError" @click="save"><template #icon><AppIcon :component="IconSave" :size="15" /></template>保存</AppButton>
     </WorkspaceToolbar>
     <div class="config-body">
       <AppAlert v-if="error" type="error" :show-icon="false">{{ error }}</AppAlert>
+      <AppAlert v-if="containerVariableError" type="error" :show-icon="false">{{ containerVariableError }}</AppAlert>
       <div v-if="loading" class="empty">正在读取配置...</div>
       <WorkspaceContent v-else-if="container" split layout="side-by-side" :initial-ratio="0.34" :panel-padding="8">
       <template #primary>
@@ -186,6 +212,7 @@ async function reload() {
           :inherit-label="`继承上级（${authSummary(inheritedAuth)}）`" :can-edit="authGuard(container.id)" :fetch-token="tokenFetcher(container.id, settings, authGuard(container.id), container.id, false, undefined, () => persistedAuth)" @update:value="patchAuth" @token-updated="persistedAuth = $event" />
       </section>
       <section class="config-block editor"><header class="section-head"><strong>请求设置</strong></header><WorkspaceForm class="settings-grid" :columns="2"><WorkspaceField label="超时（ms）"><AppInputNumber :value="settings.timeoutMs ?? null" :min="1" clearable :placeholder="timeoutPlaceholder" @update:value="patchSettings({ timeoutMs: $event ?? undefined })" /></WorkspaceField><WorkspaceField label="最大重定向"><AppInputNumber :value="settings.maxRedirects ?? null" :min="0" :max="100" clearable :placeholder="maxRedirectsPlaceholder" @update:value="patchSettings({ maxRedirects: $event ?? undefined })" /></WorkspaceField><WorkspaceField label="跟随重定向"><AppSelect :value="booleanSelectValue(settings.followRedirects, inheritedFollowRedirects)" :options="followRedirectOptions" @update:value="patchBooleanSetting('followRedirects', $event)" /></WorkspaceField><WorkspaceField label="校验 TLS"><AppSelect :value="booleanSelectValue(settings.verifyTls, inheritedVerifyTls)" :options="verifyTlsOptions" @update:value="patchBooleanSetting('verifyTls', $event)" /></WorkspaceField></WorkspaceForm></section>
+      <section class="config-block editor variable-scope"><header class="section-head"><strong>本层变量</strong><AppButton quaternary size="small" @click="addVariable">添加变量</AppButton></header><p class="scope-hint">当前集合或文件夹中的变量会覆盖全局变量，并可由更近的文件夹、环境或运行时变量覆盖。</p><div v-for="(variable, index) in (container.variables ?? [])" :key="variable.id" class="scope-variable"><AppCheckbox :checked="variable.enabled" :aria-label="`启用变量 ${variable.key}`" @update:checked="updateVariable(index, { enabled: $event })"/><AppInput :value="variable.key" placeholder="变量名" @update:value="updateVariable(index, { key: $event })"/><AppInput :value="variable.value" placeholder="变量值" @update:value="updateVariable(index, { value: $event })"/><AppButton quaternary circle size="small" title="删除变量" @click="removeVariable(index)">删除</AppButton></div><div v-if="(container.variables ?? []).length === 0" class="scope-hint">本层没有变量。</div></section>
       </div></template>
       </WorkspaceContent>
       <div v-else class="empty">找不到该容器配置。</div>

@@ -22,11 +22,15 @@ pub struct ImportedRequest {
 pub struct ImportedFolder {
     pub path: Vec<usize>,
     pub name: String,
+    #[serde(default)]
+    pub variables: Vec<EnvironmentVariable>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PostmanImportResult {
     pub name: String,
+    #[serde(default)]
+    pub variables: Vec<EnvironmentVariable>,
     pub requests: Vec<ImportedRequest>,
     pub folders: Vec<ImportedFolder>,
     pub warnings: Vec<String>,
@@ -89,12 +93,16 @@ pub fn import_environment_json(
             .and_then(|item| item.as_str())
             .unwrap_or_default();
         variables.push(EnvironmentVariable {
+            id: Uuid::new_v4(),
             key: key.to_string(),
             value: current.to_string(),
             enabled: value
                 .get("enabled")
                 .and_then(|item| item.as_bool())
                 .unwrap_or(true),
+            secret: value.get("type").and_then(|item| item.as_str()) == Some("secret"),
+            has_value: false,
+            clear_secret: false,
         });
     }
     Ok(PostmanEnvironmentImportResult {
@@ -122,6 +130,8 @@ pub fn import_json(input: &str) -> Result<PostmanImportResult, crate::error::App
     let mut folders = Vec::new();
     let mut warnings = Vec::new();
     let mut scope_warnings = Vec::new();
+    let collection_variables =
+        import_scope_variables(root.get("variable"), "集合", &mut scope_warnings);
     migration_gaps(&root, &mut scope_warnings);
     let inherited_auth = import_auth(root.get("auth"), &AuthConfig::None, &mut scope_warnings);
     walk_items(
@@ -138,6 +148,7 @@ pub fn import_json(input: &str) -> Result<PostmanImportResult, crate::error::App
     }
     Ok(PostmanImportResult {
         name,
+        variables: collection_variables,
         requests,
         folders,
         warnings,
@@ -172,6 +183,11 @@ fn walk_items(
             folders.push(ImportedFolder {
                 path: path.ids.clone(),
                 name: name.into(),
+                variables: import_scope_variables(
+                    item.get("variable"),
+                    "文件夹",
+                    &mut local_warnings,
+                ),
             });
             let folder_auth = import_auth(item.get("auth"), inherited_auth, &mut local_warnings);
             walk_items(
@@ -300,15 +316,56 @@ fn migration_gaps(value: &serde_json::Value, warnings: &mut Vec<String>) {
     {
         warnings.push("该请求或上级的预请求/测试脚本未迁移，请手动检查脚本依赖".into());
     }
-    if value
-        .get("variable")
-        .and_then(|v| v.as_array())
-        .is_some_and(|variables| !variables.is_empty())
-    {
-        warnings.push(
-            "上级变量作用域未迁移，请将集合/文件夹变量配置到环境；变量值未写入迁移报告".into(),
-        );
-    }
+}
+
+fn import_scope_variables(
+    value: Option<&serde_json::Value>,
+    scope: &str,
+    warnings: &mut Vec<String>,
+) -> Vec<EnvironmentVariable> {
+    value
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|item| {
+            let Some(key) = item
+                .get("key")
+                .or_else(|| item.get("name"))
+                .and_then(|v| v.as_str())
+            else {
+                warnings.push(format!("跳过缺少名称的{scope}变量"));
+                return None;
+            };
+            if key.trim().is_empty() {
+                warnings.push(format!("跳过名称为空的{scope}变量"));
+                return None;
+            }
+            if item.get("type").and_then(|v| v.as_str()) == Some("secret") {
+                warnings.push(format!(
+                    "{scope}变量「{key}」标记为密钥，未导入；请在环境密钥栏重新录入"
+                ));
+                return None;
+            }
+            Some(EnvironmentVariable {
+                id: Uuid::new_v4(),
+                key: key.to_string(),
+                value: item
+                    .get("value")
+                    .or_else(|| item.get("current"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string(),
+                enabled: item
+                    .get("enabled")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(true)
+                    && item.get("disabled").and_then(|v| v.as_bool()) != Some(true),
+                secret: false,
+                has_value: false,
+                clear_secret: false,
+            })
+        })
+        .collect()
 }
 /// Postman v2.0 uses an object; v2.1 uses an array of { key, value, type }.
 fn auth_field(auth: &serde_json::Value, kind: &str, key: &str) -> Option<String> {
@@ -738,14 +795,22 @@ mod tests {
             host: String::new(),
             variables: vec![
                 EnvironmentVariable {
+                    id: Uuid::new_v4(),
                     key: "apiBase".into(),
                     value: "https://api.test".into(),
                     enabled: true,
+                    secret: false,
+                    has_value: false,
+                    clear_secret: false,
                 },
                 EnvironmentVariable {
+                    id: Uuid::new_v4(),
                     key: "search".into(),
                     value: "ok".into(),
                     enabled: true,
+                    secret: false,
+                    has_value: false,
+                    clear_secret: false,
                 },
             ],
         };
@@ -870,6 +935,7 @@ mod tests {
           "values": [
             {"key": "baseUrl", "value": "https://staging.example.test", "enabled": true},
             {"key": "token", "current": "abc", "enabled": false},
+            {"key": "credential", "value": "synthetic-postman-secret", "type": "secret"},
             {"value": "ignored"}
           ]
         }"#,
@@ -877,13 +943,49 @@ mod tests {
         .unwrap();
 
         assert_eq!(imported.environment.name, "Staging");
-        assert_eq!(imported.environment.variables.len(), 2);
+        assert_eq!(imported.environment.variables.len(), 3);
         assert_eq!(
             imported.environment.variables[0].value,
             "https://staging.example.test"
         );
         assert!(!imported.environment.variables[1].enabled);
+        assert!(imported.environment.variables[2].secret);
+        assert_eq!(
+            imported.environment.variables[2].value,
+            "synthetic-postman-secret"
+        );
         assert_eq!(imported.warnings.len(), 1);
+    }
+
+    #[test]
+    fn imports_postman_collection_and_folder_variables_without_secret_values_in_warnings() {
+        let imported = import_json(
+            r#"{
+              "variable": [
+                {"key":"collectionValue","value":"collection-data"},
+                {"key":"collectionSecret","value":"synthetic-collection-secret","type":"secret"}
+              ],
+              "item": [{
+                "name":"Folder",
+                "variable":[{"key":"folderValue","value":"folder-data"}],
+                "item":[{"name":"Request","request":{"url":"https://example.test"}}]
+              }]
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(imported.variables.len(), 1);
+        assert_eq!(imported.variables[0].key, "collectionValue");
+        assert_eq!(imported.folders.len(), 1);
+        assert_eq!(imported.folders[0].variables[0].key, "folderValue");
+        assert!(imported
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("collectionSecret")));
+        assert!(!imported
+            .warnings
+            .join(" ")
+            .contains("synthetic-collection-secret"));
     }
 
     #[test]

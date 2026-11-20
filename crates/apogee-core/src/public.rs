@@ -330,15 +330,27 @@ impl PublicActualRequest {
             .map(|(_, value)| value.clone())
             .collect::<Vec<_>>();
         sensitive_path_values.extend(sources.path_values.iter().cloned());
+        sensitive_path_values.extend(sources.values.iter().cloned());
 
         self.url = sanitize_url(&self.url, &sensitive_path_values, &sources.query_names);
         self.path_params = redact_pairs_with_sensitive_sources(
             self.path_params,
             &sources.path_param_names,
-            &sources.path_values,
+            &sensitive_path_values,
         );
-        self.headers =
-            redact_pairs_with_sensitive_sources(self.headers, &sources.header_names, &[]);
+        self.headers = redact_pairs_with_sensitive_sources(
+            self.headers,
+            &sources.header_names,
+            &sources.values,
+        );
+        for (name, _) in &mut self.headers {
+            *name = redact_header_name(name, &sources.values);
+        }
+        self.common_header_names = self
+            .common_header_names
+            .into_iter()
+            .map(|name| redact_header_name(&name, &sources.values))
+            .collect();
         self
     }
 
@@ -356,6 +368,7 @@ impl PublicActualRequest {
             sensitive_path_values: Vec::new(),
             sensitive_query_names: Vec::new(),
             sensitive_header_names: Vec::new(),
+            sensitive_values: Vec::new(),
         }
     }
 }
@@ -367,6 +380,7 @@ impl From<&ActualRequest> for PublicActualRequest {
             path_values: value.sensitive_path_values.clone(),
             query_names: value.sensitive_query_names.clone(),
             header_names: value.sensitive_header_names.clone(),
+            values: value.sensitive_values.clone(),
         };
         Self {
             method: value.method.clone(),
@@ -572,6 +586,7 @@ struct SensitiveRequestSources {
     path_values: Vec<String>,
     query_names: Vec<String>,
     header_names: Vec<String>,
+    values: Vec<String>,
 }
 
 impl SensitiveRequestSources {
@@ -611,6 +626,7 @@ impl From<&PublicRequestPreview> for SensitiveRequestSources {
             path_values: sensitive_values(&value.path_params),
             query_names: sensitive_names(&value.params),
             header_names: sensitive_names(&value.headers),
+            values: Vec::new(),
         };
         sources.add_legacy_auth(&value.legacy_auth_redaction_source);
         sources
@@ -653,13 +669,15 @@ fn redact_pairs_with_sensitive_sources(
             let value = if is_sensitive_name(&key)
                 || is_sensitive_value(&value)
                 || is_marked_sensitive_name(&key, sensitive_names)
-                || sensitive_values.iter().any(|source| source == &value)
+                || sensitive_values
+                    .iter()
+                    .any(|source| !source.is_empty() && value.contains(source))
             {
                 REDACTED.to_string()
             } else {
                 value
             };
-            (key, value)
+            (redact_literal_values(&key, sensitive_values), value)
         })
         .collect()
 }
@@ -668,6 +686,19 @@ fn is_marked_sensitive_name(name: &str, sensitive_names: &[String]) -> bool {
     sensitive_names
         .iter()
         .any(|sensitive_name| sensitive_name.eq_ignore_ascii_case(name))
+}
+
+// HTTP normalizes header names to lowercase; provenance must survive that normalization.
+fn redact_header_name(name: &str, sensitive_values: &[String]) -> String {
+    let normalized = name.to_ascii_lowercase();
+    if sensitive_values
+        .iter()
+        .any(|value| !value.is_empty() && normalized.contains(&value.to_ascii_lowercase()))
+    {
+        REDACTED.to_string()
+    } else {
+        name.to_string()
+    }
 }
 
 fn sanitize_url(
@@ -773,6 +804,13 @@ fn redact_literal_values(value: &str, sensitive_values: &[String]) -> String {
         .into_iter()
         .fold(value.to_string(), |url, sensitive| {
             let url = url.replace(sensitive, REDACTED);
+            let form_encoded =
+                form_urlencoded::byte_serialize(sensitive.as_bytes()).collect::<String>();
+            let url = if form_encoded == sensitive {
+                url
+            } else {
+                url.replace(&form_encoded, REDACTED)
+            };
             let encoded = crate::http::urlencoding_path(sensitive);
             if encoded == sensitive {
                 url
@@ -1154,6 +1192,7 @@ mod tests {
             sensitive_path_values: Vec::new(),
             sensitive_query_names: Vec::new(),
             sensitive_header_names: Vec::new(),
+            sensitive_values: Vec::new(),
         };
         let mut response = ResponseSummary::without_http(Uuid::new_v4(), 3, Timing::default());
         response.actual_request = Some(actual);
@@ -1211,6 +1250,7 @@ mod tests {
             sensitive_path_values: vec!["a b".to_string()],
             sensitive_query_names: vec!["q".to_string()],
             sensitive_header_names: vec!["X-My-Key".to_string()],
+            sensitive_values: Vec::new(),
         };
 
         let public = PublicActualRequest::from(&actual);
@@ -1223,6 +1263,35 @@ mod tests {
         assert_eq!(public.headers[0].1, REDACTED);
         assert_eq!(public.headers[1].1, "safe-header");
         assert_absent(&encoded, &["a b", "a%20b", "query-secret", "header-secret"]);
+    }
+
+    #[test]
+    fn environment_secret_is_masked_when_it_appears_in_field_names() {
+        let secret = "Synthetic-Name-Secret";
+        let actual = ActualRequest {
+            method: "GET".into(),
+            url: format!("https://example.test/{secret}?{secret}=safe"),
+            path_params: vec![(secret.into(), "safe-path".into())],
+            headers: vec![(
+                format!("x-{}", secret.to_ascii_lowercase()),
+                "safe-header".into(),
+            )],
+            common_header_names: vec![format!("x-{}", secret.to_ascii_lowercase())],
+            body: None,
+            body_params: Vec::new(),
+            sensitive_path_param_names: Vec::new(),
+            sensitive_path_values: Vec::new(),
+            sensitive_query_names: Vec::new(),
+            sensitive_header_names: Vec::new(),
+            sensitive_values: vec![secret.into()],
+        };
+        let public = PublicActualRequest::from(&actual);
+        let encoded = serde_json::to_string(&public).unwrap();
+        assert!(!encoded.contains(secret), "公开字段名泄露密钥：{encoded}");
+        assert!(!encoded
+            .to_ascii_lowercase()
+            .contains(&secret.to_ascii_lowercase()));
+        assert!(public.url.contains(REDACTED));
     }
 
     #[test]
@@ -1239,6 +1308,7 @@ mod tests {
             sensitive_path_values: vec!["é".to_string()],
             sensitive_query_names: Vec::new(),
             sensitive_header_names: Vec::new(),
+            sensitive_values: Vec::new(),
         };
         let public_actual = PublicActualRequest::from(&actual);
         assert_eq!(public_actual.url, "https://example.test/users/[redacted]");

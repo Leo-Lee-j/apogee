@@ -282,9 +282,13 @@ mod tests {
             name: "test".into(),
             host: String::new(),
             variables: vec![crate::vars::EnvironmentVariable {
+                id: uuid::Uuid::new_v4(),
                 key: "q".into(),
                 value: "ok".into(),
                 enabled: true,
+                secret: false,
+                has_value: false,
+                clear_secret: false,
             }],
         };
         let before = crate::vars::resolve_request(&source, Some(&env)).unwrap();

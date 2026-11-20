@@ -23,7 +23,7 @@ use crate::model::{ActualRequest, KeyValue, ResponseMeta, Timing, ValueKind};
 use crate::public::{is_sensitive_name, is_sensitive_value};
 use crate::request::{ApiKeyIn, AuthConfig, Body, HttpVersion, RequestSpec, ResolvedSettings};
 use crate::response::Spool;
-use crate::vars::{resolve_request, Environment};
+use crate::vars::Environment;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -688,7 +688,7 @@ mod tests {
         let req = built(&s);
         assert!(header_values(&req, "authorization")[0]
             .contains("tR3%2BTy81lMeYAr%2FFid0kMTYa%2FWM%3D"));
-        let actual = snapshot_request(&req, &s);
+        let actual = snapshot_request(&req, &s, &[]);
         assert!(actual
             .sensitive_header_names
             .iter()
@@ -801,7 +801,7 @@ mod tests {
             s.headers = vec![kv("aUThorization", "manual-secret", true)];
             let req = built(&s);
             assert_eq!(header_values(&req, "authorization"), vec!["manual-secret"]);
-            assert!(snapshot_request(&req, &s)
+            assert!(snapshot_request(&req, &s, &[])
                 .sensitive_header_names
                 .iter()
                 .any(|n| n.eq_ignore_ascii_case("authorization")));
@@ -846,7 +846,7 @@ mod tests {
         };
 
         let request = built(&s);
-        let actual = snapshot_request(&request, &s);
+        let actual = snapshot_request(&request, &s, &[]);
         assert_eq!(actual.sensitive_path_param_names, vec!["id"]);
         assert_eq!(actual.sensitive_path_values, vec!["a b"]);
         assert_eq!(actual.sensitive_query_names, vec!["q", "X-Custom-Query"]);
@@ -885,7 +885,7 @@ mod tests {
             header_values(&request, "x-my-key"),
             vec!["manual-header-secret"]
         );
-        let actual = snapshot_request(&request, &s);
+        let actual = snapshot_request(&request, &s, &[]);
         assert_eq!(actual.sensitive_header_names, vec!["X-My-Key"]);
 
         let public = crate::public::PublicActualRequest::from(&actual);
@@ -901,6 +901,55 @@ mod tests {
         assert!(
             !encoded.contains("manual-header-secret"),
             "公开请求快照泄露了覆盖后的 API key header: {encoded}"
+        );
+    }
+
+    #[test]
+    fn secret_variables_are_redacted_from_custom_header_query_and_path_snapshot() {
+        let secret = "synthetic-variable-secret-7f3a";
+        let environment = crate::vars::Environment {
+            id: Uuid::new_v4(),
+            name: "合成测试".into(),
+            host: String::new(),
+            variables: vec![crate::vars::EnvironmentVariable {
+                id: Uuid::new_v4(),
+                key: "token".into(),
+                value: secret.into(),
+                enabled: true,
+                secret: true,
+                has_value: true,
+                clear_secret: false,
+            }],
+        };
+        let mut spec = spec("https://a.test/users/:id");
+        spec.path_params = vec![kv("id", "{{token}}", true)];
+        spec.params = vec![kv("trace", "{{token}}", true)];
+        spec.headers = vec![kv("X-Correlation", "prefix-{{token}}", true)];
+        let resolution = crate::vars::resolve_request_with_scopes(
+            &spec,
+            Some(&environment),
+            &[],
+            &[],
+            &[],
+            &Default::default(),
+        )
+        .unwrap();
+        let request = built(&resolution.spec);
+        let actual = snapshot_request(&request, &resolution.spec, &resolution.sensitive_values);
+        let public = crate::public::PublicActualRequest::from(&actual);
+        let encoded = serde_json::to_string(&public).unwrap();
+        assert!(
+            !encoded.contains(secret),
+            "公开快照泄露了合成密钥：{encoded}"
+        );
+        assert!(public.url.contains(crate::public::REDACTED));
+        assert_eq!(
+            public
+                .headers
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case("x-correlation"))
+                .map(|(_, value)| value.as_str()),
+            Some(crate::public::REDACTED),
         );
     }
 
@@ -1267,7 +1316,31 @@ pub async fn execute_with_session(
     on_progress: impl FnMut(Progress),
     session: Option<&HttpSession>,
 ) -> Outcome {
-    match execute_inner(id, spec, environment, spool, cancel, on_progress, session).await {
+    execute_with_variable_scopes(
+        id,
+        spec,
+        crate::vars::VariableContext {
+            environment,
+            scopes: &crate::vars::VariableScopes::default(),
+        },
+        spool,
+        cancel,
+        on_progress,
+        session,
+    )
+    .await
+}
+
+pub async fn execute_with_variable_scopes(
+    id: Uuid,
+    spec: &RequestSpec,
+    variables: crate::vars::VariableContext<'_>,
+    spool: &Spool,
+    cancel: tokio::sync::oneshot::Receiver<()>,
+    on_progress: impl FnMut(Progress),
+    session: Option<&HttpSession>,
+) -> Outcome {
+    match execute_inner(id, spec, variables, spool, cancel, on_progress, session).await {
         Ok(Some(meta)) => Outcome::Done(Box::new(meta)),
         Ok(None) => Outcome::Cancelled,
         Err(failure) => Outcome::Failed {
@@ -1282,16 +1355,29 @@ pub async fn execute_with_session(
 async fn execute_inner(
     id: Uuid,
     spec: &RequestSpec,
-    environment: Option<&Environment>,
+    variables: crate::vars::VariableContext<'_>,
     spool: &Spool,
     mut cancel: tokio::sync::oneshot::Receiver<()>,
     on_progress: impl FnMut(Progress),
     session: Option<&HttpSession>,
 ) -> Result<Option<ResponseMeta>, ExecuteFailure> {
+    let crate::vars::VariableContext {
+        environment,
+        scopes,
+    } = variables;
     let prepare_start = Instant::now();
     // 解析在执行层入口完成，保证 URL、参数、Header、Body 和鉴权共享同一份
     // 环境快照。原始 spec 仍保留模板，不会被解析结果覆盖。
-    let resolved = resolve_request(spec, environment)?;
+    let resolution = crate::vars::resolve_request_with_scopes(
+        spec,
+        environment,
+        &scopes.global,
+        &scopes.collection,
+        &scopes.folder,
+        &scopes.runtime,
+    )?;
+    let sensitive_values = resolution.sensitive_values;
+    let resolved = resolution.spec;
     let mut settings = resolved.settings.resolve();
     // A signature binds method + URI. A redirected request requires a fresh signature;
     // expose 3xx rather than forwarding a stale credential to another URI.
@@ -1301,7 +1387,7 @@ async fn execute_inner(
     let session = session.filter(|_| resolved.settings.send_cookies.unwrap_or(true));
     let client = client_for_session(&settings, session)?;
     let (request, url) = build_request(&client, &resolved)?;
-    let mut actual_request = snapshot_request(&request, &resolved);
+    let mut actual_request = snapshot_request(&request, &resolved, &sensitive_values);
     if !request.headers().contains_key(reqwest::header::COOKIE) {
         if let Some(value) = session.and_then(|session| {
             reqwest::cookie::CookieStore::cookies(&*session.cookies, request.url())
@@ -1513,7 +1599,11 @@ fn has_configured_header(rows: &[KeyValue], name: &str) -> bool {
     })
 }
 
-fn snapshot_request(request: &reqwest::Request, resolved: &RequestSpec) -> ActualRequest {
+fn snapshot_request(
+    request: &reqwest::Request,
+    resolved: &RequestSpec,
+    sensitive_values: &[String],
+) -> ActualRequest {
     let mut headers = request
         .headers()
         .iter()
@@ -1615,6 +1705,7 @@ fn snapshot_request(request: &reqwest::Request, resolved: &RequestSpec) -> Actua
         sensitive_path_values,
         sensitive_query_names,
         sensitive_header_names,
+        sensitive_values: sensitive_values.to_vec(),
     }
 }
 

@@ -18,6 +18,7 @@ mod persistence;
 mod protocol;
 mod recovery;
 mod request_preparation;
+mod secrets;
 mod state;
 mod update;
 mod workspace;
@@ -119,6 +120,8 @@ pub fn run() {
             commands::workspace_delete_node,
             commands::workspace_duplicate_node,
             commands::workspace_create_environment,
+            commands::workspace_duplicate_environment,
+            commands::workspace_save_global_variables,
             commands::workspace_save_environment,
             commands::workspace_delete_environment,
             commands::workspace_save_state,
@@ -1754,6 +1757,37 @@ mod commands {
         state
             .with_workspace_mutation(workspace_id, session_id, |repository| {
                 repository.save_environment(environment)
+            })
+            .map_err(|error| error.to_string())
+    }
+
+    #[tauri::command]
+    pub fn workspace_duplicate_environment(
+        state: State<'_, Arc<AppState>>,
+        workspace_id: String,
+        session_id: String,
+        environment_id: String,
+    ) -> Result<Environment, String> {
+        let environment_id = parse_id(&environment_id)?;
+        let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
+        state
+            .with_workspace_mutation(workspace_id, session_id, |repository| {
+                repository.duplicate_environment(environment_id)
+            })
+            .map_err(|error| error.to_string())
+    }
+
+    #[tauri::command]
+    pub fn workspace_save_global_variables(
+        state: State<'_, Arc<AppState>>,
+        workspace_id: String,
+        session_id: String,
+        variables: Vec<apogee_core::vars::EnvironmentVariable>,
+    ) -> Result<Vec<apogee_core::vars::EnvironmentVariable>, String> {
+        let (workspace_id, session_id) = parse_session(&workspace_id, &session_id)?;
+        state
+            .with_workspace_mutation(workspace_id, session_id, |repository| {
+                repository.save_global_variables(variables)
             })
             .map_err(|error| error.to_string())
     }

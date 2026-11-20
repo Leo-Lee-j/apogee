@@ -30,6 +30,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const descriptor = shallowRef<WorkspaceDescriptor | null>(null)
   const sessionId = ref<string | null>(null)
   const environments = shallowRef<Environment[]>([])
+  const globalVariables = shallowRef<EnvironmentVariable[]>([])
+  const globalVariablesDirty = ref(false)
   const activeEnvironmentId = ref<string | null>(null)
   /** 尚未落盘的环境 id；发送前统一 flush，避免 Rust 从磁盘读到旧值。 */
   const dirtyEnvironmentIds = reactive(new Set<string>())
@@ -52,6 +54,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   let loadingPromise: Promise<void> | null = null
   let workspaceGeneration = 0
   const environmentSaves = new Map<string, Promise<boolean>>()
+  let globalSave: Promise<boolean> | null = null
   const pendingStateSaves = new Set<Promise<boolean>>()
   let stateSaveQueue = Promise.resolve(true)
 
@@ -77,6 +80,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         ? localEnvironments.get(environment.id) ?? environment
         : environment,
     )
+    if (!globalVariablesDirty.value) globalVariables.value = snapshot.globalVariables ?? []
     for (const id of dirtyEnvironmentIds) {
       if (!environments.value.some((environment) => environment.id === id)) dirtyEnvironmentIds.delete(id)
     }
@@ -90,11 +94,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   function acceptOpen(result: WorkspaceOpenResult) {
     workspaceGeneration += 1
     environmentSaves.clear()
+    globalSave = null
     pendingStateSaves.clear()
     stateSaveQueue = Promise.resolve(true)
     loadingPromise = null
     nodes.value = undefined
     environments.value = []
+    globalVariables.value = []
+    globalVariablesDirty.value = false
     activeEnvironmentId.value = null
     dirtyEnvironmentIds.clear()
     ready.value = false
@@ -275,6 +282,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   function reset() {
     workspaceGeneration += 1
     environmentSaves.clear()
+    globalSave = null
     pendingStateSaves.clear()
     stateSaveQueue = Promise.resolve(true)
     invalidateDebugCaseCache()
@@ -284,6 +292,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     descriptor.value = null
     sessionId.value = null
     environments.value = []
+    globalVariables.value = []
+    globalVariablesDirty.value = false
     activeEnvironmentId.value = null
     dirtyEnvironmentIds.clear()
     ready.value = false
@@ -375,7 +385,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     updateEnvironment(environmentId, {
       variables: [
         ...environment.variables,
-        { key: '', value: '', enabled: true },
+        { id: crypto.randomUUID(), key: '', value: '', enabled: true, secret: false, hasValue: false },
       ],
     })
   }
@@ -386,6 +396,51 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     updateEnvironment(environmentId, {
       variables: environment.variables.filter((_, variableIndex) => variableIndex !== index),
     })
+  }
+
+  function updateGlobalVariable(index: number, delta: Partial<EnvironmentVariable>) {
+    globalVariables.value = globalVariables.value.map((item, itemIndex) =>
+      itemIndex === index ? { ...item, ...delta } : item,
+    )
+    globalVariablesDirty.value = true
+  }
+
+  function addGlobalVariable() {
+    globalVariables.value = [...globalVariables.value, {
+      id: crypto.randomUUID(), key: '', value: '', enabled: true, secret: false, hasValue: false,
+    }]
+    globalVariablesDirty.value = true
+  }
+
+  function removeGlobalVariable(index: number) {
+    globalVariables.value = globalVariables.value.filter((_item, itemIndex) => itemIndex !== index)
+    globalVariablesDirty.value = true
+  }
+
+  async function saveGlobalVariables(): Promise<boolean> {
+    if (!globalVariablesDirty.value || !inTauri) return true
+    if (globalSave) return globalSave
+    const isCurrent = sessionGuard()
+    const task = (async () => {
+      try {
+        while (isCurrent() && globalVariablesDirty.value) {
+          const snapshot = globalVariables.value
+          const saved = await ipc.workspaceSaveGlobalVariables(snapshot)
+          if (!isCurrent()) return false
+          if (globalVariables.value === snapshot) {
+            globalVariables.value = saved
+            globalVariablesDirty.value = false
+          }
+        }
+        return isCurrent()
+      } catch (error) {
+        if (isCurrent()) report(error)
+        return false
+      }
+    })()
+    globalSave = task
+    void task.then(() => { if (globalSave === task) globalSave = null })
+    return task
   }
 
   async function saveEnvironment(environmentId = activeEnvironmentId.value): Promise<boolean> {
@@ -424,7 +479,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   async function saveDirtyEnvironments(): Promise<boolean> {
     if (!inTauri) return true
     const isCurrent = sessionGuard()
-    while (isCurrent() && dirtyEnvironmentIds.size > 0) {
+    while (isCurrent() && (globalVariablesDirty.value || dirtyEnvironmentIds.size > 0)) {
+      if (globalVariablesDirty.value && !(await saveGlobalVariables())) return false
       for (const id of [...dirtyEnvironmentIds]) {
         if (!isCurrent() || !(await saveEnvironment(id))) return false
       }
@@ -447,15 +503,17 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   async function duplicateEnvironment(environmentId = activeEnvironmentId.value): Promise<Environment | null> {
-    const source = environments.value.find((environment) => environment.id === environmentId)
-    if (!source) return null
-    const created = await createEnvironment(`${source.name} 副本`)
-    if (!created) return null
-    updateEnvironment(created.id, {
-      host: source.host,
-      variables: source.variables.map((variable) => ({ ...variable })),
-    })
-    return (await saveEnvironment(created.id)) ? created : null
+    if (!environmentId || !inTauri) return null
+    try {
+      const environment = await ipc.workspaceDuplicateEnvironment(environmentId)
+      environments.value = [...environments.value, environment]
+      activeEnvironmentId.value = environment.id
+      await persistWorkspaceState()
+      return environment
+    } catch (error) {
+      report(error)
+      return null
+    }
   }
 
   async function deleteEnvironment(environmentId = activeEnvironmentId.value): Promise<boolean> {
@@ -667,6 +725,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     descriptor,
     sessionId,
     environments,
+    globalVariables,
+    globalVariablesDirty,
     activeEnvironmentId,
     activeEnvironment,
     activeEnvironmentDirty,
@@ -691,6 +751,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     updateEnvironmentVariable,
     addEnvironmentVariable,
     removeEnvironmentVariable,
+    updateGlobalVariable,
+    addGlobalVariable,
+    removeGlobalVariable,
+    saveGlobalVariables,
     saveEnvironment,
     saveDirtyEnvironments,
     createEnvironment,

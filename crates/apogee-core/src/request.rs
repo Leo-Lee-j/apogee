@@ -81,6 +81,9 @@ pub struct ExecContext {
     pub tab_id: Option<String>,
     #[serde(default)]
     pub environment_id: Option<String>,
+    /// Per-send values (for collection runners/scripts), highest variable precedence.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub runtime_variables: std::collections::BTreeMap<String, String>,
     /// 已保存请求的工作区节点 id。存在时发送前解析其容器继承链。
     #[serde(default)]
     pub request_node_id: Option<String>,

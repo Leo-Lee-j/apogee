@@ -47,6 +47,7 @@ tauri-plugin-dialog = "2.4.2"
 # 读进程内存，供 PRD §5.2 的「性能自检」面板与性能基准使用。
 # 只开 ProcessStatus + Threading 两个 feature，避免拖进整个 Windows API 绑定。
 [target.'cfg(windows)'.dependencies]
+keyring = { version = "=3.6.3", default-features = false, features = ["windows-native"] }
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_UI_Shell",
@@ -58,6 +59,12 @@ windows-sys = { version = "0.61", features = [
     "Win32_System_IO",
     "Win32_Storage_FileSystem",
 ] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "=3.6.3", default-features = false, features = ["apple-native"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "=3.6.3", default-features = false, features = ["linux-native-sync-persistent", "crypto-rust"] }
 
 [features]
 # tauri 的自定义协议在生产构建下需要这个 feature

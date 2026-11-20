@@ -1,5 +1,5 @@
 //! Shared cancellable preparation boundary for desktop and future runner/CLI adapters.
-use super::{execute_with_session, HttpSession, Outcome, Progress};
+use super::{HttpSession, Outcome, Progress};
 use crate::{error::AppError, request::RequestSpec, response::Spool, vars::Environment};
 use std::future::Future;
 use tokio::sync::oneshot;
@@ -9,6 +9,7 @@ use uuid::Uuid;
 pub struct PreparedRequest {
     pub spec: RequestSpec,
     pub environment: Option<Environment>,
+    pub variables: crate::vars::VariableScopes,
 }
 
 /// One cancellation receiver spans preparation and HTTP. A failed preparation never builds or
@@ -43,10 +44,13 @@ pub async fn execute_prepared_with_session(
     if !matches!(cancel.try_recv(), Err(oneshot::error::TryRecvError::Empty)) {
         return Outcome::Cancelled;
     }
-    execute_with_session(
+    super::execute_with_variable_scopes(
         id,
         &prepared.spec,
-        prepared.environment.as_ref(),
+        crate::vars::VariableContext {
+            environment: prepared.environment.as_ref(),
+            scopes: &prepared.variables,
+        },
         spool,
         cancel,
         on_progress,
@@ -117,6 +121,7 @@ mod tests {
                     )
                     .unwrap(),
                     environment: None,
+                    variables: crate::vars::VariableScopes::default(),
                 }))
             },
             &spool,

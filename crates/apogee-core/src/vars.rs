@@ -8,7 +8,10 @@ use crate::error::{AppError, ErrorKind, Hint};
 use crate::model::KeyValue;
 use crate::request::{AuthConfig, Body, RequestSpec};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::{
+    cell::{Cell, RefCell},
+    collections::HashMap,
+};
 use uuid::Uuid;
 
 /// 一个工作区环境。值保存在工作区的 environments/<id>.yaml 中。
@@ -27,11 +30,27 @@ pub struct Environment {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EnvironmentVariable {
+    #[serde(default = "new_variable_id")]
+    pub id: Uuid,
     pub key: String,
     #[serde(default)]
     pub value: String,
     #[serde(default = "default_true")]
     pub enabled: bool,
+    #[serde(default)]
+    pub secret: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub has_value: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub clear_secret: bool,
+}
+
+fn new_variable_id() -> Uuid {
+    Uuid::new_v4()
+}
+
+fn is_false(value: &bool) -> bool {
+    !value
 }
 
 fn default_true() -> bool {
@@ -39,6 +58,31 @@ fn default_true() -> bool {
 }
 
 const MAX_RESOLUTION_DEPTH: usize = 16;
+const MAX_SCOPE_VARIABLES: usize = 256;
+const MAX_SCOPE_BYTES: usize = 65_536;
+const MAX_VARIABLE_BYTES: usize = 1_048_576;
+const MAX_EXPANSION_BYTES: usize = 8_388_608;
+const MAX_RESOLUTIONS: usize = 10_000;
+
+fn check_scope_limits(count: usize, size: usize) -> Result<(), AppError> {
+    if count > MAX_SCOPE_VARIABLES || size > MAX_SCOPE_BYTES {
+        return Err(AppError::new(
+            ErrorKind::Var,
+            "变量作用域超过 256 条或 65536 字节限制",
+        ));
+    }
+    Ok(())
+}
+
+fn check_variable_scope(variables: &[EnvironmentVariable]) -> Result<(), AppError> {
+    check_scope_limits(
+        variables.len(),
+        variables.iter().fold(0usize, |size, item| {
+            size.saturating_add(item.key.len())
+                .saturating_add(item.value.len())
+        }),
+    )
+}
 
 /// 用一个环境解析请求模板中的全部 `{{name}}` 占位符。
 ///
@@ -49,7 +93,40 @@ pub fn resolve_request(
     spec: &RequestSpec,
     environment: Option<&Environment>,
 ) -> Result<RequestSpec, AppError> {
-    let resolver = Resolver::from_environment(environment)?;
+    Ok(resolve_request_with_metadata(spec, environment)?.spec)
+}
+
+/// Resolves the request and retains secret-variable provenance for public request snapshots.
+pub fn resolve_request_with_metadata(
+    spec: &RequestSpec,
+    environment: Option<&Environment>,
+) -> Result<ResolvedRequest, AppError> {
+    resolve_request_with_scopes(
+        spec,
+        environment,
+        &[],
+        &[],
+        &[],
+        &std::collections::BTreeMap::new(),
+    )
+}
+
+/// Resolve with layered workspace and per-send variable scopes. Nearest scopes override
+/// outer values while duplicates inside one scope are rejected.
+pub fn resolve_request_with_scopes(
+    spec: &RequestSpec,
+    environment: Option<&Environment>,
+    global: &[EnvironmentVariable],
+    collection: &[EnvironmentVariable],
+    folder: &[EnvironmentVariable],
+    runtime: &std::collections::BTreeMap<String, String>,
+) -> Result<ResolvedRequest, AppError> {
+    let mut resolver = Resolver::from_environment(None)?;
+    resolver.add_scope(global, "全局")?;
+    resolver.add_scope(collection, "集合")?;
+    resolver.add_scope(folder, "文件夹")?;
+    resolver.add_environment(environment)?;
+    resolver.add_runtime(runtime)?;
     let mut resolved = spec.clone();
 
     // Legacy {{name}} remains Path syntax. Explicit {{env:name}} resolves URL variables
@@ -64,7 +141,30 @@ pub fn resolve_request(
     resolved.body = resolver.resolve_body(&spec.body)?;
     resolved.auth = resolver.resolve_auth(&spec.auth)?;
 
-    Ok(resolved)
+    Ok(ResolvedRequest {
+        spec: resolved,
+        sensitive_values: resolver.sensitive_values.into_inner(),
+    })
+}
+
+#[derive(Debug, Clone)]
+pub struct ResolvedRequest {
+    pub spec: RequestSpec,
+    pub sensitive_values: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct VariableScopes {
+    pub global: Vec<EnvironmentVariable>,
+    pub collection: Vec<EnvironmentVariable>,
+    pub folder: Vec<EnvironmentVariable>,
+    pub runtime: std::collections::BTreeMap<String, String>,
+}
+
+/// Borrowed variable snapshot for one execution; never serialized or logged.
+pub struct VariableContext<'a> {
+    pub environment: Option<&'a Environment>,
+    pub scopes: &'a VariableScopes,
 }
 
 /// 对单段文本做变量解析，供未来的预览命令复用。
@@ -72,11 +172,91 @@ pub fn resolve_text(text: &str, environment: Option<&Environment>) -> Result<Str
     Resolver::from_environment(environment)?.resolve_text(text)
 }
 
+struct VariableValue {
+    value: String,
+    secret: bool,
+}
+
 struct Resolver {
-    values: HashMap<String, String>,
+    values: HashMap<String, VariableValue>,
+    sensitive_values: RefCell<Vec<String>>,
+    resolutions: Cell<usize>,
+    expansion_bytes: Cell<usize>,
 }
 
 impl Resolver {
+    fn add_scope(
+        &mut self,
+        variables: &[EnvironmentVariable],
+        scope: &str,
+    ) -> Result<(), AppError> {
+        check_variable_scope(variables)?;
+        let mut names = std::collections::HashSet::new();
+        for variable in variables.iter().filter(|item| item.enabled) {
+            let key = variable.key.trim();
+            if key.is_empty() {
+                continue;
+            }
+            if key.eq_ignore_ascii_case("host") {
+                return Err(AppError::new(ErrorKind::Var, "变量名 host 为保留名称")
+                    .detail(format!("{scope}作用域不能声明 host。"))
+                    .hint(Hint::new("请使用环境 Host 字段")));
+            }
+            if !names.insert(key.to_string()) {
+                return Err(AppError::new(
+                    ErrorKind::Var,
+                    format!("{scope}变量名重复：{key}"),
+                ));
+            }
+            self.values.insert(
+                key.to_string(),
+                VariableValue {
+                    value: variable.value.clone(),
+                    secret: variable.secret,
+                },
+            );
+        }
+        Ok(())
+    }
+
+    fn add_runtime(
+        &mut self,
+        variables: &std::collections::BTreeMap<String, String>,
+    ) -> Result<(), AppError> {
+        check_scope_limits(
+            variables.len(),
+            variables.iter().fold(0usize, |size, (key, value)| {
+                size.saturating_add(key.len()).saturating_add(value.len())
+            }),
+        )?;
+        let mut names = std::collections::HashSet::new();
+        for (key, value) in variables {
+            let key = key.trim();
+            if key.is_empty() {
+                continue;
+            }
+            if key.eq_ignore_ascii_case("host") {
+                return Err(AppError::new(ErrorKind::Var, "变量名 host 为保留名称")
+                    .detail("运行时作用域不能声明 host。")
+                    .hint(Hint::new("请使用环境 Host 字段")));
+            }
+            if !names.insert(key.to_string()) {
+                return Err(AppError::new(
+                    ErrorKind::Var,
+                    format!("运行时变量名重复：{key}"),
+                ));
+            }
+            self.values.insert(
+                key.to_string(),
+                VariableValue {
+                    value: value.clone(),
+                    secret: false,
+                },
+            );
+        }
+        Ok(())
+    }
+
     fn resolve_url(&self, url: &str) -> Result<String, AppError> {
         let mut result = String::new();
         let mut remaining = url;
@@ -96,30 +276,63 @@ impl Resolver {
     }
 
     fn from_environment(environment: Option<&Environment>) -> Result<Self, AppError> {
-        let mut values = HashMap::new();
+        let mut resolver = Self {
+            values: HashMap::new(),
+            sensitive_values: RefCell::new(Vec::new()),
+            resolutions: Cell::new(0),
+            expansion_bytes: Cell::new(0),
+        };
+        resolver.add_environment(environment)?;
+        Ok(resolver)
+    }
+
+    fn add_environment(&mut self, environment: Option<&Environment>) -> Result<(), AppError> {
         if let Some(environment) = environment {
+            check_variable_scope(&environment.variables)?;
+            if environment
+                .variables
+                .iter()
+                .any(|item| item.enabled && item.key.trim().eq_ignore_ascii_case("host"))
+            {
+                return Err(
+                    AppError::new(ErrorKind::Var, "变量名 host 为保留名称").hint(Hint::new(
+                        "请重命名普通变量；host 由当前环境的 Host 字段提供",
+                    )),
+                );
+            }
+            let mut names = std::collections::HashSet::new();
             for variable in environment.variables.iter().filter(|item| item.enabled) {
                 let key = variable.key.trim();
                 if key.is_empty() {
                     continue;
                 }
-                if values
-                    .insert(key.to_string(), variable.value.clone())
-                    .is_some()
-                {
+                if !names.insert(key.to_string()) {
                     return Err(
                         AppError::new(ErrorKind::Var, format!("环境变量名重复：{key}"))
                             .detail(format!("环境「{}」中有多个同名变量。", environment.name))
                             .hint(Hint::new("删除重复变量，或为变量改名后再发送")),
                     );
                 }
+                self.values.insert(
+                    key.to_string(),
+                    VariableValue {
+                        value: variable.value.clone(),
+                        secret: variable.secret,
+                    },
+                );
             }
             let host = environment.host.trim().trim_end_matches('/');
             if !host.is_empty() {
-                values.insert("host".to_string(), host.to_string());
+                self.values.insert(
+                    "host".to_string(),
+                    VariableValue {
+                        value: host.to_string(),
+                        secret: false,
+                    },
+                );
             }
         }
-        Ok(Self { values })
+        Ok(())
     }
 
     fn resolve_text(&self, text: &str) -> Result<String, AppError> {
@@ -170,6 +383,11 @@ impl Resolver {
         stack: &mut Vec<String>,
         depth: usize,
     ) -> Result<String, AppError> {
+        let resolutions = self.resolutions.get().saturating_add(1);
+        if resolutions > MAX_RESOLUTIONS {
+            return Err(AppError::new(ErrorKind::Var, "变量展开次数超过限制"));
+        }
+        self.resolutions.set(resolutions);
         if let Some(start) = stack.iter().position(|item| item == name) {
             let mut chain = stack[start..].to_vec();
             chain.push(name.to_string());
@@ -187,16 +405,37 @@ impl Resolver {
             .hint(Hint::new("减少环境变量之间的层层引用")));
         }
 
-        let raw = self.values.get(name).cloned().ok_or_else(|| {
+        let variable = self.values.get(name).ok_or_else(|| {
             AppError::new(ErrorKind::Var, format!("变量未定义：{name}"))
                 .detail("请求中引用了当前环境不存在或已禁用的变量。")
                 .hint(Hint::new("选择包含该变量的环境，或在环境变量面板中补充值"))
         })?;
 
+        let raw = variable.value.clone();
+        let secret = variable.secret;
+        if secret && raw.is_empty() {
+            return Err(
+                AppError::new(ErrorKind::Var, format!("密钥变量尚未设置：{name}"))
+                    .hint(Hint::new("请重新设置该密钥变量后再发送")),
+            );
+        }
         stack.push(name.to_string());
         let result = self.resolve_text_inner(&raw, stack, depth + 1);
         stack.pop();
-        result
+        let result = result?;
+        let expansion_bytes = self.expansion_bytes.get().saturating_add(result.len());
+        if result.len() > MAX_VARIABLE_BYTES || expansion_bytes > MAX_EXPANSION_BYTES {
+            return Err(AppError::new(ErrorKind::Var, "变量展开大小超过限制")
+                .hint(Hint::new("减少变量的重复引用或将大段内容直接放入请求体")));
+        }
+        self.expansion_bytes.set(expansion_bytes);
+        if secret {
+            let mut sensitive_values = self.sensitive_values.borrow_mut();
+            if !result.is_empty() && !sensitive_values.contains(&result) {
+                sensitive_values.push(result.clone());
+            }
+        }
+        Ok(result)
     }
 
     fn resolve_rows(&self, rows: &[KeyValue]) -> Result<Vec<KeyValue>, AppError> {
@@ -209,6 +448,14 @@ impl Resolver {
                 let mut resolved = row.clone();
                 resolved.key = self.resolve_text(&row.key)?;
                 resolved.value = self.resolve_text(&row.value)?;
+                if resolved.kind == crate::model::ValueKind::Text
+                    && self.sensitive_values.borrow().iter().any(|value| {
+                        !value.is_empty()
+                            && (resolved.value.contains(value) || resolved.key.contains(value))
+                    })
+                {
+                    resolved.kind = crate::model::ValueKind::Secret;
+                }
                 Ok(resolved)
             })
             .collect()
@@ -354,9 +601,13 @@ mod tests {
             variables: variables
                 .iter()
                 .map(|(key, value)| EnvironmentVariable {
+                    id: Uuid::new_v4(),
                     key: (*key).into(),
                     value: (*value).into(),
                     enabled: true,
+                    secret: false,
+                    has_value: false,
+                    clear_secret: false,
                 })
                 .collect(),
         }
@@ -407,14 +658,280 @@ mod tests {
 
     #[test]
     fn resolves_nested_variables() {
-        let env = environment(&[
-            ("host", "api.example.test"),
-            ("base", "https://{{host}}/v1"),
-        ]);
+        let mut env = environment(&[("base", "https://{{host}}/v1")]);
+        env.host = "api.example.test".into();
         assert_eq!(
             resolve_text("{{base}}/users", Some(&env)).unwrap(),
             "https://api.example.test/v1/users"
         );
+    }
+
+    #[test]
+    fn runtime_scope_rejects_excessive_count_and_bytes() {
+        let mut runtime = std::collections::BTreeMap::new();
+        for i in 0..257 {
+            runtime.insert(format!("v{i}"), String::new());
+        }
+        let mut resolver = Resolver::from_environment(None).unwrap();
+        assert!(resolver.add_runtime(&runtime).is_err());
+        runtime.clear();
+        runtime.insert("large".into(), "x".repeat(MAX_SCOPE_BYTES));
+        assert!(resolver.add_runtime(&runtime).is_err());
+    }
+
+    #[test]
+    fn secret_file_path_preserves_multipart_file_semantics() {
+        let mut env = environment(&[("file", "synthetic-upload.txt")]);
+        env.variables[0].secret = true;
+        let resolver = Resolver::from_environment(Some(&env)).unwrap();
+        let body = resolver
+            .resolve_body(&Body::FormData {
+                rows: vec![KeyValue {
+                    key: "upload".into(),
+                    value: "{{file}}".into(),
+                    enabled: true,
+                    description: None,
+                    kind: crate::model::ValueKind::File,
+                }],
+            })
+            .unwrap();
+        let Body::FormData { rows } = body else {
+            panic!("multipart body changed type")
+        };
+        assert_eq!(rows[0].kind, crate::model::ValueKind::File);
+        assert_eq!(rows[0].value, "synthetic-upload.txt");
+    }
+
+    #[test]
+    fn recursive_expansion_is_bounded_for_large_and_empty_values() {
+        let mut large = environment(&[("leaf", "")]);
+        large.variables[0].value = "x".repeat(4096);
+        let mut first = large.variables[0].clone();
+        first.key = "first".into();
+        first.value = "{{leaf}}".repeat(32);
+        let mut second = first.clone();
+        second.key = "second".into();
+        second.value = "{{first}}".repeat(32);
+        large.variables.extend([first, second]);
+        assert!(resolve_text("{{second}}", Some(&large))
+            .unwrap_err()
+            .message
+            .contains("大小超过限制"));
+
+        let mut empty = environment(&[("leaf", "")]);
+        for i in 0..7 {
+            let mut variable = empty.variables[0].clone();
+            variable.key = format!("v{i}");
+            let prior = if i == 0 {
+                "leaf".into()
+            } else {
+                format!("v{}", i - 1)
+            };
+            variable.value = format!("{{{{{prior}}}}}").repeat(16);
+            empty.variables.push(variable);
+        }
+        assert!(resolve_text("{{v6}}", Some(&empty))
+            .unwrap_err()
+            .message
+            .contains("次数超过限制"));
+    }
+
+    #[test]
+    fn unresolved_enabled_secret_fails_but_disabled_secret_does_not_block() {
+        let mut env = environment(&[("token", "unused")]);
+        env.variables[0].secret = true;
+        env.variables[0].value.clear();
+        let spec = RequestSpec {
+            method: "GET".into(),
+            url: "https://example.test/{{env:token}}".into(),
+            params: vec![],
+            path_params: vec![],
+            headers: vec![],
+            body: Body::None,
+            auth: AuthConfig::None,
+            settings: Default::default(),
+        };
+        assert!(resolve_request(&spec, Some(&env)).is_err());
+        env.variables[0].enabled = false;
+        assert!(resolve_request(&spec, Some(&env)).is_err()); // the referenced variable remains undefined
+        let unused = RequestSpec {
+            url: "https://example.test/".into(),
+            ..spec
+        };
+        assert!(resolve_request(&unused, Some(&env)).is_ok());
+    }
+
+    #[test]
+    fn nearest_scope_overrides_and_secrets_keep_provenance() {
+        let mut environment = environment(&[("x", "environment"), ("token", "synthetic-secret")]);
+        environment.variables[1].secret = true;
+        let variable = |key: &str, value: &str| EnvironmentVariable {
+            id: Uuid::new_v4(),
+            key: key.into(),
+            value: value.into(),
+            enabled: true,
+            secret: false,
+            has_value: false,
+            clear_secret: false,
+        };
+        let mut spec = RequestSpec {
+            method: "GET".into(),
+            url: "https://example.test/{{env:token}}".into(),
+            params: Vec::new(),
+            path_params: Vec::new(),
+            headers: Vec::new(),
+            body: Body::None,
+            auth: AuthConfig::None,
+            settings: Default::default(),
+        };
+        spec.headers.push(KeyValue {
+            key: "X-Custom".into(),
+            value: "prefix-{{token}}".into(),
+            enabled: true,
+            description: None,
+            kind: crate::model::ValueKind::Text,
+        });
+        let mut runtime = std::collections::BTreeMap::new();
+        runtime.insert("x".into(), "runtime".into());
+        let resolved = resolve_request_with_scopes(
+            &spec,
+            Some(&environment),
+            &[variable("x", "global")],
+            &[variable("x", "collection")],
+            &[variable("x", "folder")],
+            &runtime,
+        )
+        .unwrap();
+        assert_eq!(
+            resolve_text_with_scopes(
+                "{{x}}",
+                &[variable("x", "global")],
+                &[variable("x", "collection")],
+                &[variable("x", "folder")],
+                Some(&environment),
+                &runtime
+            )
+            .unwrap(),
+            "runtime"
+        );
+        assert!(resolved
+            .sensitive_values
+            .contains(&"synthetic-secret".to_string()));
+        assert_eq!(
+            resolved.spec.headers[0].kind,
+            crate::model::ValueKind::Secret
+        );
+    }
+
+    fn resolve_text_with_scopes(
+        text: &str,
+        global: &[EnvironmentVariable],
+        collection: &[EnvironmentVariable],
+        folder: &[EnvironmentVariable],
+        environment: Option<&Environment>,
+        runtime: &std::collections::BTreeMap<String, String>,
+    ) -> Result<String, AppError> {
+        let spec = RequestSpec {
+            method: "GET".into(),
+            url: "https://example.test/".into(),
+            params: Vec::new(),
+            path_params: Vec::new(),
+            headers: Vec::new(),
+            body: Body::Text {
+                content: text.into(),
+                content_type: "text/plain".into(),
+            },
+            auth: AuthConfig::None,
+            settings: Default::default(),
+        };
+        let resolved =
+            resolve_request_with_scopes(&spec, environment, global, collection, folder, runtime)?;
+        match resolved.spec.body {
+            Body::Text { content, .. } => Ok(content),
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn rejects_host_name_in_every_persisted_scope() {
+        let reserved = EnvironmentVariable {
+            id: Uuid::new_v4(),
+            key: "Host".into(),
+            value: "https://other.test".into(),
+            enabled: true,
+            secret: false,
+            has_value: false,
+            clear_secret: false,
+        };
+        let spec = RequestSpec {
+            method: "GET".into(),
+            url: "/".into(),
+            params: Vec::new(),
+            path_params: Vec::new(),
+            headers: Vec::new(),
+            body: Body::None,
+            auth: AuthConfig::None,
+            settings: Default::default(),
+        };
+        assert!(resolve_request_with_scopes(
+            &spec,
+            None,
+            &[reserved],
+            &[],
+            &[],
+            &Default::default()
+        )
+        .is_err());
+
+        let mut runtime = std::collections::BTreeMap::new();
+        runtime.insert("HOST".into(), "https://runtime.test".into());
+        assert!(resolve_request_with_scopes(&spec, None, &[], &[], &[], &runtime).is_err());
+    }
+
+    #[test]
+    fn disabled_inner_scope_does_not_shadow_outer_value() {
+        let mut disabled = EnvironmentVariable {
+            id: Uuid::new_v4(),
+            key: "x".into(),
+            value: "inner".into(),
+            enabled: false,
+            secret: false,
+            has_value: false,
+            clear_secret: false,
+        };
+        let parent = EnvironmentVariable {
+            id: Uuid::new_v4(),
+            key: "x".into(),
+            value: "parent".into(),
+            enabled: true,
+            secret: false,
+            has_value: false,
+            clear_secret: false,
+        };
+        assert_eq!(
+            resolve_text_with_scopes(
+                "{{x}}",
+                &[parent],
+                &[],
+                &[disabled.clone()],
+                None,
+                &Default::default()
+            )
+            .unwrap(),
+            "parent",
+        );
+
+        disabled.enabled = true;
+        let sibling_duplicate = disabled.clone();
+        assert!(resolve_text_with_scopes(
+            "{{x}}",
+            &[],
+            &[],
+            &[disabled, sibling_duplicate],
+            None,
+            &Default::default(),
+        )
+        .is_err());
     }
 
     #[test]
@@ -437,14 +954,22 @@ mod tests {
             host: String::new(),
             variables: vec![
                 EnvironmentVariable {
+                    id: Uuid::new_v4(),
                     key: "x".into(),
                     value: "1".into(),
                     enabled: true,
+                    secret: false,
+                    has_value: false,
+                    clear_secret: false,
                 },
                 EnvironmentVariable {
+                    id: Uuid::new_v4(),
                     key: "x".into(),
                     value: "2".into(),
                     enabled: true,
+                    secret: false,
+                    has_value: false,
+                    clear_secret: false,
                 },
             ],
         };
@@ -453,7 +978,8 @@ mod tests {
 
     #[test]
     fn resolves_all_request_surfaces_but_ignores_disabled_rows() {
-        let env = environment(&[("host", "https://example.test"), ("token", "secret")]);
+        let mut env = environment(&[("token", "secret")]);
+        env.host = "https://example.test".into();
         let spec = RequestSpec {
             method: "POST".into(),
             url: "{{host}}/{{id}}".into(),
@@ -488,7 +1014,7 @@ mod tests {
         };
 
         let resolved = resolve_request(&spec, Some(&env)).unwrap();
-        assert_eq!(resolved.url, "{{host}}/{{id}}");
+        assert_eq!(resolved.url, "https://example.test/{{host}}/{{id}}");
         assert_eq!(resolved.params[0].value, "secret");
         match resolved.body {
             Body::Json { content } => assert_eq!(content, "{\"token\":\"secret\"}"),

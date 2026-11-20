@@ -3,6 +3,8 @@ import { computed, nextTick, ref, useAttrs, watch } from 'vue'
 import { NInput, NPopover, type InputInst } from 'naive-ui'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { resolveVariablePreview } from '@/features/variablePreview'
+import { requestVariablePreview } from '@/features/requestVariablePreview'
+import { useTabsStore } from '@/stores/tabs'
 
 defineOptions({ inheritAttrs: false })
 
@@ -24,6 +26,7 @@ const emit = defineEmits<{
 
 const attrs = useAttrs()
 const workspace = useWorkspaceStore()
+const tabs = useTabsStore()
 const input = ref<InputInst | null>(null)
 const open = ref(false)
 const activeIndex = ref(0)
@@ -35,12 +38,11 @@ const currentValue = ref(props.value)
 const variables = computed(() => {
   if (!props.variables) return []
   const environment = workspace.activeEnvironment
-  if (!environment) return []
 
-  const items = environment.variables
-    .filter((variable) => variable.enabled && variable.key.trim())
-    .map((variable) => ({ key: variable.key.trim(), value: variable.value }))
-  if (environment.host.trim()) items.unshift({ key: 'host', value: environment.host.trim() })
+  const items = requestVariablePreview(
+    workspace.globalVariables, workspace.nodes ?? [], environment ?? null,
+    tabs.active?.nodeId ?? tabs.active?.sourceRequestId, tabs.active?.newRequestParentId,
+  ).map((variable) => ({ key: variable.key.trim(), value: variable.value, secret: variable.secret }))
   return items.map((variable) => ({ ...variable, preview: resolveVariablePreview(variable.key, items) }))
 })
 
@@ -210,8 +212,8 @@ defineExpose({
         @mousedown.prevent="select(variable.key)"
       >
         <span class="variable-name">{{ variable.key }}</span>
-        <span class="variable-value" :class="{ invalid: variable.preview.error }" :title="variable.preview.error || variable.preview.value">
-          {{ variable.preview.error || variable.preview.value || '空值' }}
+        <span class="variable-value" :class="{ invalid: variable.preview.error }" :title="variable.preview.error || (variable.secret ? '密钥值已隐藏' : variable.preview.value)">
+          {{ variable.secret ? '密钥值已隐藏' : variable.preview.error || variable.preview.value || '空值' }}
         </span>
       </button>
     </div>

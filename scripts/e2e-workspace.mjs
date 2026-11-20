@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { round2 } from './e2e-round2.mjs'
+import { round3 } from './e2e-round3.mjs'
 /**
  * Desktop smoke test for the workspace lifecycle.
  *
@@ -371,6 +372,7 @@ try {
   await page.getByText('未保存修改', { exact: true }).waitFor({ state: 'hidden' })
 
   await round2(page, root, 'http://127.0.0.1:' + address.port, echoedRequests)
+  await round3(page, root, 'http://127.0.0.1:' + address.port, echoedRequests)
   console.log('E2E PASS: workspace lifecycle and draft recovery; native close cancellation; container editor retention; atomic copy via IPC; virtual JSON tree and nested paging; Postman body transmission and export/reimport; cancellation; immediate Query/Header/form edits; blank rows; bulk metadata and duplicate/disabled params; form conversion and multipart upload; Path constraints; keyboard and drag ordering')
 } catch (error) {
   console.error(`E2E FAIL: ${error instanceof Error ? error.stack ?? error.message : String(error)}`)

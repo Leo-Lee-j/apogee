@@ -1,16 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import type { Environment, WorkspaceSnapshot } from '@/ipc'
+import type { Environment, EnvironmentVariable, WorkspaceSnapshot } from '@/ipc'
 
-const { workspaceSaveEnvironment, workspaceSaveState, workspaceLoad } = vi.hoisted(() => ({
+const { workspaceSaveEnvironment, workspaceSaveGlobalVariables, workspaceSaveState, workspaceLoad } = vi.hoisted(() => ({
   workspaceSaveEnvironment: vi.fn(),
+  workspaceSaveGlobalVariables: vi.fn(),
   workspaceSaveState: vi.fn(),
   workspaceLoad: vi.fn(),
 }))
 
 vi.mock('@/ipc', () => ({
   inTauri: true,
-  ipc: { workspaceSaveEnvironment, workspaceSaveState, workspaceLoad },
+  ipc: { workspaceSaveEnvironment, workspaceSaveGlobalVariables, workspaceSaveState, workspaceLoad },
   normalizeError: (error: unknown) => ({
     kind: 'io',
     message: error instanceof Error ? error.message : String(error),
@@ -44,9 +45,51 @@ describe('workspace persistence', () => {
     vi.resetAllMocks()
     vi.spyOn(console, 'error').mockImplementation(() => {})
     workspaceSaveEnvironment.mockImplementation(async (environment: Environment) => environment)
+    workspaceSaveGlobalVariables.mockImplementation(async (variables: EnvironmentVariable[]) => variables)
   })
 
   afterEach(() => vi.restoreAllMocks())
+
+  it('serializes global saves and flushes edits made while saving', async () => {
+    const first = deferred<EnvironmentVariable[]>()
+    const second = deferred<EnvironmentVariable[]>()
+    workspaceSaveGlobalVariables.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
+    const workspace = prepareWorkspace()
+    workspace.globalVariables = [{ id: 'global', key: 'api', value: 'before', enabled: true, secret: false }]
+    workspace.updateGlobalVariable(0, { value: 'first' })
+    const saving = workspace.saveGlobalVariables()
+    const sending = workspace.saveDirtyEnvironments()
+    expect(workspaceSaveGlobalVariables).toHaveBeenCalledTimes(1)
+    workspace.updateGlobalVariable(0, { value: 'latest' })
+    first.resolve(workspaceSaveGlobalVariables.mock.calls[0]![0])
+    await vi.waitFor(() => expect(workspaceSaveGlobalVariables).toHaveBeenCalledTimes(2))
+    expect(workspace.globalVariables[0]!.value).toBe('latest')
+    second.resolve(workspaceSaveGlobalVariables.mock.calls[1]![0])
+    await expect(saving).resolves.toBe(true)
+    await expect(sending).resolves.toBe(true)
+    expect(workspace.globalVariablesDirty).toBe(false)
+  })
+
+  it.each(['resolve', 'reject'] as const)('ignores a global save from a closed session that later %ss', async (outcome) => {
+    const pending = deferred<EnvironmentVariable[]>()
+    workspaceSaveGlobalVariables.mockReturnValueOnce(pending.promise)
+    const workspace = prepareWorkspace()
+    workspace.addGlobalVariable()
+    workspace.updateGlobalVariable(0, { key: 'old', value: 'old-value' })
+    const saving = workspace.saveDirtyEnvironments()
+    workspace.reset()
+    workspace.workspaceId = 'workspace-b'
+    workspace.sessionId = 'session-b'
+    workspace.addGlobalVariable()
+    workspace.updateGlobalVariable(0, { key: 'new', value: 'new-value' })
+    if (outcome === 'resolve') pending.resolve(workspaceSaveGlobalVariables.mock.calls[0]![0])
+    else pending.reject(new Error('old global save failed'))
+    await expect(saving).resolves.toBe(false)
+    expect(workspace.globalVariables[0]!.value).toBe('new-value')
+    expect(workspace.globalVariablesDirty).toBe(true)
+    expect(workspaceSaveEnvironment).not.toHaveBeenCalled()
+    expect(workspace.lastError).toBeNull()
+  })
 
   it('preserves edits made during a save and flushes them before reporting success', async () => {
     const first = deferred<Environment>()

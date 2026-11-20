@@ -456,6 +456,7 @@ mod tests {
                 name: "Folder".into(),
                 auth,
                 settings: RequestSettings::default(),
+                variables: Vec::new(),
             })
             .unwrap();
             let state = Arc::new(AppState::new().unwrap());
@@ -821,9 +822,13 @@ mod tests {
                 updated
                     .variables
                     .push(apogee_core::vars::EnvironmentVariable {
+                        id: Uuid::new_v4(),
                         key: "client".into(),
                         value: "changed".into(),
                         enabled: true,
+                        secret: false,
+                        has_value: false,
+                        clear_secret: false,
                     });
                 repo.save_environment(updated)?;
                 Ok(())
@@ -1310,18 +1315,20 @@ mod tests {
         fn prepare<'a>(
             &'a mut self,
             item: &'a apogee_core::automation::RunnerRequest,
-            _: &'a std::collections::BTreeMap<String, String>,
+            variables: &'a std::collections::BTreeMap<String, String>,
         ) -> apogee_core::automation::prepared::RunnerFuture<
             'a,
             Option<apogee_core::http::PreparedRequest>,
         > {
             Box::pin(async move {
+                let mut context = item.context.clone();
+                context.runtime_variables.extend(variables.clone());
                 crate::request_preparation::prepare(
                     self.0.state.clone(),
                     self.0.workspace,
                     self.0.session,
                     item.request.clone(),
-                    Some(item.context.clone()),
+                    Some(context),
                     &app(),
                 )
                 .await
@@ -1343,13 +1350,22 @@ mod tests {
                     .unwrap();
                 let (runtime, cancel, _) = lease.into_execution_parts();
                 let _finish = FinishRequest(self.0.state.clone(), id);
-                let result = apogee_core::http::execute(
+                let apogee_core::http::PreparedRequest {
+                    spec,
+                    environment,
+                    variables,
+                } = prepared;
+                let result = apogee_core::http::execute_with_variable_scopes(
                     id,
-                    &prepared.spec,
-                    prepared.environment.as_ref(),
+                    &spec,
+                    apogee_core::vars::VariableContext {
+                        environment: environment.as_ref(),
+                        scopes: &variables,
+                    },
                     runtime.spool(),
                     cancel,
                     |_| {},
+                    None,
                 )
                 .await;
                 let apogee_core::http::Outcome::Done(meta) = result else {
@@ -1410,6 +1426,77 @@ mod tests {
         assert_eq!(token_count.load(Ordering::SeqCst), 1);
         assert_eq!(count.load(Ordering::SeqCst), 2);
     }
+
+    #[tokio::test]
+    async fn async_collection_runtime_variables_reach_body_resolution_before_http() {
+        let f = Fixture::new("https://auth.invalid/token".into());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/business", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut wire = Vec::new();
+            let mut buffer = [0; 4096];
+            tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                loop {
+                    let n = socket.read(&mut buffer).await.unwrap();
+                    assert!(n > 0);
+                    wire.extend_from_slice(&buffer[..n]);
+                    if String::from_utf8_lossy(&wire).contains("runtime-body-value") {
+                        break;
+                    }
+                }
+            })
+            .await
+            .expect("request did not contain the resolved runtime variable");
+            let response = r#"{"ok":true}"#;
+            socket
+                .write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        response.len(),
+                        response
+                    )
+                    .as_bytes(),
+                )
+                .await
+                .unwrap();
+        });
+        let mut spec = business_spec(url);
+        spec.method = "POST".into();
+        spec.auth = AuthConfig::Bearer {
+            token: "manual-token".into(),
+        };
+        spec.body = Body::Json {
+            content: r#"{"token":"{{runtimeToken}}"}"#.into(),
+        };
+        let request = apogee_core::automation::RunnerRequest {
+            name: "runtime variable".into(),
+            request: spec,
+            context: apogee_core::request::ExecContext {
+                ephemeral: Some(true),
+                ..context(&f, 0)
+            },
+            assertions: vec![apogee_core::automation::Assertion::Status { expected: 200 }],
+            extractors: vec![],
+        };
+        let mut initial = std::collections::BTreeMap::new();
+        initial.insert("runtimeToken".into(), "runtime-body-value".into());
+        let mut executor = RunnerAdapter(&f);
+        let (_sender, cancel) = tokio::sync::oneshot::channel();
+        let summary = apogee_core::automation::prepared::run_collection_async(
+            &[request],
+            1,
+            initial,
+            &mut executor,
+            cancel,
+            |_| Ok(()),
+        )
+        .await
+        .unwrap();
+        assert_eq!(summary.completed, 1);
+        server.await.unwrap();
+    }
+
     #[tokio::test]
     async fn backend_rejected_token_response_is_safe_and_never_sends_business() {
         let (token_url, ready, release, _, token_server) = server_with_body(

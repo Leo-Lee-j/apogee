@@ -73,9 +73,18 @@ pub(crate) async fn prepare(
 ) -> Result<Option<PreparedRequest>, AppError> {
     let node = identifier(ctx.as_ref().and_then(|ctx| ctx.request_node_id.as_deref()))?;
     let environment_id = identifier(ctx.as_ref().and_then(|ctx| ctx.environment_id.as_deref()))?;
+    let runtime_variables = ctx
+        .as_ref()
+        .map(|ctx| ctx.runtime_variables.clone())
+        .unwrap_or_default();
     let ephemeral = node.is_none() || ctx.as_ref().and_then(|ctx| ctx.ephemeral).unwrap_or(true);
     let (mut frozen, persisted_auth) = state
         .with_workspace(workspace, session, |repo| {
+            let global = repo.global_variables_for_execution()?;
+            let (collection, folder) = node
+                .map(|node| repo.request_variable_scopes(node))
+                .transpose()?
+                .unwrap_or_default();
             let effective = match node {
                 Some(node) => repo.resolve_request_inheritance(node, spec.clone())?,
                 None => spec.clone(),
@@ -91,6 +100,12 @@ pub(crate) async fn prepare(
                     environment: environment_id
                         .map(|id| repo.read_environment(id))
                         .transpose()?,
+                    variables: apogee_core::vars::VariableScopes {
+                        global,
+                        collection,
+                        folder,
+                        runtime: runtime_variables,
+                    },
                 },
                 persisted_auth,
             ))

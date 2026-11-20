@@ -447,9 +447,13 @@ fn parse_environments(value: Option<&Value>) -> Vec<Environment> {
                 .filter_map(|variable| {
                     let key = text(variable, "name")?.trim();
                     (!key.is_empty()).then(|| EnvironmentVariable {
+                        id: Uuid::new_v4(),
                         key: key.to_string(),
                         value: text(variable, "value").unwrap_or_default().to_string(),
                         enabled: true,
+                        secret: false,
+                        has_value: false,
+                        clear_secret: false,
                     })
                 })
                 .collect(),

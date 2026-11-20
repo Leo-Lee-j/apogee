@@ -15,8 +15,10 @@ import { defaultHighlightStyle, syntaxHighlighting } from '@codemirror/language'
 import { EditorState } from '@codemirror/state'
 import { EditorView, highlightActiveLine, keymap, lineNumbers } from '@codemirror/view'
 import { resolveVariablePreview } from '@/features/variablePreview'
+import { requestVariablePreview } from '@/features/requestVariablePreview'
 import { useUiStore } from '@/stores/ui'
 import { useWorkspaceStore } from '@/stores/workspace'
+import { useTabsStore } from '@/stores/tabs'
 
 /**
  * 可编辑的 JSON 请求体。
@@ -43,6 +45,7 @@ type Validation =
 
 const ui = useUiStore()
 const workspace = useWorkspaceStore()
+const tabs = useTabsStore()
 const host = ref<HTMLDivElement | null>(null)
 const view = shallowRef<EditorView | null>(null)
 const draft = ref(props.value)
@@ -52,12 +55,11 @@ let synchronizingExternalValue = false
 
 const variables = computed(() => {
   const environment = workspace.activeEnvironment
-  if (!environment) return []
 
-  const values = environment.variables
-    .filter((variable) => variable.enabled && variable.key.trim())
-    .map((variable) => ({ key: variable.key.trim(), value: variable.value }))
-  if (environment.host.trim()) values.unshift({ key: 'host', value: environment.host.trim() })
+  const values = requestVariablePreview(
+    workspace.globalVariables, workspace.nodes ?? [], environment,
+    tabs.active?.nodeId ?? tabs.active?.sourceRequestId, tabs.active?.newRequestParentId,
+  ).map((variable) => ({ key: variable.key.trim(), value: variable.value, secret: variable.secret }))
 
   return values.map((variable) => ({
     ...variable,
@@ -73,7 +75,7 @@ function variableCompletionOptions(query: string, replaceTemplate = false): Comp
   return variables.value
     .filter((variable) => variable.key.toLocaleLowerCase().includes(normalizedSearch))
     .map((variable) => {
-      const preview = variable.preview.error || variable.preview.value || '空值'
+      const preview = variable.secret ? '密钥值已隐藏' : variable.preview.error || variable.preview.value || '空值'
       return {
         label: variable.key,
         type: 'variable',
@@ -314,7 +316,7 @@ onBeforeUnmount(() => {
           >
             <code>{{ variable.key }}</code>
             <span :class="{ invalid: variable.preview.error }">
-              {{ variable.preview.error || variable.preview.value || '空值' }}
+              {{ variable.secret ? '密钥值已隐藏' : variable.preview.error || variable.preview.value || '空值' }}
             </span>
           </button>
         </div>

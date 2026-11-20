@@ -18,6 +18,20 @@ pub struct PostmanExportResult {
     pub warnings: Vec<String>,
 }
 
+fn export_scope_variables(variables: &[apogee_core::vars::EnvironmentVariable]) -> Vec<Value> {
+    variables
+        .iter()
+        .map(|variable| {
+            json!({
+                "key": variable.key,
+                "value": variable.value,
+                "type": "string",
+                "disabled": !variable.enabled,
+            })
+        })
+        .collect()
+}
+
 impl WorkspaceRepository {
     pub fn export_postman(&self, id: Uuid) -> Result<PostmanExportResult> {
         let nodes = self.scan()?;
@@ -49,7 +63,14 @@ impl WorkspaceRepository {
                 merge_settings(&mut settings, &document.settings);
                 contexts.insert(item.node.id, (auth, settings));
                 if included {
-                    items.insert(item.node.id, json!({"name":item.node.name,"item":[]}));
+                    items.insert(
+                        item.node.id,
+                        json!({
+                            "name": item.node.name,
+                            "item": [],
+                            "variable": export_scope_variables(&document.variables),
+                        }),
+                    );
                 }
             } else if included {
                 let document: PersistedRequest = read_yaml(&item.path)?;
@@ -101,12 +122,15 @@ impl WorkspaceRepository {
             }
         }
         let root = items.remove(&id).context("导出范围无效")?;
-        let values = if source.node.is_folder {
+        let values = if matches!(source.node.kind, WorkspaceNodeKind::Collection) {
             root["item"].clone()
         } else {
             json!([root])
         };
-        let payload = json!({"info":{"name":source.node.name,"schema":"https://schema.getpostman.com/json/collection/v2.1.0/collection.json"},"item":values});
+        let mut payload = json!({"info":{"name":source.node.name,"schema":"https://schema.getpostman.com/json/collection/v2.1.0/collection.json"},"item":values});
+        if matches!(source.node.kind, WorkspaceNodeKind::Collection) {
+            payload["variable"] = root["variable"].clone();
+        }
         Ok(PostmanExportResult {
             json: serde_json::to_string_pretty(&payload)?,
             warnings,
@@ -128,12 +152,14 @@ impl WorkspaceRepository {
         if plan.requests.is_empty() {
             bail!("Postman 集合中没有可导入的请求");
         }
+        super::validate_variable_names(&plan.variables)?;
         let name = required_name(&plan.name)?;
         // Validate the complete identity graph and every name before staging anything.
         let mut known = std::collections::HashSet::new();
         known.insert(Vec::<usize>::new());
         for folder in &plan.folders {
             required_name(&folder.name)?;
+            super::validate_variable_names(&folder.variables)?;
             if folder.path.is_empty()
                 || !known.contains(&folder.path[..folder.path.len() - 1])
                 || !known.insert(folder.path.clone())
@@ -164,6 +190,7 @@ impl WorkspaceRepository {
                     name: name.clone(),
                     auth: AuthConfig::Inherit,
                     settings: RequestSettings::default(),
+                    variables: plan.variables.clone(),
                 },
             )?;
             let mut paths = HashMap::new();
@@ -183,6 +210,7 @@ impl WorkspaceRepository {
                         name: required_name(&folder.name)?,
                         auth: AuthConfig::Inherit,
                         settings: RequestSettings::default(),
+                        variables: folder.variables.clone(),
                     },
                 )?;
                 paths.insert(folder.path.clone(), path);
@@ -349,6 +377,7 @@ mod tests {
                 name: "orphan".into(),
                 auth: AuthConfig::Inherit,
                 settings: RequestSettings::default(),
+                variables: Vec::new(),
             },
         )
         .unwrap();
@@ -437,6 +466,37 @@ mod tests {
                 ));
             }
         }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn postman_scope_variables_roundtrip_through_collection_export() {
+        let root = std::env::temp_dir().join(format!("apogee-postman-scopes-{}", Uuid::new_v4()));
+        let repository = WorkspaceRepository::create(&root, "scopes".into()).unwrap();
+        let plan = apogee_core::postman::import_json(
+            &json!({
+                "info": {"name": "scope-fixture"},
+                "variable": [{"key":"collectionValue","value":"collection-data"}],
+                "item": [{
+                    "name":"Folder",
+                    "variable":[{"key":"folderValue","value":"folder-data"}],
+                    "item":[{"name":"Request","request":{"url":"https://example.test"}}]
+                }]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let imported = repository.import_postman(&plan).unwrap();
+        let exported = repository.export_postman(imported.collection_id).unwrap();
+        let json: Value = serde_json::from_str(&exported.json).unwrap();
+        assert_eq!(json["variable"][0]["key"], "collectionValue");
+        assert_eq!(json["variable"][0]["value"], "collection-data");
+        assert_eq!(json["item"][0]["variable"][0]["key"], "folderValue");
+        assert_eq!(json["item"][0]["variable"][0]["value"], "folder-data");
+
+        let roundtrip = apogee_core::postman::import_json(&exported.json).unwrap();
+        assert_eq!(roundtrip.variables[0].key, "collectionValue");
+        assert_eq!(roundtrip.folders[0].variables[0].key, "folderValue");
         fs::remove_dir_all(root).unwrap();
     }
 }

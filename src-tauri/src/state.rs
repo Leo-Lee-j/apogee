@@ -3275,6 +3275,7 @@ mod tests {
                         sensitive_path_values: Vec::new(),
                         sensitive_query_names: Vec::new(),
                         sensitive_header_names: Vec::new(),
+                        sensitive_values: Vec::new(),
                     },
                     from_cache: false,
                     truncated: false,

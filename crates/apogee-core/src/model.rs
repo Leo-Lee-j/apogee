@@ -107,6 +107,8 @@ pub struct ActualRequest {
     pub sensitive_query_names: Vec<String>,
     #[serde(default, skip_serializing, skip_deserializing)]
     pub sensitive_header_names: Vec<String>,
+    #[serde(default, skip_serializing, skip_deserializing)]
+    pub sensitive_values: Vec<String>,
 }
 
 /// 响应元信息。

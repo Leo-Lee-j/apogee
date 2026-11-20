@@ -50,6 +50,8 @@ pub struct ContainerDocument {
     pub auth: AuthConfig,
     #[serde(default)]
     pub settings: RequestSettings,
+    #[serde(default)]
+    pub variables: Vec<crate::vars::EnvironmentVariable>,
 }
 
 /// 集合或文件夹的可编辑配置投影。
@@ -60,6 +62,8 @@ pub struct WorkspaceContainer {
     pub name: String,
     pub auth: AuthConfig,
     pub settings: RequestSettings,
+    #[serde(default)]
+    pub variables: Vec<crate::vars::EnvironmentVariable>,
 }
 
 /// Rust 返回给前端的扁平节点类型。
@@ -86,6 +90,8 @@ pub struct WorkspaceNode {
     /// 请求节点所含用例数；不内嵌完整定义，供侧边栏决定是否显示懒加载入口。
     #[serde(default)]
     pub debug_case_count: usize,
+    #[serde(default)]
+    pub variables: Vec<crate::vars::EnvironmentVariable>,
 }
 
 /// `workspace_load` 的结果。
@@ -96,6 +102,8 @@ pub struct WorkspaceSnapshot {
     pub name: String,
     pub nodes: Vec<WorkspaceNode>,
     pub environments: Vec<Environment>,
+    #[serde(default)]
+    pub global_variables: Vec<crate::vars::EnvironmentVariable>,
 }
 
 /// 前端打开请求时使用的轻量投影。

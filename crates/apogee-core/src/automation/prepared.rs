@@ -183,6 +183,7 @@ mod tests {
                 Ok(Some(PreparedRequest {
                     spec: item.request.clone(),
                     environment: None,
+                    variables: crate::vars::VariableScopes::default(),
                 }))
             })
         }

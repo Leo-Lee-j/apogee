@@ -17,6 +17,19 @@ import NaiveThemeScope from '@/components/NaiveThemeScope.vue'
 const workspace = useWorkspaceStore()
 const open = ref(false)
 const saving = ref(false)
+const duplicateGlobalKeys = computed(() => {
+  const counts = new Map<string, number>()
+  for (const variable of workspace.globalVariables) {
+    const key = variable.key.trim()
+    if (variable.enabled && key) counts.set(key, (counts.get(key) ?? 0) + 1)
+  }
+  return new Set([...counts].filter(([, count]) => count > 1).map(([key]) => key))
+})
+const reservedGlobalHostConflict = computed(() =>
+  workspace.globalVariables.some((variable) =>
+    variable.enabled && variable.key.trim().toLowerCase() === 'host',
+  ),
+)
 
 const duplicateKeys = computed(() => {
   const counts = new Map<string, number>()
@@ -26,6 +39,11 @@ const duplicateKeys = computed(() => {
   }
   return new Set([...counts].filter(([, count]) => count > 1).map(([key]) => key))
 })
+const reservedHostConflict = computed(() =>
+  workspace.activeEnvironment?.variables.some((variable) =>
+    variable.enabled && variable.key.trim().toLocaleLowerCase() === 'host',
+  ) ?? false,
+)
 
 const hostError = computed(() => {
   const value = workspace.activeEnvironment?.host.trim() ?? ''
@@ -50,6 +68,7 @@ const validationMessage = computed(() => {
   if (!environment.name.trim()) return '环境名称不能为空'
   if (environment.name.trim().length > 120) return '环境名称不能超过 120 个字符'
   if (hostError.value) return hostError.value
+  if (reservedHostConflict.value) return 'host 是保留变量名，请使用环境 Host 字段'
   if (duplicateKeys.value.size > 0) return `变量名重复：${[...duplicateKeys.value].join('、')}`
   return ''
 })
@@ -80,7 +99,34 @@ function updateVariable(index: number, field: 'key' | 'value', value: string) {
   const environment = workspace.activeEnvironment
   if (!environment) return
   const delta: Partial<EnvironmentVariable> = { [field]: value }
+  if (field === 'value' && value) delta.clearSecret = false
   workspace.updateEnvironmentVariable(environment.id, index, delta)
+}
+
+function updateSecret(index: number, secret: boolean) {
+  const environment = workspace.activeEnvironment
+  if (environment) workspace.updateEnvironmentVariable(environment.id, index, { secret })
+}
+
+function clearSecret(index: number) {
+  const environment = workspace.activeEnvironment
+  if (environment) {
+    workspace.updateEnvironmentVariable(environment.id, index, {
+      value: '',
+      hasValue: false,
+      clearSecret: true,
+    })
+  }
+}
+
+function updateGlobalVariable(index: number, field: 'key' | 'value', value: string) {
+  workspace.updateGlobalVariable(index, { [field]: value, ...(field === 'value' && value ? { clearSecret: false } : {}) })
+}
+function updateGlobalSecret(index: number, secret: boolean) {
+  workspace.updateGlobalVariable(index, { secret })
+}
+function clearGlobalSecret(index: number) {
+  workspace.updateGlobalVariable(index, { value: '', hasValue: false, clearSecret: true })
 }
 
 function updateEnabled(index: number, enabled: boolean) {
@@ -89,11 +135,13 @@ function updateEnabled(index: number, enabled: boolean) {
 }
 
 async function saveActive() {
-  if (!workspace.activeEnvironment || !workspace.activeEnvironmentDirty) return true
-  if (validationMessage.value) return false
+  if (validationMessage.value || duplicateGlobalKeys.value.size > 0 || reservedGlobalHostConflict.value) return false
+  if (!workspace.activeEnvironment || !workspace.activeEnvironmentDirty) {
+    return workspace.saveGlobalVariables()
+  }
   saving.value = true
   try {
-    return await workspace.saveEnvironment()
+    return await workspace.saveEnvironment() && await workspace.saveGlobalVariables()
   } finally {
     saving.value = false
   }
@@ -205,8 +253,8 @@ async function finish() {
             </div>
           </aside>
 
-          <section v-if="workspace.activeEnvironment" class="environment-editor">
-            <section class="environment-fields">
+          <section class="environment-editor">
+            <section v-if="workspace.activeEnvironment" class="environment-fields">
               <label class="field field-name">
                 <span>环境名称</span>
                 <AppInput
@@ -233,7 +281,7 @@ async function finish() {
 
             <p v-if="validationMessage" class="validation-message">{{ validationMessage }}</p>
 
-            <section class="variables-section">
+            <section v-if="workspace.activeEnvironment" class="variables-section">
               <div class="variables-heading">
                 <div>
                   <h3>变量</h3>
@@ -249,6 +297,7 @@ async function finish() {
                 <div class="variable-row variable-header" aria-hidden="true">
                   <span>启用</span>
                   <span>变量名</span>
+                  <span>密钥</span>
                   <span>值</span>
                   <span />
                 </div>
@@ -265,20 +314,36 @@ async function finish() {
                   <AppInput
                     class="variable-key"
                     size="medium"
-                    :status="variable.enabled && duplicateKeys.has(variable.key.trim()) ? 'error' : undefined"
+                    :status="variable.enabled && (duplicateKeys.has(variable.key.trim()) || variable.key.trim().toLocaleLowerCase() === 'host') ? 'error' : undefined"
                     :value="variable.key"
                     placeholder="变量名"
                     :input-props="{ spellcheck: false }"
                     @update:value="updateVariable(index, 'key', $event)"
                   />
-                  <AppInput
-                    class="variable-value"
-                    size="medium"
-                    :value="variable.value"
-                    placeholder="变量值"
-                    :input-props="{ spellcheck: false }"
-                    @update:value="updateVariable(index, 'value', $event)"
+                  <AppCheckbox
+                    :checked="variable.secret"
+                    :aria-label="`将 ${variable.key || '变量'} 标记为密钥`"
+                    @update:checked="updateSecret(index, $event)"
                   />
+                  <div class="variable-value-cell">
+                    <AppInput
+                      class="variable-value"
+                      size="medium"
+                      :type="variable.secret ? 'password' : 'text'"
+                      :value="variable.value"
+                      :placeholder="variable.secret && variable.hasValue && !variable.value ? '已设置；输入以替换' : '变量值'"
+                      :show-password-on="variable.secret ? 'click' : undefined"
+                      :input-props="{ spellcheck: false, autocomplete: 'new-password' }"
+                      @update:value="updateVariable(index, 'value', $event)"
+                    />
+                    <AppButton
+                      v-if="variable.secret && variable.hasValue"
+                      quaternary
+                      size="tiny"
+                      title="清除系统凭据中的密钥"
+                      @click="clearSecret(index)"
+                    >清除</AppButton>
+                  </div>
                   <AppButton
                     quaternary
                     circle
@@ -295,9 +360,35 @@ async function finish() {
                 </div>
               </div>
             </section>
+
+            <section class="variables-section global-variables">
+              <div class="variables-heading">
+                <div><h3>全局变量</h3><span>{{ workspace.globalVariables.length }}</span></div>
+                <AppButton secondary size="small" @click="workspace.addGlobalVariable()">
+                  <template #icon><AppIcon :component="IconAdd" :size="14" /></template>
+                  添加全局变量
+                </AppButton>
+              </div>
+              <div class="variable-table">
+                <div class="variable-row variable-header" aria-hidden="true"><span>启用</span><span>变量名</span><span>密钥</span><span>值</span><span /></div>
+                <div v-for="(variable, index) in workspace.globalVariables" :key="variable.id" class="variable-row">
+                  <AppCheckbox :checked="variable.enabled" :aria-label="`启用全局变量 ${variable.key || '空变量'}`" @update:checked="workspace.updateGlobalVariable(index, { enabled: $event })" />
+                  <AppInput class="variable-key" size="medium" :status="variable.enabled && duplicateGlobalKeys.has(variable.key.trim()) ? 'error' : undefined" :value="variable.key" placeholder="变量名" :input-props="{ spellcheck: false }" @update:value="updateGlobalVariable(index, 'key', $event)" />
+                  <AppCheckbox :checked="variable.secret" :aria-label="`将 ${variable.key || '全局变量'} 标记为密钥`" @update:checked="updateGlobalSecret(index, $event)" />
+                  <div class="variable-value-cell">
+                    <AppInput class="variable-value" size="medium" :type="variable.secret ? 'password' : 'text'" :value="variable.value" :placeholder="variable.secret && variable.hasValue && !variable.value ? '已设置；输入以替换' : '变量值'" :show-password-on="variable.secret ? 'click' : undefined" :input-props="{ spellcheck: false, autocomplete: 'new-password' }" @update:value="updateGlobalVariable(index, 'value', $event)" />
+                    <AppButton v-if="variable.secret && variable.hasValue" quaternary size="tiny" title="清除系统凭据中的密钥" @click="clearGlobalSecret(index)">清除</AppButton>
+                  </div>
+                  <AppButton quaternary circle size="small" title="删除全局变量" aria-label="删除全局变量" @click="workspace.removeGlobalVariable(index)"><template #icon><AppIcon :component="IconDelete" :size="15" /></template></AppButton>
+                </div>
+                <div v-if="workspace.globalVariables.length === 0" class="variables-empty">暂无全局变量</div>
+              </div>
+              <p v-if="duplicateGlobalKeys.size" class="validation-message">全局变量名重复：{{ [...duplicateGlobalKeys].join('、') }}</p>
+              <p v-else-if="reservedGlobalHostConflict" class="validation-message">host 是保留变量名，请在环境 Host 字段中设置。</p>
+            </section>
           </section>
 
-          <section v-else class="editor-empty">
+          <section v-if="!workspace.activeEnvironment" class="editor-empty">
             <span>选择一个环境进行配置</span>
             <AppButton type="primary" @click="createEnvironment">新建环境</AppButton>
           </section>
@@ -308,7 +399,7 @@ async function finish() {
             <span :class="{ dirty: workspace.activeEnvironmentDirty }">
               {{ workspace.activeEnvironmentDirty ? '有未保存修改' : '已保存' }}
             </span>
-            <AppButton type="primary" :loading="saving" :disabled="!!validationMessage" @click="finish">
+            <AppButton type="primary" :loading="saving" :disabled="!!validationMessage || duplicateGlobalKeys.size > 0 || reservedGlobalHostConflict" @click="finish">
               完成
             </AppButton>
           </div>
@@ -392,7 +483,7 @@ async function finish() {
 .variable-table { min-height: 0; overflow: auto; border: 1px solid var(--a-border); border-radius: 6px; background: var(--a-bg-2); }
 .variable-row {
   display: grid;
-  grid-template-columns: 44px minmax(140px, 0.8fr) minmax(200px, 1.2fr) 36px;
+  grid-template-columns: 38px minmax(105px, 0.8fr) 42px minmax(180px, 1.2fr) 32px;
   align-items: center;
   gap: 6px;
   min-height: max(42px, var(--a-h-input-md));
@@ -402,6 +493,8 @@ async function finish() {
 .variable-row :deep(.n-input) { min-height: var(--a-h-input-md); }
 .variable-row :deep(.n-input-wrapper) { padding-inline: 10px; }
 .variable-row :deep(.n-input__input-el) { line-height: var(--a-lh) !important; }
+.variable-value-cell { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.variable-value-cell .variable-value { flex: 1 1 auto; min-width: 0; }
 .variable-row:last-child { border-bottom: 0; }
 .variable-header { position: sticky; top: 0; z-index: 1; min-height: var(--a-h-control-xs); background: var(--a-bg-3); color: var(--a-text-faint); font-size: var(--a-fs-xs); line-height: var(--a-lh-xs); }
 .variable-header span:first-child { text-align: center; }
@@ -413,6 +506,6 @@ async function finish() {
 @media (max-width: 720px) {
   .environment-dialog { grid-template-columns: 160px minmax(0, 1fr); }
   .environment-editor { padding: 12px; }
-  .variable-row { grid-template-columns: 36px minmax(100px, 0.8fr) minmax(130px, 1.2fr) 32px; }
+  .variable-row { grid-template-columns: 32px minmax(82px, 0.8fr) 34px minmax(125px, 1.2fr) 30px; }
 }
 </style>

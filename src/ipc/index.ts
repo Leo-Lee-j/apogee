@@ -153,12 +153,17 @@ export interface WorkspaceNode {
   kind?: WorkspaceNodeKind
   /** 请求下保存的调试用例数量；完整定义在用户展开时按需读取。 */
   debugCaseCount: number
+  variables?: EnvironmentVariable[]
 }
 
 export interface EnvironmentVariable {
+  id: string
   key: string
   value: string
   enabled: boolean
+  secret: boolean
+  hasValue?: boolean
+  clearSecret?: boolean
 }
 
 export interface Environment {
@@ -173,6 +178,7 @@ export interface WorkspaceSnapshot {
   name: string
   nodes: WorkspaceNode[]
   environments: Environment[]
+  globalVariables?: EnvironmentVariable[]
 }
 
 export interface WorkspaceState {
@@ -584,6 +590,14 @@ export const ipc = {
     return call('workspace_create_environment', { ...sessionArgs(), name })
   },
 
+  workspaceDuplicateEnvironment(environmentId: string): Promise<Environment> {
+    return call('workspace_duplicate_environment', { ...sessionArgs(), environmentId })
+  },
+
+  workspaceSaveGlobalVariables(variables: EnvironmentVariable[]): Promise<EnvironmentVariable[]> {
+    return call('workspace_save_global_variables', { ...sessionArgs(), variables })
+  },
+
   workspaceSaveEnvironment(environment: Environment): Promise<Environment> {
     return call('workspace_save_environment', { ...sessionArgs(), environment })
   },
@@ -972,6 +986,7 @@ export interface ExecContext {
   requestNodeId?: string
   /** Explicit draft/case Auth must never be written to its source request. */
   ephemeral?: boolean
+  runtimeVariables?: Record<string, string>
 }
 
 export interface WorkspaceContainer {
@@ -979,6 +994,7 @@ export interface WorkspaceContainer {
   name: string
   auth: AuthConfig
   settings: RequestSettings
+  variables?: EnvironmentVariable[]
 }
 
 export interface RequestDraft {
