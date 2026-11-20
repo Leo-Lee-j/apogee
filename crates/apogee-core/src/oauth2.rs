@@ -129,6 +129,16 @@ pub fn issuance_context(
     if let Some(config) = &mut config {
         config.refresh_token.clear();
     }
+    // Legacy YAML rows receive session-local IDs when read. Editor identity and
+    // secret-editor flags do not change the credentials used for token issuance.
+    let mut environment = environment.cloned();
+    if let Some(environment) = &mut environment {
+        for variable in &mut environment.variables {
+            variable.id = uuid::Uuid::nil();
+            variable.has_value = false;
+            variable.clear_secret = false;
+        }
+    }
     let bytes = serde_json::to_vec(&(config, environment, settings, environment_id))
         .map_err(|_| error(ErrorKind::Parse, "OAuth2 context unavailable"))?;
     let digest = ring::digest::digest(&ring::digest::SHA256, &bytes);
@@ -522,6 +532,30 @@ mod tests {
             client_secret: "secret +/中".into(),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn legacy_variable_ids_do_not_change_oauth_context_but_values_do() {
+        let raw = r#"{"id":"39d8747c-7203-4689-90b5-e56822ab2ec9","name":"legacy","variables":[{"key":"client","value":"synthetic-client","enabled":true}]}"#;
+        let first: Environment = serde_json::from_str(raw).unwrap();
+        let mut second: Environment = serde_json::from_str(raw).unwrap();
+        assert_ne!(first.variables[0].id, second.variables[0].id);
+        let auth: crate::request::AuthConfig = serde_json::from_value(serde_json::json!({
+            "type": "oauth2", "accessToken": "", "tokenRequest": {
+                "tokenUrl": "https://auth.test/token", "clientId": "{{client}}", "clientSecret": "synthetic"
+            }
+        })).unwrap();
+        let settings = crate::request::RequestSettings::default();
+        let context = issuance_context(&auth, Some(&first), &settings, Some(first.id)).unwrap();
+        assert_eq!(
+            context,
+            issuance_context(&auth, Some(&second), &settings, Some(first.id)).unwrap()
+        );
+        second.variables[0].value = "changed".into();
+        assert_ne!(
+            context,
+            issuance_context(&auth, Some(&second), &settings, Some(first.id)).unwrap()
+        );
     }
     fn settings() -> ResolvedSettings {
         ResolvedSettings {

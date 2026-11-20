@@ -344,17 +344,24 @@ pub async fn run(
     ) {
         return Ok(None);
     }
-    response.token_context = Some(context);
+    response.token_context = Some(context.clone());
     let next = apply_auth_response(&before.auth, &response).map_err(|e| PublicError::from(&e))?;
     // Short mutation window only; the source lock is not a workspace filesystem lock.
     let committed = state.with_workspace_mutation(workspace, session, |repo| {
         let after =
             snapshot_in(repo, &input, app).map_err(|_| anyhow::anyhow!("OAUTH2_SOURCE_STALE"))?;
+        let after_context = apogee_core::oauth2::issuance_context(
+            &after.auth,
+            after.environment.as_ref(),
+            &after.settings,
+            input.environment_id,
+        )
+        .map_err(|_| anyhow::anyhow!("OAUTH2_SOURCE_STALE"))?;
         if after.source != before.source
             || !equal(&after.owner_auth, &before.owner_auth)
             || !equal(&after.owner_settings, &before.owner_settings)
             || !equal(&after.baseline, &before.baseline)
-            || !equal(&after.environment, &before.environment)
+            || after_context != context
             || !equal(&after.settings, &before.settings)
         {
             anyhow::bail!("OAUTH2_SOURCE_STALE");
@@ -840,6 +847,31 @@ mod tests {
             Some("OAUTH2_SOURCE_STALE")
         );
         assert!(equal(&f.auth(), &old));
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn legacy_environment_without_variable_ids_can_commit_token_rotation() {
+        let (url, ready, release, _, server) = server().await;
+        let f = Fixture::new(url);
+        let environment_id = f.state.with_workspace_mutation(f.workspace, f.session, |repo| {
+            let environment = repo.create_environment("Legacy".into())?;
+            let legacy = serde_json::json!({
+                "id": environment.id, "name": environment.name, "host": "",
+                "variables": [{"key": "client", "value": "synthetic-legacy-client", "enabled": true}]
+            });
+            std::fs::write(
+                repo.root().join("environments").join(format!("{}.yaml", environment.id)),
+                apogee_core::yaml::to_string(&legacy)?,
+            )?;
+            Ok(environment.id)
+        }).unwrap();
+        let mut input = f.input(0);
+        input.environment_id = Some(environment_id);
+        let first = start(&f, input);
+        ready.await.unwrap();
+        release.notify_one();
+        assert!(first.await.unwrap().unwrap().unwrap().token.is_some());
         server.await.unwrap();
     }
 
