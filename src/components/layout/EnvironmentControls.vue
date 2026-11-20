@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import type { EnvironmentVariable } from '@/ipc'
 import { useWorkspaceStore } from '@/stores/workspace'
+import { useEnvironmentSaveState } from '@/features/environmentSaveState'
 import {
   AppButton,
   AppCheckbox,
@@ -16,7 +17,6 @@ import NaiveThemeScope from '@/components/NaiveThemeScope.vue'
 
 const workspace = useWorkspaceStore()
 const open = ref(false)
-const saving = ref(false)
 const duplicateGlobalKeys = computed(() => {
   const counts = new Map<string, number>()
   for (const variable of workspace.globalVariables) {
@@ -134,18 +134,8 @@ function updateEnabled(index: number, enabled: boolean) {
   if (environment) workspace.updateEnvironmentVariable(environment.id, index, { enabled })
 }
 
-async function saveActive() {
-  if (validationMessage.value || duplicateGlobalKeys.value.size > 0 || reservedGlobalHostConflict.value) return false
-  if (!workspace.activeEnvironment || !workspace.activeEnvironmentDirty) {
-    return workspace.saveGlobalVariables()
-  }
-  saving.value = true
-  try {
-    return await workspace.saveEnvironment() && await workspace.saveGlobalVariables()
-  } finally {
-    saving.value = false
-  }
-}
+const { saving, dirty, status, save: saveActive } = useEnvironmentSaveState(workspace,
+  () => !validationMessage.value && duplicateGlobalKeys.value.size === 0 && !reservedGlobalHostConflict.value)
 
 async function selectEnvironment(id: string) {
   if (id === workspace.activeEnvironmentId || !(await saveActive())) return
@@ -183,7 +173,7 @@ async function finish() {
     >
       <template #icon><AppIcon :component="CubeOutline" :size="15" /></template>
       环境配置
-      <span v-if="workspace.activeEnvironmentDirty" class="dirty-dot" aria-label="有未保存修改" />
+      <span v-if="dirty" class="dirty-dot" aria-label="有未保存修改" />
     </AppButton>
 
     <NaiveThemeScope>
@@ -396,8 +386,8 @@ async function finish() {
 
         <template #footer>
           <div class="modal-footer">
-            <span :class="{ dirty: workspace.activeEnvironmentDirty }">
-              {{ workspace.activeEnvironmentDirty ? '有未保存修改' : '已保存' }}
+            <span :class="{ dirty }" role="status" aria-live="polite">
+              {{ status }}
             </span>
             <AppButton type="primary" :loading="saving" :disabled="!!validationMessage || duplicateGlobalKeys.size > 0 || reservedGlobalHostConflict" @click="finish">
               完成
