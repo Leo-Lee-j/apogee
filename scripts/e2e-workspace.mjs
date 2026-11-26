@@ -378,7 +378,34 @@ try {
   await round2(page, root, 'http://127.0.0.1:' + address.port, echoedRequests)
   await round3(page, root, 'http://127.0.0.1:' + address.port, echoedRequests)
   await round4(page, root, 'http://127.0.0.1:' + address.port, echoedRequests)
-  console.log('E2E PASS: workspace lifecycle and draft recovery; native close cancellation; container editor retention; atomic copy via IPC; virtual JSON tree and nested paging; Postman body transmission and export/reimport; cancellation; immediate Query/Header/form edits; blank rows; bulk metadata and duplicate/disabled params; form conversion and multipart upload; Path constraints; keyboard and drag ordering')
+
+  // Remove vault references before testing an accepted close, since the isolated data
+  // directory is deleted by the harness after the application exits.
+  await page.evaluate(async () => {
+    const { ipc } = await import('/src/ipc/index.ts')
+    const snapshot = await ipc.workspaceLoad()
+    for (const node of snapshot.nodes.filter(n => n.kind === 'collection')) await ipc.workspaceDeleteNode(node.id)
+    for (const environment of snapshot.environments) await ipc.workspaceDeleteEnvironment(environment.id)
+    await ipc.workspaceSaveGlobalVariables([])
+  })
+  workspacePage = null
+
+  // Confirming the close prompt must finish persistence and actually destroy the window.
+  const closeProbe = await page.evaluate(async () => {
+    const { useAppStore } = await import('/src/stores/app.ts')
+    const { useTabsStore } = await import('/src/stores/tabs.ts')
+    const tabs = useTabsStore()
+    tabs.resetWorkspace()
+    const draft = tabs.openQuick()
+    tabs.patch(draft.id, { url: 'http://127.0.0.1/close-draft', dirty: true })
+    return { shell: useAppStore().shell, tabs: tabs.tabs.map(tab => ({ id: tab.id, kind: tab.kind, dirty: tab.dirty, nodeId: tab.nodeId, historyPreview: tab.historyPreview })) }
+  })
+  assert.equal(closeProbe.shell, 'workspace')
+  assert.ok(closeProbe.tabs.some(tab => tab.dirty && !tab.nodeId), 'accepted close must exercise the unsaved-draft prompt')
+  await page.getByRole('button', { name: '关闭', exact: true }).click()
+  await page.getByRole('button', { name: '放弃修改', exact: true }).click()
+  await page.waitForEvent('close', { timeout: 10_000 })
+  console.log('E2E PASS: workspace lifecycle and draft recovery; native close cancellation and confirmed exit; container editor retention; atomic copy via IPC; virtual JSON tree and nested paging; Postman body transmission and export/reimport; cancellation; immediate Query/Header/form edits; blank rows; bulk metadata and duplicate/disabled params; form conversion and multipart upload; Path constraints; keyboard and drag ordering')
 } catch (error) {
   console.error(`E2E FAIL: ${error instanceof Error ? error.stack ?? error.message : String(error)}`)
   process.exitCode = 1
