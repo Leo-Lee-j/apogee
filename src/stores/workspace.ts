@@ -53,6 +53,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const lastError = ref<AppError | null>(null)
   let loadingPromise: Promise<void> | null = null
   let workspaceGeneration = 0
+  let requestOpenVersion = 0
   const environmentSaves = new Map<string, Promise<boolean>>()
   let globalSave: Promise<boolean> | null = null
   const pendingStateSaves = new Set<Promise<boolean>>()
@@ -84,7 +85,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     for (const id of dirtyEnvironmentIds) {
       if (!environments.value.some((environment) => environment.id === id)) dirtyEnvironmentIds.delete(id)
     }
-    if (!environments.value.some((environment) => environment.id === activeEnvironmentId.value)) {
+    if (activeEnvironmentId.value !== null && !environments.value.some((environment) => environment.id === activeEnvironmentId.value)) {
       activeEnvironmentId.value = environments.value[0]?.id ?? null
     }
     ready.value = true
@@ -490,53 +491,64 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   async function createEnvironment(name = '新环境'): Promise<Environment | null> {
     if (!inTauri) return null
+    const isCurrent = sessionGuard()
     try {
       const environment = await ipc.workspaceCreateEnvironment(name)
+      if (!isCurrent()) return null
       environments.value = [...environments.value, environment]
       activeEnvironmentId.value = environment.id
       await persistWorkspaceState()
-      return environment
+      return isCurrent() ? environment : null
     } catch (error) {
-      report(error)
+      if (isCurrent()) report(error)
       return null
     }
   }
 
   async function duplicateEnvironment(environmentId = activeEnvironmentId.value): Promise<Environment | null> {
     if (!environmentId || !inTauri) return null
+    const isCurrent = sessionGuard()
     try {
+      if (!(await saveEnvironment(environmentId)) || !isCurrent()) return null
       const environment = await ipc.workspaceDuplicateEnvironment(environmentId)
+      if (!isCurrent()) return null
       environments.value = [...environments.value, environment]
       activeEnvironmentId.value = environment.id
       await persistWorkspaceState()
-      return environment
+      return isCurrent() ? environment : null
     } catch (error) {
-      report(error)
+      if (isCurrent()) report(error)
       return null
     }
   }
 
   async function deleteEnvironment(environmentId = activeEnvironmentId.value): Promise<boolean> {
     if (!environmentId || !inTauri) return false
+    const isCurrent = sessionGuard()
     try {
       const snapshot = await ipc.workspaceDeleteEnvironment(environmentId)
+      if (!isCurrent()) return false
       dirtyEnvironmentIds.delete(environmentId)
       accept(snapshot)
       if (activeEnvironmentId.value === environmentId) {
         activeEnvironmentId.value = environments.value[0]?.id ?? null
       }
       await persistWorkspaceState()
-      return true
+      return isCurrent()
     } catch (error) {
-      report(error)
+      if (isCurrent()) report(error)
       return false
     }
   }
 
   async function openRequest(node: Pick<WorkspaceNode, 'id' | 'kind'>, preview = true): Promise<WorkspaceRequest | null> {
     if (!inTauri || node.kind !== 'request') return null
+    const sessionCurrent = sessionGuard()
+    const version = ++requestOpenVersion
+    const isCurrent = () => sessionCurrent() && version === requestOpenVersion
     try {
       const request = await ipc.workspaceReadRequest(node.id)
+      if (!isCurrent()) return null
       const spec = request.spec
       const tabsStore = useTabsStore()
       // 已打开的接口重新激活时不抢焦点：每次都全选 URL 会让「切换/双击固定」很突兀。
@@ -558,7 +570,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       if (!alreadyOpen) useUiStore().focusUrl()
       return request
     } catch (error) {
-      report(error)
+      if (isCurrent()) report(error)
       return null
     }
   }
@@ -601,7 +613,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   async function createFolder(parentId?: string, name = '新建文件夹'): Promise<boolean> {
     if (!inTauri) return false
+    const isCurrent = sessionGuard()
     const parent = await parentForNewNode(parentId)
+    if (!isCurrent()) return false
     if (!parent) {
       report(new Error('请先创建一个集合'))
       return false
@@ -613,7 +627,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   async function createRequest(parentId?: string, name = '新建请求'): Promise<WorkspaceRequest | null> {
     if (!inTauri) return null
+    const isCurrent = sessionGuard()
     const parent = await parentForNewNode(parentId)
+    if (!isCurrent()) return null
     if (!parent) {
       report(new Error('请先创建一个集合'))
       return null
@@ -621,7 +637,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
     try {
       const request = await ipc.workspaceCreateRequest(parent, name)
+      if (!isCurrent()) return null
       await load()
+      if (!isCurrent()) return null
       expandPath(parent)
       useTabsStore().open({
         title: request.name,
@@ -639,7 +657,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       useUiStore().focusUrl()
       return request
     } catch (error) {
-      report(error)
+      if (isCurrent()) report(error)
       return null
     }
   }
@@ -652,9 +670,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
    */
   async function saveTabAs(tab: Tab, parentId: string, name: string): Promise<boolean> {
     if (!inTauri) return false
+    const isCurrent = sessionGuard()
     try {
       const request = await ipc.workspaceCreateRequest(parentId, name)
+      if (!isCurrent()) return false
       await load()
+      if (!isCurrent()) return false
       expandPath(parentId)
       const tabs = useTabsStore()
       tabs.patch(tab.id, {
@@ -668,11 +689,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         newRequestParentId: undefined,
       })
       const saved = await tabs.save(tab.id)
-      if (saved.ok) updateRequestMethod(request.id, tab.method)
+      if (!isCurrent()) return false
+      const current = tabs.tabs.find(item => item.id === tab.id)
+      if (saved.ok && current) updateRequestMethod(request.id, current.method)
       if (!saved.ok && saved.error) report(saved.error)
       return saved.ok
     } catch (error) {
-      report(error)
+      if (isCurrent()) report(error)
       return false
     }
   }

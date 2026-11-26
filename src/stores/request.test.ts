@@ -175,6 +175,15 @@ describe('OAuth2 send preflight', () => {
     })
     await request.send(); expect(request.sending.value).toBe(false)
   })
+  it('allows an accepted request to run beyond 90 seconds until its terminal event', async () => {
+    const { request } = setup()
+    await request.send()
+    await vi.advanceTimersByTimeAsync(180_000)
+    expect(cancelRequest).not.toHaveBeenCalled()
+    expect(request.sending.value).toBe(true)
+    callbacks.current!.onCancelled!({ id: 'handle', workspaceId: 'workspace-a', sessionId: 'session-a' })
+    expect(request.sending.value).toBe(false)
+  })
   it('a late cancelled or wrong-session event cannot reset a newer HTTP request', async () => {
     const { request } = setup()
     sendRequest.mockResolvedValueOnce({ id: 'old-handle' }).mockResolvedValueOnce({ id: 'new-handle' })

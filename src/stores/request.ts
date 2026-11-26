@@ -104,7 +104,7 @@ export function useRequest() {
   }
 
   let unlisten: (() => void) | undefined
-  /** 兜底超时句柄：防止后端任务崩溃/丢失事件导致按钮永远卡在「等待中」。 */
+  /** 仅限制请求准备和 IPC 句柄返回；HTTP 执行的超时由后端负责。 */
   let pendingTimeout: ReturnType<typeof setTimeout> | undefined
 
   function clearPendingTimeout() {
@@ -116,11 +116,11 @@ export function useRequest() {
 
   function armPendingTimeout() {
     clearPendingTimeout()
-    // 90s 远大于任何正常 HTTP 请求。后端在 panic 兜底下也会发
-    // request:error,所以这只是「后端完全沉默」的最后防线。
+    // 后端接受请求后必须清除此计时器。响应体下载没有总时限，
+    // 固定的前端总超时会误取消大文件下载及自定义长超时请求。
     pendingTimeout = setTimeout(() => {
       if (sending.value) {
-        console.warn('[request] 后端 90s 内未发出任何终结事件,主动复位发送状态')
+        console.warn('[request] 请求准备或 IPC 句柄返回超过 90s,主动复位发送状态')
         cancel()
       }
     }, 90_000)
@@ -379,6 +379,7 @@ export function useRequest() {
         return
       }
       pendingSend = null
+      clearPendingTimeout()
       if (!isCurrentSession(requestSession)) {
         // RPC 句柄可能在工作区切换后才回到前端；它及其早到事件不属于新 UI。
         orphans.delete(handle.id)
